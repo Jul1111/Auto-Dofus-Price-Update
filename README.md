@@ -67,16 +67,17 @@ Toujours depuis le venv activé :
 python dofus_price_helper_V2.py
 ```
 Une fois lancé, le script tourne en arrière-plan et attend vos raccourcis clavier.
+
 ---
-⚙️ Paramétrage pour votre jeu
+### 6. ⚙️ Paramétrage pour votre jeu
 
-Chaque joueur doit calibrer les zones de prix (lots 1/10/100), car elles dépendent de votre résolution et interface.
-Le calibrage est rapide et sauvegardé automatiquement.
+- Chaque joueur doit calibrer les zones de prix ***(lots 1/10/100)***, car elles dépendent de votre résolution et interface. 
+  - Le calibrage est rapide et sauvegardé automatiquement.
+- Ouvrez l’*Hôtel de Vente* → onglet Vente.
 
-Ouvrez l’Hôtel de Vente → onglet Vente.
+- Placez la souris au *centre* du prix du **lot 1**, puis *appuyez* sur ***Ctrl+Alt+F1***.
 
-Placez la souris au centre du prix du lot 1, puis appuyez sur Ctrl+Alt+F1.
+- Faites de même pour le **lot 10** ***(Ctrl+Alt+F2)*** et le **lot 100** ***(Ctrl+Alt+F3)***.
 
-Faites de même pour le lot 10 (Ctrl+Alt+F2) et le lot 100 (Ctrl+Alt+F3).
+- Les zones sont enregistrées dans ***dofus_price_helper_config.json***.
 
-Les zones sont enregistrées dans dofus_price_helper_config.json.
