@@ -17,5 +17,22 @@ git clone https://github.com/Jul1111/Auto-Dofus-Price-Update
 ```bash
 cd dofus-price-helper
 ```
+### 2. Créer un environnement virtuel
 
+#### Windows :
 
+```bash
+python -m venv venv
+```
+
+```bash
+.\venv\Scripts\activate
+```
+---
+#### Linux / macOS :
+```bash
+python3 -m venv venv
+```
+```bash
+source venv/bin/activatee
+```
