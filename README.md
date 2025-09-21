@@ -7,7 +7,14 @@ Un outil Python pour **optimiser vos ventes en Hôtel de Vente sur Dofus**. Il u
 ⚠️ Ce script est un **assistant** (OCR + collage clavier), pas un bot full-auto. À utiliser de manière responsable.
 
 ---
-### ⌨️ Raccourcis clavier
+
+## ✨ Fonctionnalités
+- Hotkeys pour lire les prix (lots 1 / 10 / 100)
+- Collage direct du prix ajusté
+- Calibration des zones par raccourci (Ctrl+Alt+F1/F2/F3)
+- Historique & options d'undercut
+---
+## ⌨️ Raccourcis clavier
 
 - F1 / F2 / F3 → Lire et coller le prix (lots 1, 10, 100)
 
@@ -123,4 +130,5 @@ Une fois lancé, le script tourne en arrière-plan et attend vos raccourcis clav
 
 **Ce projet n’est pas un bot mais un outil d’assistance.
 Respectez les conditions d’utilisation du jeu : utilisez-le comme une aide au confort de vente, pas pour automatiser des actions massives.**
+
 
