@@ -105,6 +105,7 @@ Une fenêtre s’ouvre avec :
 - Chaque joueur doit calibrer les zones de prix **(lots 1/10/100)**, car elles dépendent de votre résolution et interface.
 - Le calibrage est rapide et sauvegardé automatiquement.
 
+
 1. Ouvrez **l’Hôtel de Vente** → onglet **Vente**
 2. Placez la souris au **centre** du prix du lot 1
 3. Appuyez sur **Ctrl+Alt+F1**
@@ -138,10 +139,3 @@ Les zones sont enregistrées dans ***dofus_price_helper_config.json***.
 
 **Ce projet n’est pas un bot mais un outil d’assistance.
 Respectez les conditions d’utilisation du jeu : utilisez-le comme une aide au confort de vente, pas pour automatiser des actions massives.**
-
-
-
-
-
-
-

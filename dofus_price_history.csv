@@ -1,0 +1,10 @@
+ts,action,lot,read_price,pasted_price,mode,value,rounding,min_price
+1758451720,auto_paste,1,3969,3968,fixed,1,none,1
+1758451732,recommend,auto,,,3968fixed,1,none,1
+1758451746,recommend,auto,,,3968fixed,1,none,1
+1758451762,recommend,auto,,,3968fixed,1,none,1
+1758454872,,auto_paste,1,36,35,fixed,1,none,1
+1758454878,,auto_paste,100,30000,29999,fixed,1,none,1
+1758454901,,auto_paste,100,12398,12397,fixed,1,none,1
+1758454917,,auto_paste,100,12398,12397,fixed,1,none,1
+1758454920,,auto_paste,10,657,656,fixed,1,none,1
