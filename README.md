@@ -7,4 +7,10 @@ Un outil Python pour **optimiser vos ventes en Hôtel de Vente sur Dofus**. Il u
 ⚠️ Ce script est un **assistant** (OCR + collage clavier), pas un bot full-auto. À utiliser de manière responsable.
 
 ---
+## 🚀 Installation
+
+### 1. Cloner le projet
+```bash
+git clone https://github.com/VOTRE_USER/dofus-price-helper.git
+cd dofus-price-helper
 
