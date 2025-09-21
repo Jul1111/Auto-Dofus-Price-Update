@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Dofus Price Helper — PySimpleGUI + Presets + Auto-Paste + Optimizer + CSV
---------------------------------------------------------------------------
-- GUI moderne avec PySimpleGUI.
-- Zones PRIX fixes (lots 1/10/100) calibrées à la souris.
-- Undercut (fixe / %) + options d’arrondi.
-- Aperçu visuel des captures (par lot).
-- Système de PRÉSETS (sauver/charger/supprimer) pour gérer plusieurs profils (résos, comptes).
-- Collage automatique (Ctrl+V) optionnel via 'keyboard'.
-- Optimiseur: lit 1/10/100, évalue prix/unité et recommande le lot le plus rentable.
-- Historique CSV des collages.
+Dofus Price Helper — CustomTkinter + Hotkeys + Optimizer (no CSV, no item name)
+-------------------------------------------------------------------------------
+- UI moderne (CustomTkinter) : log temps réel coloré, réglages.
+- Hotkeys globaux :
+    F1  -> lire lot 1   -> undercut -> (auto) coller
+    F2  -> lire lot 10  -> undercut -> (auto) coller
+    F3  -> lire lot 100 -> undercut -> (auto) coller
+    F4  -> optimiser (lit 1/10/100, choisit le meilleur lot), undercut, (auto) coller
+    Ctrl+Alt+F1/F2/F3 -> calibrer la zone prix (place la souris au CENTRE du prix)
+- Collage automatique Ctrl+V (via 'keyboard') désactivable.
+- OCR via Tesseract + mss (plein écran OK).
+- Config JSON persistée (zones, paramètres).
+- Logs colorés: Lot1 (cyan), Lot10 (vert), Lot100 (orange), OPT (violet), INFO (gris), ERROR (rouge).
 
-Dépendances :
-  pip install PySimpleGUI mss pyautogui pytesseract opencv-python numpy pyperclip pillow keyboard
+Dépendances (dans venv) :
+  pip install customtkinter mss pyautogui pytesseract opencv-python numpy pyperclip pillow keyboard
+
 + Installer Tesseract (Windows : https://github.com/UB-Mannheim/tesseract/wiki)
-  et ajuster TESSERACT_CMD si nécessaire.
+  et ajuster TESSERACT_CMD ci-dessous si nécessaire.
 """
 
-import os, re, json, time, io, csv
+import os, re, json, time, threading, queue
 from typing import Optional, Tuple, Dict
 
 import numpy as np
@@ -29,91 +33,50 @@ import pytesseract
 import pyperclip
 from PIL import Image
 
-import PySimpleGUI as sg
+# UI
+import customtkinter as ctk
+import tkinter as tk  # pour Text + tags couleurs
 
-# keyboard est optionnel : on gère le fallback si non dispo
+# Hotkeys globaux + Ctrl+V auto
 try:
-    import keyboard  # pour Ctrl+V auto
+    import keyboard
     KEYBOARD_AVAILABLE = True
 except Exception:
     KEYBOARD_AVAILABLE = False
 
-# ---------------- CONFIG ----------------
+# ---------------- CONFIG / DEFAULTS ----------------
 TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # adapte si besoin
 CONFIG_FILE   = "dofus_price_helper_config.json"
-HISTORY_CSV   = "dofus_price_history.csv"
 
-# taille de la zone capturée autour du centre du prix
+# Taille de la zone capturée autour du centre du prix
 PRICE_W = 150
 ROW_H   = 40
 
 # OCR
 TESSERACT_CONFIG = r"--psm 6 -c tessedit_char_whitelist=0123456789"
-SCALE = 2  # upscaling pour OCR
+SCALE = 2  # upscaling OCR
 
 # Undercut
 UNDERCUT_MODE  = "fixed"    # "fixed" | "percent"
 UNDERCUT_VALUE = 1          # int (fixed) ou float (percent)
 MIN_PRICE      = 1
 
-# Rounding: "none" | "down_10" | "down_100" | "end_9"
+# Arrondi: "none" | "down_10" | "down_100" | "end_9"
 ROUNDING       = "none"
 
-# Regions par lot: { "1": (x,y,w,h) , "10": (...), "100": (...) }
+# Zones par lot: { "1": (x,y,w,h) , "10": (...), "100": (...) }
 PRICE_REGIONS: Dict[str, Optional[Tuple[int,int,int,int]]] = {"1": None, "10": None, "100": None}
 
-# Préséts multi-profils : { "nom_preset": { "1":(x,y,w,h), "10":(...), "100":(...) } }
-PRESETS: Dict[str, Dict[str, Optional[Tuple[int,int,int,int]]]] = {}
-
-# Collage auto (Ctrl+V via 'keyboard')
+# Coller automatiquement (Ctrl+V)
 AUTO_PASTE = True
-# ---------------------------------------
+# ---------------------------------------------------
 
+
+# ---------------- OCR & PRICE UTILS ----------------
 def ensure_tesseract():
     if TESSERACT_CMD:
         pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
-def load_config():
-    global PRICE_REGIONS, PRESETS, PRICE_W, ROW_H, UNDERCUT_MODE, UNDERCUT_VALUE, MIN_PRICE, ROUNDING, AUTO_PASTE
-    if not os.path.exists(CONFIG_FILE):
-        return
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f) or {}
-        if "PRICE_REGIONS" in data:
-            PRICE_REGIONS = {k: (tuple(v) if v else None) for k, v in data["PRICE_REGIONS"].items()}
-        if "PRESETS" in data:
-            PRESETS = {name: {k: (tuple(v) if v else None) for k, v in pr.items()} for name, pr in data["PRESETS"].items()}
-        PRICE_W        = int(data.get("PRICE_W", PRICE_W))
-        ROW_H          = int(data.get("ROW_H", ROW_H))
-        UNDERCUT_MODE  = data.get("UNDERCUT_MODE", UNDERCUT_MODE)
-        UNDERCUT_VALUE = data.get("UNDERCUT_VALUE", UNDERCUT_VALUE)
-        MIN_PRICE      = int(data.get("MIN_PRICE", MIN_PRICE))
-        ROUNDING       = data.get("ROUNDING", ROUNDING)
-        AUTO_PASTE     = bool(data.get("AUTO_PASTE", AUTO_PASTE))
-    except Exception as e:
-        print("[Config] load failed:", e)
-
-def save_config():
-    data = {
-        "PRICE_REGIONS": {k: list(v) if v else None for k, v in PRICE_REGIONS.items()},
-        "PRESETS": {name: {k: (list(v) if v else None) for k, v in pr.items()} for name, pr in PRESETS.items()},
-        "PRICE_W": PRICE_W,
-        "ROW_H": ROW_H,
-        "UNDERCUT_MODE": UNDERCUT_MODE,
-        "UNDERCUT_VALUE": UNDERCUT_VALUE,
-        "MIN_PRICE": MIN_PRICE,
-        "ROUNDING": ROUNDING,
-        "AUTO_PASTE": AUTO_PASTE,
-    }
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        print("[Config] saved.")
-    except Exception as e:
-        print("[Config] save failed:", e)
-
-# --- capture & OCR ---
 def grab_screen(region: Tuple[int,int,int,int]) -> np.ndarray:
     x, y, w, h = region
     with mss.mss() as sct:
@@ -124,7 +87,7 @@ def preprocess_for_ocr(img_bgr: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     up   = cv2.resize(gray, (gray.shape[1]*SCALE, gray.shape[0]*SCALE), interpolation=cv2.INTER_CUBIC)
     up   = cv2.bilateralFilter(up, d=7, sigmaColor=55, sigmaSpace=55)
-    # Si UI claire sur fond sombre lit mal, essayer: THRESH_BINARY_INV
+    # Si UI claire sur fond sombre lit mal, essayer THRESH_BINARY_INV
     _, th = cv2.threshold(up, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return th
 
@@ -134,7 +97,6 @@ def ocr_number_from_image(img_bgr: np.ndarray) -> Optional[int]:
     digits = re.sub(r"[^0-9]", "", txt)
     return int(digits) if digits else None
 
-# --- undercut & arrondi ---
 def smart_round(p: int, mode: str) -> int:
     if mode == "down_10":
         return (p // 10) * 10
@@ -162,83 +124,25 @@ def compute_undercut(price: Optional[int], mode: str, value, rounding: str, min_
     new_p = smart_round(new_p, rounding)
     return max(min_price, new_p)
 
-# --- utils GUI ---
-def region_from_mouse(center_w: int, center_h: int) -> Tuple[int,int,int,int]:
-    x, y = pyautogui.position()
-    return (x - center_w//2, y - center_h//2, center_w, center_h)
-
-def to_tk_image(img_bgr: np.ndarray, max_w=520) -> bytes:
-    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    im  = Image.fromarray(rgb)
-    if im.width > max_w:
-        im = im.resize((max_w, int(max_w * im.height / im.width)))
-    bio = io.BytesIO()
-    im.save(bio, format="PNG")
-    return bio.getvalue()
-
-# --- Historique CSV ---
-def log_history(action: str, lot: str, read_price: Optional[int], pasted_price: Optional[int], settings: dict):
-    row = {
-        "ts": int(time.time()),
-        "action": action,           # "paste" | "auto_paste" | "recommend"
-        "lot": lot,                 # "1" | "10" | "100" | "auto"
-        "read_price": read_price if read_price is not None else "",
-        "pasted_price": pasted_price if pasted_price is not None else "",
-        "mode": settings.get("mode"),
-        "value": settings.get("value"),
-        "rounding": settings.get("rounding"),
-        "min_price": settings.get("min_price"),
-    }
-    is_new = not os.path.exists(HISTORY_CSV)
-    try:
-        with open(HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-            if is_new:
-                writer.writeheader()
-            writer.writerow(row)
-    except Exception as e:
-        print("[History] write failed:", e)
-
-# --- Optimiseur ---
-def pick_best_lot(p1: Optional[int], p10: Optional[int], p100: Optional[int]) -> Optional[str]:
-    """
-    Choisit le lot avec le meilleur prix/unité.
-    Règles :
-      - calcule u1, u10, u100 (ignore ceux non disponibles)
-      - prend le max u*
-      - si ex aequo (±1%), préfère le lot plus petit (1 > 10 > 100) pour turnover
-    """
-    units = []
-    if p1   is not None:  units.append(("1",   p1/1.0))
-    if p10  is not None:  units.append(("10",  p10/10.0))
-    if p100 is not None:  units.append(("100", p100/100.0))
-    if not units:
-        return None
-    # meilleur u
-    best_lot, best_u = max(units, key=lambda t: t[1])
-
-    # ex aequo ±1% → préférer plus petit lot
-    def close(a,b,th=0.01):  # 1%
-        return abs(a-b) <= max(a,b)*th
-
-    # trie par u desc, puis lot priorité 1 > 10 > 100
-    priority = {"1": 3, "10": 2, "100": 1}
-    units_sorted = sorted(units, key=lambda t: (t[1], priority[t[0]]), reverse=True)
-    top = units_sorted[0]
-    if len(units_sorted) > 1 and close(units_sorted[0][1], units_sorted[1][1]):
-        # si très proches, prends le plus petit (déjà géré par tri secondaire)
-        return units_sorted[0][0]
-    return best_lot
-
-def read_price(lot: str) -> Optional[int]:
-    region = PRICE_REGIONS.get(lot)
+def read_price_from_region(region: Optional[Tuple[int,int,int,int]]) -> Optional[int]:
     if not region:
         return None
     img = grab_screen(region)
     return ocr_number_from_image(img)
 
+def pick_best_lot(p1: Optional[int], p10: Optional[int], p100: Optional[int]) -> Optional[str]:
+    cand = []
+    if p1   is not None:  cand.append(("1",   p1/1.0))
+    if p10  is not None:  cand.append(("10",  p10/10.0))
+    if p100 is not None:  cand.append(("100", p100/100.0))
+    if not cand:
+        return None
+    # ex aequo ±1% -> privilégie le plus petit lot (meilleur turnover)
+    priority = {"1":3, "10":2, "100":1}
+    cand.sort(key=lambda t: (t[1], priority[t[0]]), reverse=True)
+    return cand[0][0]
+
 def paste_value(val: int, auto: bool) -> bool:
-    """Copie val dans le presse-papier et (si auto=True et keyboard dispo) envoie Ctrl+V."""
     pyperclip.copy(str(val))
     time.sleep(0.05)
     if auto and KEYBOARD_AVAILABLE:
@@ -248,268 +152,318 @@ def paste_value(val: int, auto: bool) -> bool:
         except Exception:
             return False
     return False
+# ---------------------------------------------------
 
-# ---------------- GUI BUILD ----------------
-def make_layout():
-    sg.theme("SystemDefault")
 
-    left_col = [
-        [sg.Text("Undercut"),
-         sg.Combo(["fixed","percent"], default_value=UNDERCUT_MODE, key="-MODE-", size=(10,1)),
-         sg.Text("Valeur"),
-         sg.Input(str(UNDERCUT_VALUE), key="-VALUE-", size=(8,1))],
-        [sg.Text("Arrondi"),
-         sg.Combo(["none","down_10","down_100","end_9"], default_value=ROUNDING, key="-ROUND-", size=(10,1)),
-         sg.Text("Min"),
-         sg.Input(str(MIN_PRICE), key="-MIN-", size=(8,1))],
+# ---------------- CONFIG (JSON) --------------------
+def load_config():
+    global PRICE_REGIONS, PRICE_W, ROW_H, UNDERCUT_MODE, UNDERCUT_VALUE, MIN_PRICE, ROUNDING, AUTO_PASTE
+    if not os.path.exists(CONFIG_FILE):
+        return
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+        if "PRICE_REGIONS" in data:
+            PRICE_REGIONS = {k: (tuple(v) if v else None) for k, v in data["PRICE_REGIONS"].items()}
+        PRICE_W        = int(data.get("PRICE_W", PRICE_W))
+        ROW_H          = int(data.get("ROW_H", ROW_H))
+        UNDERCUT_MODE  = data.get("UNDERCUT_MODE", UNDERCUT_MODE)
+        UNDERCUT_VALUE = data.get("UNDERCUT_VALUE", UNDERCUT_VALUE)
+        MIN_PRICE      = int(data.get("MIN_PRICE", MIN_PRICE))
+        ROUNDING       = data.get("ROUNDING", ROUNDING)
+        AUTO_PASTE     = bool(data.get("AUTO_PASTE", AUTO_PASTE))
+    except Exception as e:
+        print("[Config] load failed:", e)
 
-        [sg.Checkbox("Coller automatiquement (Ctrl+V)", key="-AUTO-", default=AUTO_PASTE, enable_events=True),
-         sg.Text("(keyboard {})".format("OK" if KEYBOARD_AVAILABLE else "absent"), text_color="green" if KEYBOARD_AVAILABLE else "red")],
+def save_config():
+    data = {
+        "PRICE_REGIONS": {k: list(v) if v else None for k, v in PRICE_REGIONS.items()},
+        "PRICE_W": PRICE_W,
+        "ROW_H": ROW_H,
+        "UNDERCUT_MODE": UNDERCUT_MODE,
+        "UNDERCUT_VALUE": UNDERCUT_VALUE,
+        "MIN_PRICE": MIN_PRICE,
+        "ROUNDING": ROUNDING,
+        "AUTO_PASTE": AUTO_PASTE,
+    }
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print("[Config] save failed:", e)
+# ---------------------------------------------------
 
-        [sg.Frame("Taille zone (prix)", [
-            [sg.Text("Largeur"), sg.Input(str(PRICE_W), key="-W-", size=(6,1)),
-             sg.Text("Hauteur"), sg.Input(str(ROW_H), key="-H-", size=(6,1))],
-            [sg.Button("Sauver paramètres", key="-SAVE-PARAMS-")]
-        ])],
 
-        [sg.Frame("Calibration des zones (placez la souris au centre du prix)", [
-            [sg.Button("Set zone Lot 1", key="-SET-1-")],
-            [sg.Button("Set zone Lot 10", key="-SET-10-")],
-            [sg.Button("Set zone Lot 100", key="-SET-100-")],
-        ])],
+# -------------------- UI APP -----------------------
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Dofus Price Helper — CustomTkinter (Hotkeys + Optimizer)")
+        self.geometry("980x640")
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
 
-        [sg.Frame("Préséts (multi-profils)", [
-            [sg.Text("Nom"), sg.Input(key="-PRESET-NAME-", size=(18,1))],
-            [sg.Button("Sauver prését", key="-PRESET-SAVE-"),
-             sg.Button("Charger", key="-PRESET-LOAD-"),
-             sg.Button("Supprimer", key="-PRESET-DEL-")],
-            [sg.Text("Disponibles:"), sg.Combo(sorted([]), key="-PRESET-LIST-", size=(22,1))]
-        ])],
+        ensure_tesseract()
+        load_config()
 
-        [sg.Frame("Actions", [
-            [sg.Button("Lire 1", key="-READ-1-"), sg.Button("Coller 1", key="-PASTE-1-")],
-            [sg.Button("Lire 10", key="-READ-10-"), sg.Button("Coller 10", key="-PASTE-10-")],
-            [sg.Button("Lire 100", key="-READ-100-"), sg.Button("Coller 100", key="-PASTE-100-")],
-            [sg.HSeparator()],
-            [sg.Button("Optimiser (lire 1/10/100)", key="-OPTIMIZE-")],
-            [sg.Button("Coller recommandé", key="-PASTE-BEST-")],
-            [sg.HSeparator()],
-            [sg.Button("Sauver config", key="-SAVE-CONFIG-"), sg.Button("Quitter", key="-QUIT-")],
-        ])],
+        # state vars
+        self.mode_var  = ctk.StringVar(value=str(UNDERCUT_MODE))
+        self.value_var = ctk.StringVar(value=str(UNDERCUT_VALUE))
+        self.round_var = ctk.StringVar(value=str(ROUNDING))
+        self.min_var   = ctk.StringVar(value=str(MIN_PRICE))
+        self.w_var     = ctk.StringVar(value=str(PRICE_W))
+        self.h_var     = ctk.StringVar(value=str(ROW_H))
+        self.auto_var  = ctk.BooleanVar(value=bool(AUTO_PASTE))
+        self.reco_var  = ctk.StringVar(value="-")
 
-        [sg.StatusBar("Prêt.", key="-STATUS-")]
-    ]
+        # thread-safe event queue from hotkeys
+        self.ev_queue = queue.Queue()
 
-    right_col = [
-        [sg.Text("Aperçu capture")],
-        [sg.Image(key="-PREVIEW-")],
-        [sg.Text("Recommandation :"), sg.Text("-", key="-RECO-")],
-    ]
+        self._build_ui()
+        self._setup_log_tags()
+        self._start_hotkeys_thread()
+        self._poll_events()  # start periodic poll
 
-    layout = [
-        [sg.Column(left_col, vertical_alignment="top", pad=((8,8),(8,8))),
-         sg.VSeparator(),
-         sg.Column(right_col, vertical_alignment="top", pad=((8,8),(8,8)))]
-    ]
-    return layout
+        self._log("Prêt. Hotkeys: F1/F2/F3/F4, Ctrl+Alt+F1/F2/F3", tag="INFO")
 
-def capture_preview_for(lot: str) -> Optional[np.ndarray]:
-    region = PRICE_REGIONS.get(lot)
-    if not region:
-        return None
-    return grab_screen(region)
+    # ---------- UI ----------
+    def _build_ui(self):
+        # Top controls
+        top = ctk.CTkFrame(self)
+        top.pack(fill="x", padx=12, pady=(12,6))
 
-def main():
-    ensure_tesseract()
-    load_config()
+        ctk.CTkLabel(top, text="Undercut:").pack(side="left", padx=(6,4))
+        ctk.CTkOptionMenu(top, values=["fixed","percent"], variable=self.mode_var, width=110).pack(side="left", padx=(0,8))
+        ctk.CTkLabel(top, text="Valeur:").pack(side="left", padx=(6,4))
+        ctk.CTkEntry(top, textvariable=self.value_var, width=80).pack(side="left", padx=(0,12))
 
-    window = sg.Window("Dofus Price Helper — GUI + Presets + Optimizer", make_layout(), finalize=True)
+        ctk.CTkLabel(top, text="Arrondi:").pack(side="left", padx=(6,4))
+        ctk.CTkOptionMenu(top, values=["none","down_10","down_100","end_9"], variable=self.round_var, width=120).pack(side="left", padx=(0,8))
+        ctk.CTkLabel(top, text="Min:").pack(side="left", padx=(6,4))
+        ctk.CTkEntry(top, textvariable=self.min_var, width=80).pack(side="left", padx=(0,12))
 
-    # maj initiale de la liste des presets
-    def update_preset_list():
-        window["-PRESET-LIST-"].update(values=sorted(list(PRESETS.keys())))
+        ctk.CTkSwitch(top, text="Coller automatiquement (Ctrl+V)", variable=self.auto_var).pack(side="left", padx=8)
 
-    update_preset_list()
+        # Secondary controls
+        sec = ctk.CTkFrame(self)
+        sec.pack(fill="x", padx=12, pady=(6,6))
 
-    # état optimiseur courant
-    last_prices = {"1": None, "10": None, "100": None}
-    last_best = None
+        ctk.CTkLabel(sec, text="Taille zone (prix)").pack(side="left", padx=(6,10))
+        ctk.CTkLabel(sec, text="Largeur").pack(side="left", padx=(0,4))
+        ctk.CTkEntry(sec, textvariable=self.w_var, width=70).pack(side="left", padx=(0,10))
+        ctk.CTkLabel(sec, text="Hauteur").pack(side="left", padx=(0,4))
+        ctk.CTkEntry(sec, textvariable=self.h_var, width=70).pack(side="left", padx=(0,10))
+        ctk.CTkButton(sec, text="Sauver paramètres", command=self._on_save_params, width=170).pack(side="left", padx=(10,6))
 
-    while True:
-        event, values = window.read(timeout=200)
-        if event in (sg.WINDOW_CLOSED, "-QUIT-"):
-            break
+        # Calibration buttons (optionnels, hotkeys existent aussi)
+        cal = ctk.CTkFrame(self)
+        cal.pack(fill="x", padx=12, pady=(6,6))
+        ctk.CTkLabel(cal, text="Calibration : place la souris au CENTRE du prix, puis :").pack(side="left", padx=(6,8))
+        ctk.CTkButton(cal, text="Set zone Lot 1",  command=lambda: self._calibrate_click("1"), width=130).pack(side="left", padx=4)
+        ctk.CTkButton(cal, text="Set zone Lot 10", command=lambda: self._calibrate_click("10"), width=130).pack(side="left", padx=4)
+        ctk.CTkButton(cal, text="Set zone Lot 100",command=lambda: self._calibrate_click("100"), width=130).pack(side="left", padx=4)
 
-        # toggle auto paste
-        if event == "-AUTO-":
-            global AUTO_PASTE
-            AUTO_PASTE = bool(values["-AUTO-"])
-            save_config()
+        # Recommendation
+        reco = ctk.CTkFrame(self)
+        reco.pack(fill="x", padx=12, pady=(6,6))
+        ctk.CTkLabel(reco, text="Lot recommandé :").pack(side="left", padx=(6,8))
+        ctk.CTkLabel(reco, textvariable=self.reco_var, font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
 
-        # save params
-        if event == "-SAVE-PARAMS-":
-            try:
-                global PRICE_W, ROW_H, UNDERCUT_MODE, UNDERCUT_VALUE, MIN_PRICE, ROUNDING
-                PRICE_W = int(values["-W-"])
-                ROW_H   = int(values["-H-"])
-                UNDERCUT_MODE  = values["-MODE-"]
-                UNDERCUT_VALUE = float(values["-VALUE-"]) if UNDERCUT_MODE=="percent" else int(values["-VALUE-"])
-                MIN_PRICE      = int(values["-MIN-"])
-                ROUNDING       = values["-ROUND-"]
-                save_config()
-                window["-STATUS-"].update("Paramètres sauvegardés.")
-            except Exception as e:
-                window["-STATUS-"].update(f"Erreur paramètres: {e}")
+        # Log box (tk.Text pour tags couleur) + CTkScrollbar
+        log_frame = ctk.CTkFrame(self)
+        log_frame.pack(fill="both", expand=True, padx=12, pady=(6,12))
 
-        # set zones
-        if event in ("-SET-1-","-SET-10-","-SET-100-"):
-            lot = "1" if event=="-SET-1-" else ("10" if event=="-SET-10-" else "100")
-            x, y = pyautogui.position()
-            region = (x - PRICE_W//2, y - ROW_H//2, PRICE_W, ROW_H)
-            PRICE_REGIONS[lot] = region
-            save_config()
-            window["-STATUS-"].update(f"[Calib] Zone {lot} = {region}")
-            img = capture_preview_for(lot)
-            if img is not None:
-                window["-PREVIEW-"].update(data=to_tk_image(img))
+        self.log_text = tk.Text(log_frame, wrap="word", height=18, bg="#111418", fg="#EDEDED", insertbackground="#EDEDED")
+        self.log_text.configure(state="disabled")
+        self.log_text.pack(side="left", fill="both", expand=True, padx=(6,0), pady=6)
 
-        # read buttons
-        if event in ("-READ-1-","-READ-10-","-READ-100-"):
-            lot = "1" if event=="-READ-1-" else ("10" if event=="-READ-10-" else "100")
-            img = capture_preview_for(lot)
-            if img is not None:
-                window["-PREVIEW-"].update(data=to_tk_image(img))
-            p = read_price(lot)
-            last_prices[lot] = p
-            if p is None:
-                window["-STATUS-"].update(f"[{lot}] Aucun prix détecté.")
-            else:
-                up = compute_undercut(p, values["-MODE-"], values["-VALUE-"], values["-ROUND-"], int(values["-MIN-"]))
-                window["-STATUS-"].update(f"[{lot}] Lu: {p}  |  Undercut → {up}")
+        scrollbar = ctk.CTkScrollbar(log_frame, command=self.log_text.yview)
+        scrollbar.pack(side="right", fill="y", padx=(0,6), pady=6)
+        self.log_text.configure(yscrollcommand=scrollbar.set)
 
-        # paste buttons
-        if event in ("-PASTE-1-","-PASTE-10-","-PASTE-100-"):
-            lot = "1" if event=="-PASTE-1-" else ("10" if event=="-PASTE-10-" else "100")
-            p = read_price(lot)
-            last_prices[lot] = p
-            if p is None:
-                window["-STATUS-"].update(f"[{lot}] Aucun prix à coller.")
-            else:
-                up = compute_undercut(p, values["-MODE-"], values["-VALUE-"], values["-ROUND-"], int(values["-MIN-"]))
-                if up is None:
-                    window["-STATUS-"].update(f"[{lot}] Undercut invalide.")
-                else:
-                    pasted = paste_value(up, auto=bool(values["-AUTO-"]))
-                    window["-STATUS-"].update(f"[{lot}] {'Collé auto' if pasted else 'Copié'} : {up}  → {'(Ctrl+V auto)' if pasted else '(Ctrl+V manuel)'}")
-                    log_history("auto_paste" if pasted else "paste", lot, p, up, {
-                        "mode": values["-MODE-"], "value": values["-VALUE-"],
-                        "rounding": values["-ROUND-"], "min_price": values["-MIN-"]
-                    })
+        # Help footer
+        help_text = (
+            "Raccourcis :  F1=lot 1  |  F2=lot 10  |  F3=lot 100  |  F4=Optimiser  |  "
+            "Ctrl+Alt+F1/F2/F3=Calibrer zones"
+        )
+        ctk.CTkLabel(self, text=help_text, text_color="#AFAFAF").pack(pady=(0,8))
 
-        # optimizer
-        if event == "-OPTIMIZE-":
-            # Lire 1/10/100 (uniquement si zones calibrées)
-            p1   = read_price("1")
-            p10  = read_price("10")
-            p100 = read_price("100")
-            last_prices.update({"1": p1, "10": p10, "100": p100})
+    def _setup_log_tags(self):
+        # couleurs
+        self.log_text.tag_configure("TIME", foreground="#7f8c8d")
+        self.log_text.tag_configure("INFO", foreground="#bdc3c7")
+        self.log_text.tag_configure("ERROR", foreground="#ff6b6b")
+        self.log_text.tag_configure("LOT1", foreground="#66d9ef")    # cyan
+        self.log_text.tag_configure("LOT10", foreground="#a6e22e")   # vert
+        self.log_text.tag_configure("LOT100", foreground="#fd971f")  # orange
+        self.log_text.tag_configure("OPT", foreground="#ae81ff")     # violet
 
-            # Aperçu : si une zone existe, affiche celle du lot 1 par défaut
-            for k in ("1","10","100"):
-                img = capture_preview_for(k)
-                if img is not None:
-                    window["-PREVIEW-"].update(data=to_tk_image(img)); break
+    # ---------- Thread-safe log ----------
+    def _log(self, msg: str, tag: str = "INFO"):
+        ts = time.strftime("%H:%M:%S")
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", f"{ts}  ", ("TIME",))
+        self.log_text.insert("end", msg + "\n", (tag,))
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
 
-            best = pick_best_lot(p1, p10, p100)
-            last_best = best
-            # texte reco
-            def fmt(p): return "-" if p is None else f"{p}"
-            if best is None:
-                window["-RECO-"].update("Aucune zone valide (calibrez les 3).")
-                window["-STATUS-"].update(f"Lu → 1:{fmt(p1)} | 10:{fmt(p10)} | 100:{fmt(p100)}")
-            else:
-                u1 = None if p1   is None else p1/1.0
-                u10= None if p10  is None else p10/10.0
-                u100=None if p100 is None else p100/100.0
-                window["-RECO-"].update(f"Lot recommandé: {best} (u1={u1}, u10={u10}, u100={u100})")
-                window["-STATUS-"].update(f"Lu → 1:{fmt(p1)} | 10:{fmt(p10)} | 100:{fmt(p100)}")
-                log_history("recommend", "auto", None, None, {
-                    "mode": values["-MODE-"], "value": values["-VALUE-"],
-                    "rounding": values["-ROUND-"], "min_price": values["-MIN-"]
-                })
+    # ---------- Params ----------
+    def _on_save_params(self):
+        global PRICE_W, ROW_H, UNDERCUT_MODE, UNDERCUT_VALUE, MIN_PRICE, ROUNDING, AUTO_PASTE
+        try:
+            PRICE_W = int(self.w_var.get())
+            ROW_H   = int(self.h_var.get())
+        except:
+            self._log("[Param] Largeur/hauteur invalides.", tag="ERROR")
+            return
+        UNDERCUT_MODE  = self.mode_var.get()
+        try:
+            UNDERCUT_VALUE = float(self.value_var.get()) if UNDERCUT_MODE=="percent" else int(self.value_var.get())
+        except:
+            self._log("[Param] Valeur d’undercut invalide, fallback 1.", tag="ERROR")
+            UNDERCUT_VALUE = 1 if UNDERCUT_MODE=="fixed" else 1.0
+        try:
+            MIN_PRICE = int(self.min_var.get())
+        except:
+            MIN_PRICE = 1
+        ROUNDING   = self.round_var.get()
+        AUTO_PASTE = bool(self.auto_var.get())
+        save_config()
+        self._log("[Param] Paramètres sauvegardés.", tag="INFO")
 
-        if event == "-PASTE-BEST-":
-            # colle sur le lot recommandé (si on a déjà optimisé)
-            if last_best is None:
-                window["-STATUS-"].update("Pas de recommandation. Cliquez d'abord sur 'Optimiser'.")
-            else:
-                lot = last_best
-                p = last_prices.get(lot)
-                if p is None:
-                    # relire au cas où ça a changé
-                    p = read_price(lot)
-                    last_prices[lot] = p
-                if p is None:
-                    window["-STATUS-"].update(f"[{lot}] Aucun prix à coller.")
-                else:
-                    up = compute_undercut(p, values["-MODE-"], values["-VALUE-"], values["-ROUND-"], int(values["-MIN-"]))
-                    if up is None:
-                        window["-STATUS-"].update(f"[{lot}] Undercut invalide.")
-                    else:
-                        pasted = paste_value(up, auto=bool(values["-AUTO-"]))
-                        window["-STATUS-"].update(f"[{lot}] {'Collé auto' if pasted else 'Copié'} : {up}  → {'(Ctrl+V auto)' if pasted else '(Ctrl+V manuel)'}")
-                        log_history("auto_paste" if pasted else "paste", lot, p, up, {
-                            "mode": values["-MODE-"], "value": values["-VALUE-"],
-                            "rounding": values["-ROUND-"], "min_price": values["-MIN-"]
-                        })
+    # ---------- Calibration ----------
+    def _calibrate_click(self, lot: str):
+        try:
+            w = int(self.w_var.get()); h = int(self.h_var.get())
+        except:
+            self._log("[Calib] Largeur/hauteur invalides.", tag="ERROR")
+            return
+        x, y = pyautogui.position()
+        region = (x - w//2, y - h//2, w, h)
+        PRICE_REGIONS[lot] = region
+        save_config()
+        self._log(f"[Calib] Zone {lot} = {region}", tag=self._lot_tag(lot))
 
-        # save config
-        if event == "-SAVE-CONFIG-":
-            save_config()
-            window["-STATUS-"].update("Config sauvegardée.")
+    # ---------- Hotkeys ----------
+    def _start_hotkeys_thread(self):
+        if not KEYBOARD_AVAILABLE:
+            self._log("[Hotkeys] Le module 'keyboard' n'est pas disponible. Les hotkeys ne fonctionneront pas.", tag="ERROR")
+            return
+        th = threading.Thread(target=self._register_hotkeys, daemon=True)
+        th.start()
+        self._log("[Hotkeys] Enregistrés : F1/F2/F3/F4, Ctrl+Alt+F1/F2/F3", tag="INFO")
 
-        # presets
-        if event == "-PRESET-SAVE-":
-            name = (values["-PRESET-NAME-"] or "").strip()
-            if not name:
-                window["-STATUS-"].update("Donnez un nom de prését.")
-            else:
-                PRESETS[name] = {k: PRICE_REGIONS.get(k) for k in ("1","10","100")}
-                save_config()
-                window["-STATUS-"].update(f"Prését '{name}' sauvegardé.")
-                # refresh list
-                window["-PRESET-LIST-"].update(values=sorted(list(PRESETS.keys())))
+    def _register_hotkeys(self):
+        # poster des événements vers la queue, consommés par le thread UI
+        def post(name, payload=None):
+            self.ev_queue.put((name, payload or {}))
+        # lecture+collage
+        keyboard.add_hotkey("f1",  lambda: post("READ_PASTE", {"lot":"1"}))
+        keyboard.add_hotkey("f2",  lambda: post("READ_PASTE", {"lot":"10"}))
+        keyboard.add_hotkey("f3",  lambda: post("READ_PASTE", {"lot":"100"}))
+        # optimiser
+        keyboard.add_hotkey("f4",  lambda: post("OPTIMIZE", {}))
+        # calibration
+        keyboard.add_hotkey("ctrl+alt+f1", lambda: post("CAL", {"lot":"1"}))
+        keyboard.add_hotkey("ctrl+alt+f2", lambda: post("CAL", {"lot":"10"}))
+        keyboard.add_hotkey("ctrl+alt+f3", lambda: post("CAL", {"lot":"100"}))
 
-        if event == "-PRESET-LOAD-":
-            name = (values["-PRESET-LIST-"] or "").strip()
-            if not name or name not in PRESETS:
-                window["-STATUS-"].update("Prését introuvable.")
-            else:
-                for k in ("1","10","100"):
-                    PRICE_REGIONS[k] = PRESETS[name].get(k)
-                save_config()
-                window["-STATUS-"].update(f"Prését '{name}' chargé.")
-                # rafraîchit l’aperçu sur la première zone dispo
-                for k in ("1","10","100"):
-                    img = capture_preview_for(k)
-                    if img is not None:
-                        window["-PREVIEW-"].update(data=to_tk_image(img))
-                        break
+    def _poll_events(self):
+        # appelé périodiquement sur le thread UI
+        try:
+            while True:
+                name, payload = self.ev_queue.get_nowait()
+                if name == "READ_PASTE":
+                    self._handle_read_paste(payload.get("lot"))
+                elif name == "OPTIMIZE":
+                    self._handle_optimize()
+                elif name == "CAL":
+                    self._handle_cal_hotkey(payload.get("lot"))
+        except queue.Empty:
+            pass
+        # re-planifier
+        self.after(40, self._poll_events)
 
-        if event == "-PRESET-DEL-":
-            name = (values["-PRESET-LIST-"] or "").strip()
-            if not name or name not in PRESETS:
-                window["-STATUS-"].update("Prését introuvable.")
-            else:
-                del PRESETS[name]
-                save_config()
-                window["-PRESET-LIST-"].update(values=sorted(list(PRESETS.keys())))
-                window["-STATUS-"].update(f"Prését '{name}' supprimé.")
+    # ---------- Helpers ----------
+    def _current_settings(self) -> dict:
+        return {
+            "mode": self.mode_var.get(),
+            "value": self.value_var.get(),
+            "rounding": self.round_var.get(),
+            "min_price": self.min_var.get(),
+            "auto_paste": bool(self.auto_var.get()),
+        }
 
-    window.close()
+    def _lot_tag(self, lot: Optional[str]) -> str:
+        if lot == "1": return "LOT1"
+        if lot == "10": return "LOT10"
+        if lot == "100": return "LOT100"
+        return "INFO"
 
+    # ---------- Actions ----------
+    def _handle_cal_hotkey(self, lot: str):
+        try:
+            w = int(self.w_var.get()); h = int(self.h_var.get())
+        except:
+            self._log("[Calib] Largeur/hauteur invalides.", tag="ERROR")
+            return
+        x, y = pyautogui.position()
+        region = (x - w//2, y - h//2, w, h)
+        PRICE_REGIONS[lot] = region
+        save_config()
+        self._log(f"[Calib] (Hotkey) Zone {lot} = {region}", tag=self._lot_tag(lot))
+
+    def _handle_read_paste(self, lot: str):
+        settings = self._current_settings()
+        p = read_price_from_region(PRICE_REGIONS.get(lot))
+        if p is None:
+            self._log(f"[{lot}] Aucun prix détecté. (zone non calibrée ou OCR)", tag=self._lot_tag(lot))
+            return
+        try:
+            minp = int(settings["min_price"])
+        except:
+            minp = 1
+        up = compute_undercut(p, settings["mode"], settings["value"], settings["rounding"], minp)
+        pasted = paste_value(up, auto=settings["auto_paste"])
+        self._log(
+            f"[{lot}] Lu: {p}  ->  Undercut: {up}  |  {'Collé auto (Ctrl+V)' if pasted else 'Copié (Ctrl+V man.)'}",
+            tag=self._lot_tag(lot)
+        )
+
+    def _handle_optimize(self):
+        settings = self._current_settings()
+        p1   = read_price_from_region(PRICE_REGIONS.get("1"))
+        p10  = read_price_from_region(PRICE_REGIONS.get("10"))
+        p100 = read_price_from_region(PRICE_REGIONS.get("100"))
+        self._log(
+            f"[OPT] Lu → 1:{'-' if p1 is None else p1} | 10:{'-' if p10 is None else p10} | 100:{'-' if p100 is None else p100}",
+            tag="OPT"
+        )
+
+        best = pick_best_lot(p1, p10, p100)
+        if best is None:
+            self.reco_var.set("-")
+            self._log("[OPT] Aucune zone valide (calibrez 1/10/100).", tag="ERROR")
+            return
+
+        self.reco_var.set(best)
+        p = {"1": p1, "10": p10, "100": p100}[best]
+        try:
+            minp = int(settings["min_price"])
+        except:
+            minp = 1
+        up = compute_undercut(p, settings["mode"], settings["value"], settings["rounding"], minp)
+        pasted = paste_value(up, auto=settings["auto_paste"])
+        self._log(
+            f"[OPT] Lot recommandé: {best}  |  Lu: {p} -> Undercut: {up}  |  {'Collé auto' if pasted else 'Copié'}",
+            tag="OPT"
+        )
+
+
+# ----------------- MAIN -----------------
 if __name__ == "__main__":
     try:
-        main()
+        app = App()
+        app.mainloop()
     except Exception as e:
         print("Error:", e)
