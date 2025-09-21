@@ -92,5 +92,35 @@ Une fois lancé, le script tourne en arrière-plan et attend vos raccourcis clav
 - Faites de même pour le **lot 10** ***(Ctrl+Alt+F2)*** et le **lot 100** ***(Ctrl+Alt+F3)***.
 
 - Les zones sont enregistrées dans ***dofus_price_helper_config.json***.
+  
+---
+### 💡 Conseils d’utilisation
 
+- **Toujours cliquer dans le champ Prix du lot avant d’appuyer sur F1/F2/F3.**
+
+- **Vérifiez visuellement les prix collés la première fois.**
+
+- **Ajustez la valeur d’undercut dans le script :**
+  ```python
+  UNDERCUT_MODE  = "fixed"   # ou "percent"
+  UNDERCUT_VALUE = 1         # valeur en kamas ou en %
+  ```
+- **Vous pouvez aussi changer PRICE_W et ROW_H si vos chiffres sont mal capturés.**
+
+---
+### 📂 Fichiers importants
+
+- dofus_price_helper_fixed.py → le script principal
+
+- requirements.txt → dépendances Python
+
+- dofus_price_helper_config.json → zones calibrées (générées automatiquement, à ne pas partager)
+
+- captures/ → images debug si DEBUG = True (optionnel)
+  
+---
+### 🛑 Disclaimer
+
+**Ce projet n’est pas un bot mais un outil d’assistance.
+Respectez les conditions d’utilisation du jeu : utilisez-le comme une aide au confort de vente, pas pour automatiser des actions massives.**
 
