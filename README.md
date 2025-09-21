@@ -48,11 +48,15 @@ pip install -r requirements.txt
 
 #### Windows : 
 
-**Télécharger [ici](https://github.com/UB-Mannheim/tesseract/wiki)** (par défaut, installez dans **"C:\Program Files\Tesseract-OCR\")
+**Télécharger [ici](https://github.com/UB-Mannheim/tesseract/wiki)** (par défaut, installez dans **"C:\Program Files\Tesseract-OCR\"**)
 
 #### Linux/macOS :
 ```bash
 sudo apt install tesseract-ocr    # Debian/Ubuntu
 brew install tesseract # macOS
+```
+Dans le script adaptez la ligne si besoin :
+```python
+TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 ```
 
