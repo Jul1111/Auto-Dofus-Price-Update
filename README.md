@@ -43,14 +43,16 @@ Un fichier requirements.txt est fourni. Installez les librairies nécessaires av
 ```bash
 pip install -r requirements.txt
 ```
+---
 ### 4. Installer Tesseract OCR
 
-Windows : Télécharger [ici](https://github.com/UB-Mannheim/tesseract/wiki)
+#### Windows : 
 
-(par défaut, installez dans C:\Program Files\Tesseract-OCR\)
+**Télécharger [ici](https://github.com/UB-Mannheim/tesseract/wiki)** (par défaut, installez dans **"C:\Program Files\Tesseract-OCR\")
 
-Linux/macOS :
+#### Linux/macOS :
 ```bash
 sudo apt install tesseract-ocr    # Debian/Ubuntu
 brew install tesseract # macOS
 ```
+
