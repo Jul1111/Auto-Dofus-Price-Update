@@ -9,6 +9,8 @@ Un outil Python pour **optimiser vos ventes en Hôtel de Vente sur Dofus**. Il u
 ---
 https://github.com/user-attachments/assets/9d1fd908-4398-410b-accb-64e54f98fd78
 
+<img width="974" height="668" alt="image" src="https://github.com/user-attachments/assets/71677131-5761-45e9-bbf2-3984da1a2845" />
+
 ---
 
 ## ✨ Fonctionnalités
@@ -139,3 +141,4 @@ Les zones sont enregistrées dans ***dofus_price_helper_config.json***.
 
 **Ce projet n’est pas un bot mais un outil d’assistance.
 Respectez les conditions d’utilisation du jeu : utilisez-le comme une aide au confort de vente, pas pour automatiser des actions massives.**
+
