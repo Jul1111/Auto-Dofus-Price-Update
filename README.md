@@ -17,6 +17,7 @@ git clone https://github.com/Jul1111/Auto-Dofus-Price-Update
 ```bash
 cd dofus-price-helper
 ```
+---
 ### 2. Créer un environnement virtuel
 
 #### Windows :
@@ -28,7 +29,6 @@ python -m venv venv
 ```bash
 .\venv\Scripts\activate
 ```
----
 #### Linux / macOS :
 ```bash
 python3 -m venv venv
@@ -36,3 +36,11 @@ python3 -m venv venv
 ```bash
 source venv/bin/activatee
 ```
+---
+### 3. Installer les dépendances
+Un fichier requirements.txt est fourni. Installez les librairies nécessaires avec :
+
+```bash
+pip install -r requirements.txt
+```
+
