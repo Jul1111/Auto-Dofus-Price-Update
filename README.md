@@ -11,6 +11,11 @@ Un outil Python pour **optimiser vos ventes en Hôtel de Vente sur Dofus**. Il u
 
 ### 1. Cloner le projet
 ```bash
-git clone https://github.com/VOTRE_USER/dofus-price-helper.git
+git clone https://github.com/Jul1111/Auto-Dofus-Price-Update
+```
+#### 1.1 Déplacez vous dans le dossier
+```bash
 cd dofus-price-helper
+```
+
 
