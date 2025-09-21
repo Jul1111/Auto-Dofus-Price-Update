@@ -59,4 +59,12 @@ Dans le script adaptez la ligne si besoin :
 ```python
 TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 ```
+---
+### ▶️ 5. Lancer le script
+
+Toujours depuis le venv activé :
+```bash
+python dofus_price_helper_fixed.py
+```
+Une fois lancé, le script tourne en arrière-plan et attend vos raccourcis clavier.
 
