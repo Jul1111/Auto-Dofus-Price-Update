@@ -26,8 +26,9 @@ https://github.com/user-attachments/assets/9d1fd908-4398-410b-accb-64e54f98fd78
 - **F1 / F2 / F3 → Lire et coller le prix (lots 1, 10, 100)**  
 - **F4 → Lire les 3 lots et coller le plus optimisé**  
 - **Ctrl+Alt+F1/F2/F3 → Calibrer une zone prix (placer la souris puis appuyer)**
+  
+ℹ️ Les boutons dans l’UI permettent aussi de calibrer manuellement si besoin.
 
-ℹ️ Les boutons dans l’UI permettent aussi de calibrer manuellement si besoin.  
 ---
 ## 🚀 Installation
 
@@ -141,4 +142,5 @@ Les zones sont enregistrées dans ***dofus_price_helper_config.json***.
 
 **Ce projet n’est pas un bot mais un outil d’assistance.
 Respectez les conditions d’utilisation du jeu : utilisez-le comme une aide au confort de vente, pas pour automatiser des actions massives.**
+
 
