@@ -20,8 +20,8 @@
     23
   ],
   "PRICE_FIELD": [
-    929,
-    578
+    941,
+    576
   ],
   "SELL_BUTTON": [
     972,
@@ -34,10 +34,10 @@
     15
   ],
   "COUNT_REGION": [
-    1099,
-    1075,
-    49,
-    11
+    1097,
+    1066,
+    146,
+    20
   ],
   "MINE_REGION": [
     877,
@@ -71,7 +71,7 @@
   "VERIFY_COUNT": true,
   "RELIST_AUTO": true,
   "RELIST_ROWS": 10,
-  "RELIST_SCROLL": 3,
+  "RELIST_SCROLL_MAX": 40,
   "RELIST_MAX": 120,
   "RELIST_DELAY": 0.5,
   "AUTO_PASTE": true,

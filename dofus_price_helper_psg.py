@@ -478,6 +478,9 @@ class App(ctk.CTk):
                       "et appuie à nouveau.", "CAL")
         else:
             self._log(f"[Calib] {label} = {val}", "CAL")
+            hint = core.zone_hint(name, val)
+            if hint:
+                self._log(f"[Calib] {label} : {hint}. Recalibre si la lecture échoue.", "WARN")
             self._show_zones()
         self._refresh_status()
 

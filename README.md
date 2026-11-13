@@ -20,7 +20,7 @@ https://github.com/user-attachments/assets/9d1fd908-4398-410b-accb-64e54f98fd78
 - **Garde-fou « Prix moyen »** (optionnel, Ctrl+Alt+F5) : si le prix par objet tombe sous 50 % du « Prix moyen » affiché par le jeu (`MIN_AVG_RATIO`), la vente est marquée suspecte (prix copié seulement). Protège contre un chiffre mal lu ou un prix piège.
 - **F2 vérifié par le compteur** (optionnel, Ctrl+Alt+F6) : après chaque mise en vente, le compteur « 21/100 lots en vente » doit avoir augmenté de 1. Sinon F2 s'arrête (« vente non confirmée »). Arrêt aussi quand l'HDV est plein.
 - **F3 « Mettre à jour mes ventes »** : dans la liste de vos ventes, sélectionnez une ligne puis F3. Si quelqu'un est moins cher, le nouveau prix est collé puis **Modifier** est validé, et le prix affiché ensuite est vérifié. Si le moins cher c'est vous : rien. Plusieurs lignes du même objet s'alignent sur votre nouveau prix (pas 759, 758, 757…).
-- **Ctrl+F3 « toute la liste »** ⚠️ (désactivé : interrupteur dans l'interface, ou `RELIST_AUTO`) : clique chaque ligne visible, met à jour, descend à la molette, recommence jusqu'en bas. Une modification réordonne la liste : la page est alors reprise depuis la 1re ligne (aucune ligne sautée). Arrêt à la moindre lecture suspecte ou modification non confirmée, ou Ctrl+Alt+P.
+- **Ctrl+F3 « toute la liste »** ⚠️ (désactivé : interrupteur dans l'interface, ou `RELIST_AUTO`) : clique chaque ligne visible, met à jour, descend à la molette en mesurant de combien la liste a réellement bougé (cran par cran, jusqu'à une page), reprend à la 1re ligne pas encore vue, jusqu'en bas. Une modification réordonne la liste : la page est alors reprise depuis la 1re ligne (aucune ligne sautée). Arrêt à la moindre lecture suspecte ou modification non confirmée, ou Ctrl+Alt+P.
 - **Pas d'undercut contre vous-même** : si le prix en tête est celui que vous venez de mettre (même lot, < 30 min, `OWN_PRICE_TTL`), il est réutilisé tel quel.
 - **F4** : meilleur prix unitaire **parmi les lots possibles** (≤ quantité affichée, que le jeu met au maximum permis par votre stock). Si c'est un lot plus petit, la popup indique lequel choisir.
 - **Lot absent** : prix estimé depuis les autres lots (proposé, jamais validé automatiquement).
@@ -130,7 +130,7 @@ Le tableau « Actuellement en vente », la quantité et le prix moyen sont aux m
 
 1. Sélectionnez une de vos ventes. **Ton prix** : coin haut-gauche puis bas-droit du champ « Prix du lot » → **Ctrl+Alt+F7** deux fois. Le texte surligné en bleu est géré.
 2. **Modifier** : souris sur le bouton → **Ctrl+Alt+F8**. Sans calibration, F3 appuie sur Entrée.
-3. Pour Ctrl+F3 seulement : souris au centre de la 1re ligne de la liste → **Ctrl+Alt+F9**, puis au centre de la 2e ligne → **Ctrl+Alt+F9**. Réglez `RELIST_ROWS` (lignes entièrement visibles, 10 par défaut), `RELIST_SCROLL` (crans de molette), puis activez l'interrupteur « CTRL+F3 : toute la liste » (ou `"RELIST_AUTO": true`).
+3. Pour Ctrl+F3 seulement : souris au centre de la 1re ligne de la liste → **Ctrl+Alt+F9**, puis au centre de la 2e ligne → **Ctrl+Alt+F9**. Réglez `RELIST_ROWS` (lignes entièrement visibles, 10 par défaut), puis activez l'interrupteur « CTRL+F3 : toute la liste » (ou `"RELIST_AUTO": true`).
 
 Chaque modification de prix peut être taxée par le jeu : ne relancez pas en boucle pour 1 kama.
 

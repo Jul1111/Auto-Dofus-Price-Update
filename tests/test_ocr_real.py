@@ -122,3 +122,19 @@ def test_reads_quantity_with_dropdown_frame(monkeypatch, name):
     import pytesseract
     d = pytesseract.image_to_data(q, config=core.OCR_CONFIG, output_type=pytesseract.Output.DICT)
     assert core.parse_number(d, (0, q.shape[0])).value == 1
+
+
+def test_reads_own_price_in_same_ocr_call(monkeypatch):
+    # F3 / Ctrl+F3 : ton prix lu dans le MÊME appel Tesseract que le tableau (plus rapide)
+    _patch_fixture(monkeypatch, "hdv_mesventes.png")
+    cfg = core.Config(table_region=[30, 462, 180, 128], qty_region=[16, 229, 90, 22],
+                      avg_region=[14, 331, 60, 20], mine_region=[16, 172, 125, 22])
+    sr = core.read_screen(cfg, with_mine=True)
+    assert sr.mine_r.value == 774 and sr.selected == 1 and sr.avg == 1189 and sr.values[1] == 760
+
+
+def test_reads_table_with_pale_item_icons(monkeypatch):
+    # Laine Céleste : icônes blanches (pas assez colorées pour le masque) -> lots perdus avant
+    w, h = _patch_fixture(monkeypatch, "tableau_laine_celeste.png")
+    sr = core.read_screen(core.Config(table_region=[0, 0, w, h]))
+    assert sr.values == {1: 149, 10: 1499, 100: 22294}

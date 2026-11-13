@@ -139,7 +139,7 @@ class Config:
     # « Mettre à jour mes ventes » (F3 / Ctrl+F3)
     relist_auto: bool = False         # Ctrl+F3 : parcourir toute la liste seul (risque CGU : à toi de voir)
     relist_rows: int = 10             # lignes entièrement visibles dans la liste
-    relist_scroll: int = 3            # crans de molette entre deux pages
+    relist_scroll_max: int = 40       # crans de molette max pour passer une page
     relist_max: int = 120             # lignes traitées max par appui
     relist_delay: float = 0.5         # s après un clic sur une ligne / une modification
 
@@ -213,6 +213,20 @@ class Config:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, path)  # écriture atomique
+
+
+def zone_hint(name: str, region) -> Optional[str]:
+    """Conseil si une zone calibrée semble mal taillée (trop serrée = chiffres coupés)."""
+    x, y, w, h = region
+    if name in ("qty", "avg", "count", "mine") and h < 18:
+        return f"zone haute de {h} px seulement : les chiffres risquent d'être coupés, ajoute de la marge en haut et en bas"
+    if name in ("avg", "count") and w < 40:
+        return f"zone large de {w} px seulement : prends tout le nombre avec de la marge"
+    if name == "count" and w < 70:
+        return "prends toute la ligne « 21/100 lots en vente »"
+    if name == "table" and h < 60:
+        return "le tableau doit couvrir les 4 lignes (lot 1 à lot 1000)"
+    return None
 
 
 def rect_from_points(p1: Point, p2: Point) -> Region:
@@ -310,6 +324,7 @@ class ScreenRead:
     avg: Optional[int] = None            # « Prix moyen » (par objet), None = non lu / non calibré
     listed: Optional[Tuple[int, int]] = None  # compteur (n, max), rempli par le test de lecture
     mine: Optional[int] = None                # ton prix (mes ventes), rempli par le test de lecture
+    mine_r: Optional["Reading"] = None        # ton prix lu dans le même appel OCR (mes ventes)
 
     @property
     def values(self) -> Dict[int, Optional[int]]:
@@ -383,7 +398,26 @@ def preprocess(img_bgr: np.ndarray, scale: int = 2) -> np.ndarray:
             th = th2
     if np.mean(th) < 127:  # fond sombre majoritaire -> inverser
         th = cv2.bitwise_not(th)
+    th = _drop_big_blobs(th, scale)
     return cv2.copyMakeBorder(th, BORDER, BORDER, BORDER, BORDER, cv2.BORDER_CONSTANT, value=255)
+
+
+def _drop_big_blobs(th: np.ndarray, scale: int) -> np.ndarray:
+    """Efface les taches noires trop grandes pour être un chiffre : icônes d'objet
+    PÂLES (laine céleste, plumes : pas assez colorées pour le masque de couleur),
+    traits de séparation. Un chiffre Dofus fait ~10 px de haut à l'échelle 1."""
+    import cv2
+    ink = (th == 0).astype(np.uint8)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    if n <= 1:
+        return th
+    h, w = stats[1:, cv2.CC_STAT_HEIGHT], stats[1:, cv2.CC_STAT_WIDTH]
+    big = (h > 16 * scale) | (w > 24 * scale)
+    if not big.any():
+        return th
+    out = th.copy()
+    out[np.isin(lab, np.where(big)[0] + 1)] = 255
+    return out
 
 
 def stack_images(imgs: List[np.ndarray], gap: int = 30) -> Tuple[np.ndarray, List[Tuple[int, int]]]:
@@ -470,8 +504,8 @@ def parse_number(data: Dict[str, list], bounds: Tuple[int, int]) -> Reading:
     return Reading(int("".join(w[1] for w in ws)), min(w[2] for w in ws), " ".join(w[1] for w in ws))
 
 
-def read_screen(cfg: Config, debug_dir: Optional[Path] = None) -> ScreenRead:
-    """Tableau + quantité en UN appel Tesseract."""
+def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool = False) -> ScreenRead:
+    """Tableau + quantité (+ prix moyen, + ton prix) en UN appel Tesseract."""
     import pytesseract
     if not cfg.table_region:
         return ScreenRead()
@@ -481,6 +515,12 @@ def read_screen(cfg: Config, debug_dir: Optional[Path] = None) -> ScreenRead:
     if cfg.avg_region:
         regions.append(tuple(cfg.avg_region))
     imgs = [preprocess(grab_screen(r), cfg.scale) for r in regions]
+    mine_img = None
+    if with_mine and cfg.mine_region:
+        # même échelle que le reste : à ×4 le texte est trop grand pour cet appel groupé
+        mine_img = preprocess_field(grab_screen(tuple(cfg.mine_region)), cfg.scale)
+        if mine_img is not None:
+            imgs.append(mine_img)
     comp, bounds = stack_images(imgs)
     if debug_dir:
         import cv2
@@ -494,15 +534,68 @@ def read_screen(cfg: Config, debug_dir: Optional[Path] = None) -> ScreenRead:
         res.selected_raw = q.raw
         res.selected = q.value if q.value in cfg.lots else None
     if cfg.avg_region:
-        a = parse_number(data, bounds[-1])
+        a = parse_number(data, bounds[len(regions) - 1])
         res.avg = a.value if a.value and a.confidence >= cfg.min_confidence else None
+    if mine_img is not None:
+        res.mine_r = parse_number(data, bounds[-1])
     return res
 
 
-def preprocess_field(img_bgr: np.ndarray, scale: int = 4) -> np.ndarray:
-    """Champ « Prix du lot » : texte souvent SÉLECTIONNÉ (fond bleu). Le masque des couleurs
-    effacerait tout -> on recadre sur le surlignage bleu puis Otsu, sinon traitement normal."""
+def _same_row(a: np.ndarray, b: np.ndarray) -> bool:
+    """Deux lignes de la liste identiques (au survol / anticrénelage près)."""
+    if a.shape != b.shape:
+        return False
+    return float(np.abs(a.astype(np.int16) - b.astype(np.int16)).mean()) < 2.0
+
+
+def wait_change(region: Optional[Region], before: Optional[np.ndarray], timeout: float,
+                min_wait: float = 0.05) -> None:
+    """Attend que la zone change à l'écran (panneau mis à jour), au plus `timeout` s.
+    Remplace une pause fixe : le jeu répond souvent en ~0,1 s."""
+    time.sleep(min_wait)
+    if region is None or before is None:
+        time.sleep(max(0.0, timeout - min_wait))
+        return
+    end = time.time() + timeout - min_wait
+    while time.time() < end:
+        if not np.array_equal(grab_screen(region), before):
+            time.sleep(0.03)  # laisser finir l'affichage
+            return
+        time.sleep(0.03)
+
+
+def _find_field(img_bgr: np.ndarray) -> Optional[np.ndarray]:
+    """Dans une zone trop large, isole le champ « Prix du lot » : rectangle presque NOIR
+    (bien plus sombre que le panneau), large et peu haut."""
     import cv2
+    if img_bgr.shape[1] < 220 and img_bgr.shape[0] < 60:
+        return img_bgr  # zone déjà ajustée au champ
+    best = None
+    # champ sélectionné : ~8 ; champ non sélectionné : ~27 (panneau ~40)
+    for limit in (20, 33):
+        dark = (img_bgr.max(axis=2) < limit).astype(np.uint8)
+        n, _, stats, _ = cv2.connectedComponentsWithStats(dark)
+        for k in range(1, n):
+            x, y, w, h, area = (int(v) for v in stats[k])
+            if 60 <= w <= 400 and 12 <= h <= 60 and w >= 3 * h and area >= 0.6 * w * h:
+                if best is None or area > best[4]:
+                    best = (x, y, w, h, area)
+        if best is not None:
+            break
+    if best is None:
+        return None  # pas de champ (vente désélectionnée) : ne pas lire toute la zone
+    x, y, w, h, _ = best
+    return img_bgr[y:y + h, x:x + w]
+
+
+def preprocess_field(img_bgr: np.ndarray, scale: int = 4) -> Optional[np.ndarray]:
+    """Champ « Prix du lot ». Zone trop large -> on y retrouve le champ (rectangle noir).
+    Texte souvent SÉLECTIONNÉ (fond bleu) : le masque des couleurs effacerait tout ->
+    recadrage sur le surlignage puis Otsu ; sinon traitement normal du champ seul."""
+    import cv2
+    img_bgr = _find_field(img_bgr)
+    if img_bgr is None:
+        return None
     c = img_bgr.astype(int)
     hl = (c[:, :, 0] > 110) & (c[:, :, 0] > c[:, :, 2] + 40)
     if hl.sum() < 20:
@@ -526,6 +619,8 @@ def read_mine(cfg: Config) -> Reading:
     if not cfg.mine_region:
         return Reading(None, -1.0, "")
     img = preprocess_field(grab_screen(tuple(cfg.mine_region)))
+    if img is None:
+        return Reading(None, -1.0, "")
     data = pytesseract.image_to_data(img, config=OCR_CONFIG, output_type=pytesseract.Output.DICT)
     return parse_number(data, (0, img.shape[0]))
 
@@ -748,10 +843,54 @@ def click_at(p: Point) -> None:
     pyautogui.click(*p)
 
 
+WHEEL_DELTA = 120  # un cran de molette sous Windows
+
+
 def scroll_at(p: Point, notches: int) -> None:
+    """Molette vers le bas de `notches` crans. Sous Windows, pyautogui.scroll(n) envoie n
+    BRUT (1 = 1/120 de cran) : il faut multiplier par 120, sinon la liste bouge à peine."""
     import pyautogui
     pyautogui.moveTo(*p)
-    pyautogui.scroll(-abs(notches))
+    pyautogui.scroll(-abs(notches) * (WHEEL_DELTA if IS_WINDOWS else 1))
+
+
+def measure_shift(before: np.ndarray, after: np.ndarray, step: int,
+                  expected: Optional[int] = None) -> Optional[int]:
+    """Déplacement vers le haut (px) du contenu de la liste entre deux captures.
+    Bande de 2 lignes de `after` recherchée dans `before`. Lignes identiques (même objet,
+    même prix) = plusieurs positions possibles : on garde la plus proche du déplacement
+    précédent (un cran de molette défile toujours pareil), sinon la plus petite.
+    None = introuvable (défilé de plus de ~6 lignes d'un coup)."""
+    import cv2
+    a = cv2.cvtColor(before, cv2.COLOR_BGR2GRAY) if before.ndim == 3 else before
+    b = cv2.cvtColor(after, cv2.COLOR_BGR2GRAY) if after.ndim == 3 else after
+    if a.shape != b.shape:
+        return None
+    if np.abs(a.astype(int) - b.astype(int)).mean() < 0.5:
+        return 0
+    h = a.shape[0]
+    band_y, band_h = step, min(2 * step, h - step - 1)
+    if band_h < step // 2:
+        return None
+    band = b[band_y:band_y + band_h]
+    res = cv2.matchTemplate(a[band_y:], band, cv2.TM_CCOEFF_NORMED)[:, 0]
+    best = float(res.max())
+    if best < 0.8:
+        return None
+    cands = [int(i) for i in np.where(res >= best - 0.03)[0]]
+    # positions voisines = même pic : garder le centre de chaque pic
+    peaks, cur = [], [cands[0]]
+    for c in cands[1:]:
+        if c - cur[-1] <= 2:
+            cur.append(c)
+        else:
+            peaks.append(cur)
+            cur = [c]
+    peaks.append(cur)
+    ds = [max(p, key=lambda i: res[i]) for p in peaks]
+    if expected:
+        return min(ds, key=lambda d: (abs(d - expected), d))
+    return min(ds)
 
 
 def beep(kind: str, cfg: Config) -> None:
@@ -893,8 +1032,12 @@ class PriceEngine:
             return Result(None, "error",
                           f"[{tag}] Zone « ton prix » non calibrée ({cfg.hotkeys['calibrate_mine']} ×2).",
                           hint="Calibre ton prix")
-        sr = read_screen(cfg, self.debug_dir)
-        mine = read_mine(cfg)
+        sr = read_screen(cfg, self.debug_dir, with_mine=True)
+        mine = sr.mine_r
+        if mine is None or mine.value is None or mine.confidence < cfg.min_confidence:
+            alone = read_mine(cfg)  # 2e lecture seule, plus grande : garder la plus sûre
+            if mine is None or alone.confidence > mine.confidence:
+                mine = alone
         lot = sr.selected
         if lot is None:
             return Result(None, "error", f"[{tag}] Quantité illisible (lu : {sr.selected_raw!r}).", sr,
@@ -941,10 +1084,12 @@ class PriceEngine:
                           sr, new_p, hint="Suspect")
         self._pending = None
         input_price(new_p, cfg, paste=True, validate=False)
-        time.sleep(0.15)
+        time.sleep(0.1)
+        mine_box = tuple(cfg.mine_region)
+        before = grab_screen(mine_box)
         press_modify(cfg)
         self._my_last[lot] = (new_p, time.time())
-        time.sleep(cfg.relist_delay)
+        wait_change(mine_box, before, cfg.relist_delay)
         # Après « Modifier », le jeu désélectionne la vente : panneau vide (« Veuillez
         # sélectionner un objet ») = modification acceptée. Ancien prix encore affiché = échec.
         check = read_mine(cfg)
@@ -961,55 +1106,134 @@ class PriceEngine:
         return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}", sr, new_p,
                       hint=f"Modifié : {new_p}")
 
+    def _visible_rows(self, shift: int) -> List[Tuple[int, int]]:
+        """Lignes cliquables après un défilement de `shift` px depuis le haut :
+        [(y écran du centre, numéro global de la ligne)]. Le jeu défile au pixel près :
+        une ligne trop coupée en haut est ignorée (elle a déjà été traitée)."""
+        cfg = self.cfg
+        x0, y0 = cfg.relist_row
+        step = cfg.relist_step
+        offset = shift % step
+        y = y0 - offset
+        if offset > 0.35 * step:
+            y += step
+        y_max = y0 + (cfg.relist_rows - 1) * step + 0.3 * step
+        rows = []
+        while y <= y_max:
+            rows.append((int(y), int(round((y - y0 + shift) / step))))
+            y += step
+        return rows
+
+    def _scroll_page(self, box: Region, target: int) -> Tuple[int, Optional[str]]:
+        """Molette cran par cran en MESURANT le déplacement réel de la liste, jusqu'à
+        `target` px (≈ une page moins une ligne). Retourne (px défilés, erreur).
+        0 px après 2 crans = bas de la liste."""
+        cfg = self.cfg
+        x0, y0 = cfg.relist_row
+        anchor = (x0, y0 + cfg.relist_step)
+        prev = grab_screen(box)
+        total, zeros, per_notch, notches = 0, 0, None, 0
+        max_jump = 5 * cfg.relist_step     # au-delà, la mesure ne retrouve plus la liste
+        while notches < cfg.relist_scroll_max:
+            # 1er essai : 1 cran pour mesurer ; ensuite autant de crans que nécessaire d'un coup
+            n = 1
+            if per_notch:
+                n = max(1, min(int((target - total) // per_notch), int(max_jump // per_notch)))
+            scroll_at(anchor, n)
+            notches += n
+            time.sleep(0.12)
+            img = grab_screen(box)
+            d = measure_shift(prev, img, cfg.relist_step, per_notch * n if per_notch else None)
+            if d is None:
+                return total, "défilement non suivi (liste méconnaissable entre deux crans)"
+            prev = img
+            if d == 0:
+                zeros += 1
+                if zeros >= 2:
+                    break
+                continue
+            zeros, total = 0, total + d
+            per_notch = per_notch or d / n
+            if total >= target:
+                break
+        time.sleep(cfg.relist_delay)       # fin d'une éventuelle animation
+        img = grab_screen(box)
+        d = measure_shift(prev, img, cfg.relist_step, None)
+        if d is None:
+            return total, "défilement non suivi (animation)"
+        return total + d, None
+
     def _relist_all(self) -> Result:
         """Parcourt la liste « mes ventes » : clic sur chaque ligne visible, mise à jour,
-        puis molette et page suivante. Arrêt : liste qui ne bouge plus (en bas), lecture
+        puis défilement mesuré et lignes suivantes. Arrêt : bas de la liste, lecture
         suspecte, modification non confirmée, pause, RELIST_MAX lignes."""
         cfg = self.cfg
         if not cfg.relist_auto:
-            return Result(None, "warn", "[MAJ] Mode boucle désactivé (RELIST_AUTO = false). "
-                          f"Utilise {cfg.hotkeys['relist']} ligne par ligne.", hint="Boucle désactivée")
+            return Result(None, "warn", "[MAJ] Mode boucle désactivé (interrupteur « toute la liste » "
+                          f"ou RELIST_AUTO). Utilise {cfg.hotkeys['relist']} ligne par ligne.",
+                          hint="Boucle désactivée")
         if not cfg.relist_row or cfg.relist_step <= 0:
             return Result(None, "error", f"[MAJ] Lignes non calibrées ({cfg.hotkeys['calibrate_rows']} ×2).",
                           hint="Calibre les lignes")
         x0, y0 = cfg.relist_row
         step = cfg.relist_step
-        # Une modification RÉORDONNE la liste (la ligne change de place) : après chaque
-        # modification on reprend la page depuis la 1re ligne. Les lignes déjà au bon prix
-        # sont relues sans rien faire ; aucune ligne n'est sautée.
-        list_box = (x0 - 60, y0 - step // 2, 120, step * cfg.relist_rows)
+        # bande de la liste (noms, durée, lot, prix ; sans la barre de défilement)
+        box = (x0 - 80, y0 - step // 2, 260, step * cfg.relist_rows)
         back = mouse_position()
-        done = changed = same = 0
+        done = changed = same = pages = shift = 0
+        seen = -1                     # plus grand numéro global de ligne déjà traité
+        ok_rows: List[np.ndarray] = []  # images de lignes déjà au bon prix (même objet, même prix)
+        skipped = 0
+        mine_box = tuple(cfg.mine_region) if cfg.mine_region else None
         stop = "fin de la liste"
-        pages = 0
         try:
             while True:
-                i = 0
-                while i < cfg.relist_rows:
-                    if self.paused:
-                        stop = "pause"
-                        raise StopIteration
-                    if done >= cfg.relist_max:
-                        stop = f"limite {cfg.relist_max} lignes"
-                        raise StopIteration
-                    click_at((x0, y0 + i * step))
-                    time.sleep(cfg.relist_delay)
-                    res = self._relist(auto=True)
-                    done += 1
-                    if res.level != "ok":
-                        stop = f"ligne {i + 1} : {res.message}"
-                        raise StopIteration
-                    if "modifié" in res.message:
-                        changed += 1
-                        i = 0
-                    else:
+                rows = self._visible_rows(shift)
+                restart = True
+                while restart:
+                    restart = False
+                    for y, g in rows:
+                        if g <= seen:
+                            continue
+                        if self.paused:
+                            stop = "pause"
+                            raise StopIteration
+                        if done >= cfg.relist_max:
+                            stop = f"limite {cfg.relist_max} lignes"
+                            raise StopIteration
+                        # Ligne identique (même objet, même prix) à une ligne déjà au bon prix :
+                        # même résultat garanti -> pas de clic ni de lecture.
+                        row_img = grab_screen((x0 - 90, y - step // 2 + 4, 430, step - 8))
+                        if any(_same_row(row_img, r) for r in ok_rows):
+                            same += 1
+                            skipped += 1
+                            seen = max(seen, g)
+                            continue
+                        before = grab_screen(mine_box) if mine_box else None
+                        click_at((x0, y))
+                        wait_change(mine_box, before, cfg.relist_delay)
+                        res = self._relist(auto=True)
+                        done += 1
+                        if res.level != "ok":
+                            stop = f"ligne {g + 1} : {res.message}"
+                            raise StopIteration
+                        if "modifié" in res.message:
+                            # la ligne modifiée change de place : on reprend cette page
+                            changed += 1
+                            seen = rows[0][1] - 1
+                            restart = True
+                            break
                         same += 1
-                        i += 1
-                before = grab_screen(list_box)
-                scroll_at((x0, y0 + step), cfg.relist_scroll)
-                time.sleep(cfg.relist_delay)
-                if np.array_equal(before, grab_screen(list_box)):
-                    break  # la liste n'a pas bougé : en bas
+                        seen = max(seen, g)
+                        if len(ok_rows) < 200:
+                            ok_rows.append(row_img)
+                moved, err = self._scroll_page(box, max(step, (len(rows) - 1) * step))
+                if err:
+                    stop = err
+                    break
+                if moved <= 0:
+                    break  # la liste ne bouge plus : en bas
+                shift += moved
                 pages += 1
         except StopIteration:
             pass
@@ -1020,7 +1244,8 @@ class PriceEngine:
             except Exception:
                 pass
         level = "ok" if stop == "fin de la liste" else "warn"
-        return Result(None, level, f"[MAJ TOUT] {done} lignes vues ({pages + 1} pages) : "
+        return Result(None, level, f"[MAJ TOUT] {done + skipped} lignes vues ({pages + 1} pages, "
+                      f"{skipped} identiques sautées) : "
                       f"{changed} modifiées, {same} déjà au bon prix | arrêt : {stop}",
                       hint=f"{changed} modifiées")
 

@@ -554,7 +554,9 @@ def relist_engine(monkeypatch):
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     monkeypatch.setattr(core, "read_mine",
                         lambda c: core.Reading(state["mine"].pop(0), 95) if state["mine"] else core.Reading(None, -1))
-    monkeypatch.setattr(core, "read_screen", lambda c, d=None: state["screens"].pop(0))
+    monkeypatch.setattr(core, "read_screen", lambda c, d=None, with_mine=False: state["screens"].pop(0))
+    monkeypatch.setattr(core, "grab_screen", lambda r: np.zeros((2, 2, 3), np.uint8))
+    monkeypatch.setattr(core, "wait_change", lambda *a, **k: None)
     cfg = core.Config(table_region=[0, 0, 1, 1], qty_region=[0, 0, 1, 1], mine_region=[0, 0, 1, 1])
     return core.PriceEngine(cfg), calls, state
 
@@ -618,21 +620,79 @@ def test_relist_all_disabled_by_default(relist_engine):
 def test_relist_all_scrolls_until_list_stops(relist_engine, monkeypatch):
     eng, calls, st = relist_engine
     eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 2
-    clicks, scrolls = [], []
+    clicks = []
     monkeypatch.setattr(core, "click_at", lambda p: clicks.append(p))
-    monkeypatch.setattr(core, "scroll_at", lambda p, n: scrolls.append(n))
     monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
-    pages = iter([np.zeros((2, 2, 3)), np.ones((2, 2, 3)),     # page 1 -> 2 : a bougé
-                  np.ones((2, 2, 3)), np.ones((2, 2, 3))])     # page 2 -> fin : immobile
-    monkeypatch.setattr(core, "grab_screen", lambda r: next(pages))
+    moves = iter([(50, None), (0, None)])            # 1 ligne de plus, puis en bas
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: next(moves))
+    n = [0]                                          # chaque capture différente : rien d'identique
+    monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
+                        np.full((4, 4, 3), n[0] * 7 % 250, np.uint8))
     # page 1 : ligne à modifier (panneau vidé ensuite = accepté) -> la liste a bougé :
-    # reprise en 1re ligne (déjà OK), 2e ligne OK ; page 2 : deux lignes déjà OK
-    st["screens"] = [scr({1: 760}), scr({1: 759}), scr({1: 87}), scr({1: 76}), scr({1: 76})]
-    st["mine"] = [774, None, 759, 87, 76, 76]
+    # reprise en 1re ligne (déjà OK), 2e ligne OK ; page 2 : seule la nouvelle ligne est lue
+    st["screens"] = [scr({1: 760}), scr({1: 759}), scr({1: 87}), scr({1: 76})]
+    st["mine"] = [774, None, 759, 87, 76]
     res = eng.relist_all()
-    assert res.level == "ok" and "5 lignes" in res.message and "1 modifiées" in res.message
-    assert clicks == [(100, 100), (100, 100), (100, 150), (100, 100), (100, 150)]
-    assert len(scrolls) == 2
+    assert res.level == "ok" and "4 lignes" in res.message and "1 modifiées" in res.message
+    assert clicks == [(100, 100), (100, 100), (100, 150), (100, 150)]
+
+
+def test_visible_rows_after_pixel_scroll():
+    eng = core.PriceEngine(core.Config(relist_row=[0, 100], relist_step=50, relist_rows=4))
+    assert eng._visible_rows(0) == [(100, 0), (150, 1), (200, 2), (250, 3)]
+    assert eng._visible_rows(10) == [(90, 0), (140, 1), (190, 2), (240, 3)]  # petit décalage
+    assert eng._visible_rows(40)[0] == (110, 1)           # 1re ligne trop coupée : ignorée
+    assert eng._visible_rows(150)[0] == (100, 3)
+
+
+def _list_image(n_rows=20, step=50, seed=0, identical=False):
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n_rows):
+        v = 0 if identical else i
+        r = np.full((step, 120), 40, np.uint8)
+        r[0:2] = 90                                       # séparation de ligne
+        r[15:35, 10:10 + 5 * ((v % 9) + 1)] = 200         # « texte » variable
+        r[15:35, 80:90] = 120 + (v * 13) % 100
+        rows.append(r)
+    return np.vstack(rows) + rng.integers(0, 3, (n_rows * step, 120)).astype(np.uint8)
+
+
+@pytest.mark.parametrize("d", [0, 7, 23, 50, 73, 140])
+def test_measure_shift(d):
+    full = _list_image()
+    a, b = full[0:400], full[d:d + 400]
+    assert core.measure_shift(a, b, 50) == d
+
+
+def test_measure_shift_identical_rows_uses_expected():
+    full = _list_image(identical=True)
+    a, b = full[0:400], full[30:430]
+    assert core.measure_shift(a, b, 50, expected=30) == 30
+    assert core.measure_shift(a, b, 50) == 30            # plus petit candidat
+
+
+def test_scroll_page_measures_until_target(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = [60, 25], 50, 8
+    full = _list_image(40)
+    pos = [0]
+    steps = []
+    monkeypatch.setattr(core, "scroll_at", lambda p, n: steps.append(n) or
+                        pos.__setitem__(0, min(pos[0] + 30 * n, 1600)))
+    monkeypatch.setattr(core, "grab_screen", lambda r: full[pos[0]:pos[0] + 400])
+    moved, err = eng._scroll_page((0, 0, 120, 400), 350)
+    assert err is None and moved == pos[0] and moved >= 350
+    assert steps[0] == 1 and max(steps) > 1 and len(steps) <= 4   # crans groupés après la mesure
+
+
+def test_scroll_page_bottom(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_row, eng.cfg.relist_step = [60, 25], 50
+    img = _list_image()[0:400]
+    monkeypatch.setattr(core, "scroll_at", lambda p, n: None)
+    monkeypatch.setattr(core, "grab_screen", lambda r: img)
+    assert eng._scroll_page((0, 0, 120, 400), 350) == (0, None)
 
 
 def test_relist_panel_cleared_means_done(relist_engine):
@@ -653,3 +713,34 @@ def test_relist_all_stops_on_suspect(relist_engine, monkeypatch):
     st["mine"] = [774]
     res = eng.relist_all()
     assert res.level == "warn" and "SUSPECT" in res.message and ("paste", 99) not in calls
+
+
+def test_relist_all_skips_identical_rows(relist_engine, monkeypatch):
+    # 3 lignes identiques (même objet, même prix) déjà au bon prix : 1 seule lue
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 3
+    clicks = []
+    monkeypatch.setattr(core, "click_at", lambda p: clicks.append(p))
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    st["screens"] = [scr({1: 34})]
+    st["mine"] = [34]
+    res = eng.relist_all()
+    assert clicks == [(100, 100)] and "2 identiques sautées" in res.message and res.level == "ok"
+
+
+def test_zone_hint():
+    assert core.zone_hint("count", (0, 0, 49, 11))       # zone du compteur trop petite
+    assert core.zone_hint("avg", (0, 0, 17, 15))
+    assert core.zone_hint("count", (0, 0, 140, 22)) is None
+    assert core.zone_hint("mine", (0, 0, 667, 513)) is None  # grande zone : le champ est retrouvé
+
+
+def test_find_field_in_large_zone():
+    img = np.full((300, 600, 3), 40, np.uint8)
+    img[100:125, 50:180] = 27                            # champ non sélectionné
+    img[105:118, 60:75] = 220                            # « 76 »
+    f = core._find_field(img)
+    assert f is not None and f.shape[:2] == (25, 130)
+    img[100:125, 50:180] = 40                            # vente désélectionnée : plus de champ
+    assert core._find_field(img) is None

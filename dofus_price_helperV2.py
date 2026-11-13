@@ -65,6 +65,9 @@ def main() -> int:
             print(f"[Calib] {name} : coin 1 = {val}. Souris sur le coin opposé, puis ré-appuie.")
         else:
             print(f"[Calib] {name} = {val}")
+            hint = core.zone_hint(name, val)
+            if hint:
+                print(f"[Calib] Attention : {hint}")
 
     def calib_point(name):
         print(f"[Calib] {name} = {engine.calibrate_point(name)}")

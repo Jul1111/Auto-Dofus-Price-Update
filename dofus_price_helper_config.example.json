@@ -34,7 +34,7 @@
   "VERIFY_COUNT": true,
   "RELIST_AUTO": false,
   "RELIST_ROWS": 10,
-  "RELIST_SCROLL": 3,
+  "RELIST_SCROLL_MAX": 40,
   "RELIST_MAX": 120,
   "RELIST_DELAY": 0.5,
   "AUTO_PASTE": false,
