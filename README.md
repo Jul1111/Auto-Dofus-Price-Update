@@ -1,10 +1,8 @@
-# 🪙 Dofus Price Helper   
+# 🪙 Dofus Price Helper
 
-Un outil Python pour **optimiser vos ventes en Hôtel de Vente sur Dofus**. Il utilise l’OCR (Tesseract) pour lire automatiquement les prix affichés et coller un prix ajusté (undercut configurable).  
+Un outil Python pour **vendre plus vite à l'Hôtel de Vente de Dofus**. Il lit le tableau « Actuellement en vente » par OCR (Tesseract), calcule un prix juste en dessous (undercut configurable) et le saisit dans « Prix du lot ».
 
-🛑 **Disclaimer:** Ce projet n’est pas un bot mais un outil d’assistance. Respectez les conditions d’utilisation du jeu : utilisez-le comme une aide au confort de vente, pas pour automatiser des actions massives.
-
-⚠️ Ce script est un **assistant** (OCR + collage clavier), pas un bot full-auto. À utiliser de manière responsable.
+> ⚠️ **Avertissement.** Les conditions d'utilisation d'Ankama interdisent en général les logiciels tiers qui interagissent avec le client de jeu. Ce projet est un assistant (lecture d'écran + collage), pas un bot. Le **collage automatique** et surtout la **mise en vente automatique** sont les fonctions les plus risquées : elles sont **désactivées par défaut**. Vous les utilisez à vos risques.
 
 ---
 https://github.com/user-attachments/assets/9d1fd908-4398-410b-accb-64e54f98fd78
@@ -14,133 +12,174 @@ https://github.com/user-attachments/assets/9d1fd908-4398-410b-accb-64e54f98fd78
 ---
 
 ## ✨ Fonctionnalités
-- **Interface graphique (CustomTkinter)** avec logs colorés
-- **Hotkeys pour lire les prix (lots 1 / 10 / 100)**
-- **Collage direct du prix ajusté**
-- **Calibration des zones par raccourci (Ctrl+Alt+F1/F2/F3)**
-- **Historique & options d'undercut**
-- **Détection du lot optimal (F4)**
+
+- **Lecture du tableau entier** (lots 1 / 10 / 100 / 1000) en un seul appel OCR. Chaque prix est associé à son lot grâce à la colonne « Lot » : si personne ne vend un lot, rien n'est décalé.
+- **Lecture de la quantité sélectionnée** : le prix collé correspond **toujours** à la quantité affichée dans le jeu.
+- **F1** : vendre à la quantité affichée (le jeu choisit déjà 1 / 10 / 100 selon votre stock).
+- **F2 « Tout vendre »** : met en vente puis recommence **au même prix** en appuyant seulement sur Entrée (le jeu garde le prix affiché). Quand la quantité affichée baisse (ex. 42 objets : 4×10, puis il en reste 2 → lot 1), il calcule le prix du nouveau lot et continue, après avoir vérifié que c'est le même objet (votre dernière vente est en tête de l'ancien lot). Arrêt : stock épuisé, prix en tête qui n'est plus le vôtre (autre objet, concurrent), lecture suspecte, 20 ventes (`SELL_ALL_MAX`) ou pause (Ctrl+Alt+P). Jamais vers un lot plus grand.
+- **Garde-fou « Prix moyen »** (optionnel, Ctrl+Alt+F5) : si le prix par objet tombe sous 50 % du « Prix moyen » affiché par le jeu (`MIN_AVG_RATIO`), la vente est marquée suspecte (prix copié seulement). Protège contre un chiffre mal lu ou un prix piège.
+- **F2 vérifié par le compteur** (optionnel, Ctrl+Alt+F6) : après chaque mise en vente, le compteur « 21/100 lots en vente » doit avoir augmenté de 1. Sinon F2 s'arrête (« vente non confirmée »). Arrêt aussi quand l'HDV est plein.
+- **F3 « Mettre à jour mes ventes »** : dans la liste de vos ventes, sélectionnez une ligne puis F3. Si quelqu'un est moins cher, le nouveau prix est collé puis **Modifier** est validé, et le prix affiché ensuite est vérifié. Si le moins cher c'est vous : rien. Plusieurs lignes du même objet s'alignent sur votre nouveau prix (pas 759, 758, 757…).
+- **Ctrl+F3 « toute la liste »** ⚠️ (désactivé : interrupteur dans l'interface, ou `RELIST_AUTO`) : clique chaque ligne visible, met à jour, descend à la molette, recommence jusqu'en bas. Une modification réordonne la liste : la page est alors reprise depuis la 1re ligne (aucune ligne sautée). Arrêt à la moindre lecture suspecte ou modification non confirmée, ou Ctrl+Alt+P.
+- **Pas d'undercut contre vous-même** : si le prix en tête est celui que vous venez de mettre (même lot, < 30 min, `OWN_PRICE_TTL`), il est réutilisé tel quel.
+- **F4** : meilleur prix unitaire **parmi les lots possibles** (≤ quantité affichée, que le jeu met au maximum permis par votre stock). Si c'est un lot plus petit, la popup indique lequel choisir.
+- **Lot absent** : prix estimé depuis les autres lots (proposé, jamais validé automatiquement).
+- **Icônes ignorées** : les icônes kamas et objets (colorées) sont effacées avant l'OCR, donc la calibration n'a pas besoin d'être précise.
+- **Champ « Prix du lot » vidé** (Fin + Retour arrière, le jeu le pré-remplit) puis prix **collé** (Ctrl+V) ; le presse-papier est restauré ensuite.
+- **Popup près de la souris** + **son**, **pause**, raccourcis actifs **seulement dans Dofus**.
+- **Garde-fous** : confiance OCR, cohérence entre lots, prix toujours inférieur au concurrent.
+- **Historique** dans `dofus_price_history.csv`.
+
 ---
+
 ## ⌨️ Raccourcis clavier
 
-- **F1 / F2 / F3 → Lire et coller le prix (lots 1, 10, 100)**  
-- **F4 → Lire les 3 lots et coller le plus optimisé**  
-- **Ctrl+Alt+F1/F2/F3 → Calibrer une zone prix (placer la souris puis appuyer)**
-  
-ℹ️ Les boutons dans l’UI permettent aussi de calibrer manuellement si besoin.
+| Touche | Action |
+|---|---|
+| **F1** | Vendre à la quantité affichée |
+| **F2** | Tout vendre au même prix (arrêt automatique) |
+| **F4** | Meilleur lot (prix unitaire le plus haut) |
+| **Même touche 2×** (< 3 s) | Forcer une lecture suspecte |
+| **Ctrl+Alt+F1** (×2) | Calibrer le tableau : coin haut-gauche, puis coin bas-droit |
+| **Ctrl+Alt+F2** (×2) | Calibrer le menu Quantité : coin haut-gauche, puis coin bas-droit |
+| **Ctrl+Alt+F3** | Calibrer le champ « Prix du lot » |
+| **Ctrl+Alt+F4** | Calibrer le bouton « Mettre en vente » (seulement si `VALIDATE_METHOD` = `click`) |
+| **Ctrl+Alt+F5** (×2) | (optionnel) Calibrer la valeur sous « PRIX MOYEN » (chiffres + icône kamas) |
+| **Ctrl+Alt+F6** (×2) | (optionnel) Calibrer le compteur « 21/100 lots en vente » (toute la ligne) |
+| **F3** | Mes ventes : mettre à jour la ligne sélectionnée |
+| **Ctrl+F3** | Mes ventes : toute la liste, avec scroll (`RELIST_AUTO` = `true` requis) |
+| **Ctrl+Alt+F7** (×2) | Mes ventes : calibrer le texte du champ « Prix du lot » (votre prix actuel) |
+| **Ctrl+Alt+F8** | Mes ventes : calibrer le bouton « Modifier » (sinon Entrée) |
+| **Ctrl+Alt+F9** (×2) | Mes ventes : centre de la 1re ligne, puis de la 2e ligne de la liste |
+| **Ctrl+Alt+V** | Afficher les zones calibrées |
+| **Ctrl+Alt+P** | Pause / reprise |
+| **Ctrl+Alt+Q** | Quitter (version CLI) |
+
+Tous les raccourcis se changent dans `dofus_price_helper_config.json`, clé `HOTKEYS`.
 
 ---
+
 ## 🚀 Installation
 
 ### 1. Cloner le projet
 ```bash
 git clone https://github.com/Jul1111/Auto-Dofus-Price-Update
+cd Auto-Dofus-Price-Update
 ```
-#### 1.1 Déplacez vous dans le dossier
-```bash
-cd dofus-price-helper
-```
----
+
 ### 2. Créer un environnement virtuel
 
-#### Windows :
-
+Windows :
 ```bash
 python -m venv venv
-```
-
-```bash
 .\venv\Scripts\activate
 ```
-#### Linux / macOS :
+
+Linux / macOS :
 ```bash
 python3 -m venv venv
+source venv/bin/activate
 ```
-```bash
-source venv/bin/activatee
-```
----
-### 3. Installer les dépendances
-Un fichier requirements.txt est fourni. Installez les librairies nécessaires avec :
 
+### 3. Installer les dépendances
 ```bash
 pip install -r requirements.txt
 ```
----
+
 ### 4. Installer Tesseract OCR
 
-#### Windows : 
+- **Windows** : [télécharger ici](https://github.com/UB-Mannheim/tesseract/wiki) (dossier par défaut : `C:\Program Files\Tesseract-OCR\`)
+- **Linux** : `sudo apt install tesseract-ocr`
+- **macOS** : `brew install tesseract`
 
-**Télécharger [ici](https://github.com/UB-Mannheim/tesseract/wiki)** (par défaut, installez dans **"C:\Program Files\Tesseract-OCR\"**)
+Si Tesseract est installé ailleurs, modifiez `TESSERACT_CMD` dans la config. S'il est dans le PATH, il est trouvé automatiquement.
 
-#### Linux/macOS :
-```bash
-sudo apt install tesseract-ocr    # Debian/Ubuntu
-brew install tesseract # macOS
-```
-Dans le script adaptez la ligne si besoin :
-```python
-TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-```
----
-### ▶️ 5. Lancer le script
+### 5. Lancer
 
-### Version Ligne de commande :
-
-Toujours depuis le venv activé :
-```bash
-python dofus_price_helper_V2.py
-```
-Une fois lancé, le script tourne en arrière-plan et attend vos raccourcis clavier.
-
-### Version Interface Graphique
+Interface graphique (recommandé) :
 ```bash
 python dofus_price_helper_psg.py
 ```
-Une fenêtre s’ouvre avec :
 
-- Vos réglages (undercut, arrondi, min)
-- Les logs colorés en temps réel
-- Le lot recommandé après optimisation
+Ligne de commande :
+```bash
+python dofus_price_helperV2.py          # --debug pour enregistrer les images OCR dans captures/
+```
+
+ℹ️ Le module `keyboard` a besoin des droits administrateur sur certains PC Windows, et de root sous Linux.
+
 ---
-### 6. ⚙️ Paramétrage pour votre jeu
 
-- Chaque joueur doit calibrer les zones de prix **(lots 1/10/100)**, car elles dépendent de votre résolution et interface.
-- Le calibrage est rapide et sauvegardé automatiquement.
+## ⚙️ Premier réglage (1 minute)
 
+Ouvrez **l'Hôtel de Vente** → onglet **Vente**, avec un objet sélectionné.
 
-1. Ouvrez **l’Hôtel de Vente** → onglet **Vente**
-2. Placez la souris au **centre** du prix du lot 1
-3. Appuyez sur **Ctrl+Alt+F1**
-4. Faites de même pour le lot 10 **(Ctrl+Alt+F2)** et le lot 100 **(Ctrl+Alt+F3)**
+1. **Tableau** : souris sur le coin **haut-gauche** de la colonne « Lot » (ligne du lot 1) → **Ctrl+Alt+F1**. Puis souris sur le coin **bas-droit** de la colonne « Prix » (ligne du lot 1000) → **Ctrl+Alt+F1**. Pas besoin d'être précis : les icônes sont ignorées.
+2. **Quantité** : même chose sur le menu « Quantité » (coin haut-gauche puis bas-droit) → **Ctrl+Alt+F2** deux fois.
+3. **Prix du lot** (recommandé) : souris sur le champ → **Ctrl+Alt+F3**. L'option « Cliquer Prix du lot » s'active toute seule.
+4. **Mettre en vente** : inutile par défaut, la validation se fait avec **Entrée** (`"VALIDATE_METHOD": "enter"`). Pour cliquer le bouton à la place : `"click"` + calibrer avec **Ctrl+Alt+F4**.
+5. **Prix moyen** (optionnel) : coin haut-gauche puis bas-droit du nombre sous « PRIX MOYEN » → **Ctrl+Alt+F5** deux fois.
+6. **Compteur de lots** (optionnel, conseillé pour F2) : toute la ligne « 21/100 lots en vente », avec un peu de marge en haut et en bas → **Ctrl+Alt+F6** deux fois. Une zone qui coupe les chiffres peut lire « 91 » au lieu de « 21 » : F2 s'arrêtera alors après la 1re vente (sans risque), recalibrez plus large.
+7. **Ctrl+Alt+V** pour voir les zones, puis **Lire (test)** dans l'interface : la quantité et les 4 prix doivent être corrects.
 
-Les zones sont enregistrées dans ***dofus_price_helper_config.json***.
-  
+Les boutons de calibration de l'interface font la même chose, avec un compte à rebours de 3 s pour placer la souris.
+
+### Mes ventes (F3)
+
+Le tableau « Actuellement en vente », la quantité et le prix moyen sont aux mêmes endroits que dans l'onglet vente : rien à refaire. En plus :
+
+1. Sélectionnez une de vos ventes. **Ton prix** : coin haut-gauche puis bas-droit du champ « Prix du lot » → **Ctrl+Alt+F7** deux fois. Le texte surligné en bleu est géré.
+2. **Modifier** : souris sur le bouton → **Ctrl+Alt+F8**. Sans calibration, F3 appuie sur Entrée.
+3. Pour Ctrl+F3 seulement : souris au centre de la 1re ligne de la liste → **Ctrl+Alt+F9**, puis au centre de la 2e ligne → **Ctrl+Alt+F9**. Réglez `RELIST_ROWS` (lignes entièrement visibles, 10 par défaut), `RELIST_SCROLL` (crans de molette), puis activez l'interrupteur « CTRL+F3 : toute la liste » (ou `"RELIST_AUTO": true`).
+
+Chaque modification de prix peut être taxée par le jeu : ne relancez pas en boucle pour 1 kama.
+
 ---
-### 💡 Conseils d’utilisation
 
-- Toujours cliquer dans le champ **Prix du lot** avant d’appuyer sur **F1/F2/F3**.
+## ⚡ Vendre plus vite
 
-- Vérifiez visuellement les prix collés la première fois.
+| Niveau | Options (section **Vente rapide**) | Ce que vous faites par objet |
+|---|---|---|
+| Prudent (défaut) | aucune | F1 → clic sur « Prix du lot » → Ctrl+A → Ctrl+V → Mettre en vente |
+| Rapide | **Coller auto** + **Cliquer Prix du lot** | F1 → vérifier la popup → Mettre en vente |
+| Une touche ⚠️ | + **Mettre en vente auto** | F1 |
 
-- Ajustez la valeur d’undercut et l’arrondi directement dans l’UI.
+Une lecture **suspecte** (confiance faible, écart anormal entre lots, lot absent, quantité non vérifiée) n'est **jamais** mise en vente automatiquement : le prix est seulement copié, une popup jaune s'affiche, et il faut ré-appuyer pour le coller.
 
-- Si l’OCR lit mal, augmentez ***PRICE_W*** et ***ROW_H*** (taille des zones).
+Le champ est vidé avec Fin + Retour arrière (`"CLEAR_METHOD": "backspace"`) puis le prix est collé (`"INPUT_METHOD": "paste"`). La frappe chiffre par chiffre (`"type"`) existe mais ne marche pas en AZERTY (la touche « 6 » donne « - »).
+
 ---
-### 📂 Fichiers importants
 
-- dofus_price_helper_fixed.py → le script principal
+## 🛡️ Garde-fous
 
-- requirements.txt → dépendances Python
+| Contrôle | Réglage | Défaut |
+|---|---|---|
+| Prix collé = prix du lot de la **quantité affichée** | `QTY_REGION` | obligatoire pour F1 |
+| Confiance OCR minimale | `MIN_CONFIDENCE` | 60 |
+| Écart max de prix unitaire entre lots | `MAX_RATIO` | 5 |
+| Prix par objet ≥ 50 % du « Prix moyen » | `MIN_AVG_RATIO` (0 = off) | 0.5 |
+| F2 : compteur de lots = avant + nombre de ventes | `VERIFY_COUNT` | true |
+| Délai pour forcer en ré-appuyant | `CONFIRM_WINDOW` | 3 s |
+| Prix toujours < prix lu (même avec l'arrondi) | — | toujours |
+| Raccourcis seulement dans le jeu (exe **ou** titre) | `WINDOW_PROCESS` / `WINDOW_TITLE` | `dofus` / ` - Release` |
+| Vidage du champ puis collage | `CLEAR_METHOD` / `INPUT_METHOD` | `backspace` / `paste` |
 
-- dofus_price_helper_config.json → zones calibrées (générées automatiquement, à ne pas partager)
-
-- captures/ → images debug si DEBUG = True (optionnel)
-  
 ---
-### 🛑 Disclaimer
 
-**Ce projet n’est pas un bot mais un outil d’assistance.
-Respectez les conditions d’utilisation du jeu : utilisez-le comme une aide au confort de vente, pas pour automatiser des actions massives.**
+## 📂 Fichiers
 
+| Fichier | Rôle |
+|---|---|
+| `dofus_core.py` | Logique partagée (OCR, calcul, garde-fous, saisie, config, historique) |
+| `dofus_price_helper_psg.py` | Interface graphique |
+| `dofus_price_helperV2.py` | Version ligne de commande |
+| `dofus_price_helper_config.example.json` | Exemple de config avec toutes les options |
+| `dofus_price_helper_config.json` | Votre config (créée automatiquement, **non versionnée**) |
+| `dofus_price_history.csv` | Historique des ventes (non versionné) |
+| `tests/` | Tests, dont un OCR réel sur une capture de l'HDV (`pip install -r requirements-dev.txt` puis `pytest`) |
 
+---
+
+## 🛑 Disclaimer
+
+**Ce projet n'est pas un bot mais un outil d'assistance. Respectez les conditions d'utilisation du jeu : utilisez-le comme une aide au confort de vente, pas pour automatiser des actions massives.**

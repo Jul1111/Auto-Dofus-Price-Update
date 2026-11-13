@@ -1,10 +1,84 @@
-ts,action,lot,read_price,pasted_price,mode,value,rounding,min_price
-1758451720,auto_paste,1,3969,3968,fixed,1,none,1
-1758451732,recommend,auto,,,3968fixed,1,none,1
-1758451746,recommend,auto,,,3968fixed,1,none,1
-1758451762,recommend,auto,,,3968fixed,1,none,1
-1758454872,,auto_paste,1,36,35,fixed,1,none,1
-1758454878,,auto_paste,100,30000,29999,fixed,1,none,1
-1758454901,,auto_paste,100,12398,12397,fixed,1,none,1
-1758454917,,auto_paste,100,12398,12397,fixed,1,none,1
-1758454920,,auto_paste,10,657,656,fixed,1,none,1
+ts,datetime,action,lot,selected_qty,read_price,confidence,new_price,status,mode,value,rounding
+1794603901,2026-11-13 22:05:01,sell,1,1,600,95,599,saisi,fixed,1.0,none
+1794603917,2026-11-13 22:05:17,sell,1,1,600,95,599,saisi,fixed,1.0,none
+1794603921,2026-11-13 22:05:21,sell,1,1,600,95,599,saisi,fixed,1.0,none
+1794603937,2026-11-13 22:05:37,sell,1,1,600,95,599,saisi + mis en vente,fixed,1.0,none
+1794603946,2026-11-13 22:05:46,sell,1,1,600,95,599,saisi + mis en vente,fixed,1.0,none
+1794604052,2026-11-13 22:07:32,sell,1,1,600,95,599,saisi,fixed,1.0,none
+1794604076,2026-11-13 22:07:56,sell,1,1,600,95,599,saisi + mis en vente,fixed,1.0,none
+1794604088,2026-11-13 22:08:08,sell,1,1,791,87,790,saisi + mis en vente,fixed,1.0,none
+1794604093,2026-11-13 22:08:13,read,1,1,2000,85,1999,suspect,fixed,1.0,none
+1794604108,2026-11-13 22:08:28,read,1,1,2000,85,1999,suspect,fixed,1.0,none
+1794604123,2026-11-13 22:08:43,sell,1,1,35,94,34,saisi + mis en vente,fixed,1.0,none
+1794604217,2026-11-13 22:10:17,sell,1,1,70,93,69,saisi + mis en vente,fixed,1.0,none
+1794604537,2026-11-13 22:15:37,sell,1,1,722,96,721,saisi + mis en vente,fixed,1.0,none
+1794604539,2026-11-13 22:15:39,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604540,2026-11-13 22:15:40,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604542,2026-11-13 22:15:42,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604543,2026-11-13 22:15:43,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604544,2026-11-13 22:15:44,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604546,2026-11-13 22:15:46,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604547,2026-11-13 22:15:47,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604549,2026-11-13 22:15:49,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604550,2026-11-13 22:15:50,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604551,2026-11-13 22:15:51,sell,1,1,721,94,721,sell_all,fixed,1.0,none
+1794604705,2026-11-13 22:18:25,sell,1,1,775,95,774,saisi + mis en vente,fixed,1.0,none
+1794604707,2026-11-13 22:18:27,sell,1,1,774,90,774,sell_all,fixed,1.0,none
+1794604708,2026-11-13 22:18:28,sell,1,1,774,90,774,sell_all,fixed,1.0,none
+1794604715,2026-11-13 22:18:35,read,1,1,6,87,5,suspect,fixed,1.0,none
+1794604724,2026-11-13 22:18:44,read,1,1,6,87,5,suspect,fixed,1.0,none
+1794604748,2026-11-13 22:19:08,read,1,1,23,76,22,suspect,fixed,1.0,none
+1794604929,2026-11-13 22:22:09,read,1,1,88,94,87,suspect,fixed,1.0,none
+1794604939,2026-11-13 22:22:19,read,1,1,88,94,87,suspect,fixed,1.0,none
+1794604947,2026-11-13 22:22:27,read,1,1,88,94,87,suspect,fixed,1.0,none
+1794604954,2026-11-13 22:22:34,read,1,1,88,94,87,suspect,fixed,1.0,none
+1794604962,2026-11-13 22:22:42,read,1,1,88,94,87,suspect,fixed,1.0,none
+1794604969,2026-11-13 22:22:49,sell,1,1,88,94,87,saisi + mis en vente,fixed,1.0,none
+1794604970,2026-11-13 22:22:50,sell,1,1,87,93,87,sell_all,fixed,1.0,none
+1794604971,2026-11-13 22:22:51,sell,1,1,87,93,87,sell_all,fixed,1.0,none
+1794604973,2026-11-13 22:22:53,sell,1,1,87,93,87,sell_all,fixed,1.0,none
+1794604974,2026-11-13 22:22:54,sell,1,1,87,93,87,sell_all,fixed,1.0,none
+1794604976,2026-11-13 22:22:56,sell,1,1,87,93,87,sell_all,fixed,1.0,none
+1794604987,2026-11-13 22:23:07,sell,1,1,27,96,26,saisi + mis en vente,fixed,1.0,none
+1794604988,2026-11-13 22:23:08,sell,1,1,26,96,26,sell_all,fixed,1.0,none
+1794604989,2026-11-13 22:23:09,sell,1,1,26,96,26,sell_all,fixed,1.0,none
+1794604991,2026-11-13 22:23:11,sell,1,1,26,96,26,sell_all,fixed,1.0,none
+1794604992,2026-11-13 22:23:12,sell,1,1,26,96,26,sell_all,fixed,1.0,none
+1794604994,2026-11-13 22:23:14,sell,1,1,26,96,26,sell_all,fixed,1.0,none
+1794604995,2026-11-13 22:23:15,sell,1,1,26,96,26,sell_all,fixed,1.0,none
+1794605003,2026-11-13 22:23:23,sell,1,1,62,95,61,saisi + mis en vente,fixed,1.0,none
+1794605004,2026-11-13 22:23:24,sell,1,1,61,92,61,sell_all,fixed,1.0,none
+1794605006,2026-11-13 22:23:26,sell,1,1,61,92,61,sell_all,fixed,1.0,none
+1794605007,2026-11-13 22:23:27,sell,1,1,61,92,61,sell_all,fixed,1.0,none
+1794605016,2026-11-13 22:23:36,sell,10,10,634,96,633,saisi + mis en vente,fixed,1.0,none
+1794605017,2026-11-13 22:23:37,sell,10,10,633,94,633,sell_all,fixed,1.0,none
+1794605019,2026-11-13 22:23:39,sell,10,10,633,94,633,sell_all,fixed,1.0,none
+1794605020,2026-11-13 22:23:40,sell,10,10,633,94,633,sell_all,fixed,1.0,none
+1794605182,2026-11-13 22:26:22,sell,10,10,178,96,177,saisi + mis en vente,fixed,1.0,none
+1794605184,2026-11-13 22:26:24,sell,1,1,10,96,9,saisi + mis en vente,fixed,1.0,none
+1794605194,2026-11-13 22:26:34,sell,10,10,248,96,247,saisi + mis en vente,fixed,1.0,none
+1794605196,2026-11-13 22:26:36,sell,10,10,247,96,247,sell_all,fixed,1.0,none
+1794605197,2026-11-13 22:26:37,sell,10,10,247,96,247,sell_all,fixed,1.0,none
+1794605198,2026-11-13 22:26:38,sell,1,1,24,96,23,saisi + mis en vente,fixed,1.0,none
+1794605208,2026-11-13 22:26:48,sell,1,1,77,90,76,saisi + mis en vente,fixed,1.0,none
+1794605209,2026-11-13 22:26:49,sell,1,1,76,96,76,sell_all,fixed,1.0,none
+1794605211,2026-11-13 22:26:51,sell,1,1,76,96,76,sell_all,fixed,1.0,none
+1794605212,2026-11-13 22:26:52,sell,1,1,76,96,76,sell_all,fixed,1.0,none
+1794605214,2026-11-13 22:26:54,sell,1,1,76,96,76,sell_all,fixed,1.0,none
+1794605215,2026-11-13 22:26:55,sell,1,1,76,96,76,sell_all,fixed,1.0,none
+1794605222,2026-11-13 22:27:02,read,10,10,179,71,178,suspect,fixed,1.0,none
+1794605239,2026-11-13 22:27:19,sell,10,10,387,95,386,saisi + mis en vente,fixed,1.0,none
+1794605241,2026-11-13 22:27:21,sell,10,10,386,96,386,sell_all,fixed,1.0,none
+1794605242,2026-11-13 22:27:22,read,1,1,484,95,483,suspect,fixed,1.0,none
+1794605247,2026-11-13 22:27:27,sell,10,10,1990,90,1989,saisi + mis en vente,fixed,1.0,none
+1794605254,2026-11-13 22:27:34,sell,10,10,150,96,149,saisi + mis en vente,fixed,1.0,none
+1794605256,2026-11-13 22:27:36,sell,10,10,149,96,149,sell_all,fixed,1.0,none
+1794605257,2026-11-13 22:27:37,sell,10,10,149,96,149,sell_all,fixed,1.0,none
+1794605258,2026-11-13 22:27:38,read,1,1,180,89,179,suspect,fixed,1.0,none
+1794605262,2026-11-13 22:27:42,read,1,1,180,89,179,suspect,fixed,1.0,none
+1794605266,2026-11-13 22:27:46,sell,1,1,180,89,179,forced,fixed,1.0,none
+1794610002,2026-11-13 23:46:42,read,1,1,34,96,33,relist_suspect,fixed,1.0,none
+1794610093,2026-11-13 23:48:13,relist,1,1,770,95,769,unconfirmed,fixed,1.0,none
+1794610112,2026-11-13 23:48:32,relist,1,1,769,96,769,unconfirmed,fixed,1.0,none
+1794610119,2026-11-13 23:48:39,relist,1,1,769,96,769,unconfirmed,fixed,1.0,none
+1794610132,2026-11-13 23:48:52,relist,1,1,60,96,59,unconfirmed,fixed,1.0,none

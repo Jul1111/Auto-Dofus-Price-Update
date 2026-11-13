@@ -1,0 +1,655 @@
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import dofus_core as core  # noqa: E402
+
+
+# ---------------- compute_price / smart_round ----------------
+@pytest.mark.parametrize("price,mode,value,rounding,expected", [
+    (3969, "fixed", 1, "none", 3968),
+    (1002, "fixed", 1, "end_9", 999),      # ancien bug : donnait 1009 (> concurrent)
+    (1010, "fixed", 1, "end_9", 1009),
+    (1019, "fixed", 1, "end_9", 1009),
+    (1250, "fixed", 1, "down_100", 1200),
+    (1200, "fixed", 0, "down_100", 1199),  # arrondi = prix -> forcé à prix-1
+    (36, "percent", 1, "none", 35),        # 1% de 36 arrondi donnait 36 (pas d'undercut)
+    (10000, "percent", 5, "none", 9500),
+    (1, "fixed", 1, "none", 1),            # plancher min_price
+])
+def test_compute_price(price, mode, value, rounding, expected):
+    assert core.compute_price(price, mode, value, rounding, 1) == expected
+
+
+def test_compute_price_always_below_competitor():
+    for p in range(2, 3000):
+        for mode, val in (("fixed", 1), ("fixed", 0), ("percent", 0.5), ("percent", 3)):
+            for rnd in ("none", "down_10", "down_100", "end_9"):
+                assert core.compute_price(p, mode, val, rnd, 1) < p
+
+
+def test_compute_price_none_and_bad_value():
+    assert core.compute_price(None, "fixed", 1, "none", 1) is None
+    assert core.compute_price(100, "fixed", "abc", "none", 1) == 99
+
+
+# ---------------- pick_best_lot / coherence / derive ----------------
+def test_pick_best_lot():
+    # valeurs de la capture HDV : 35 / 184 / 1789 / 17875
+    assert core.pick_best_lot({1: 35, 10: 184, 100: 1789, 1000: 17875}) == 1
+    assert core.pick_best_lot({1: 100, 10: 1200, 100: 8000}) == 10
+    assert core.pick_best_lot({1: 100, 10: 1005}, 0.01) == 1      # ex aequo -> petit lot
+    assert core.pick_best_lot({1: 100, 10: 1005}, 0.0) == 10
+    assert core.pick_best_lot({1: None, 10: None}) is None
+
+
+def test_coherence():
+    assert core.check_coherence(100, {1: 1240, 10: 12398, 100: 12398}, 5) is not None
+    assert core.check_coherence(1, {1: 35, 10: 184, 100: 1789, 1000: 17875}, 5) is None
+    assert core.check_coherence(1, {1: 50, 10: None}, 5) is None
+
+
+def test_derive_price():
+    assert core.derive_price(1000, {1: 35, 10: 184, 100: 1789}) == 17890  # 17.89/u
+    assert core.derive_price(10, {10: None}) is None
+
+
+def test_rect_from_points_any_order():
+    assert core.rect_from_points((232, 620), (88, 482)) == (88, 482, 144, 138)
+
+
+# ---------------- OCR parsing ----------------
+def _data(rows):
+    keys = ["text", "left", "top", "width", "height", "conf", "block_num", "par_num", "line_num"]
+    return {k: [r[i] for r in rows] for i, k in enumerate(keys)}
+
+
+def test_parse_table_maps_rows_by_lot_column():
+    # largeur utile 200 px, bordure 10 : lot à gauche (x<0.45), prix à droite
+    data = _data([
+        ("1", 15, 10, 8, 20, 96, 1, 1, 1), ("35", 170, 10, 20, 20, 95, 1, 1, 1),
+        ("100", 15, 60, 25, 20, 96, 1, 1, 2), ("789", 180, 60, 25, 20, 90, 1, 1, 2),
+        ("1", 160, 60, 8, 20, 88, 1, 1, 2),        # "1 789" dans le désordre
+        ("7", 15, 110, 8, 20, 50, 1, 1, 3), ("12", 170, 110, 20, 20, 90, 1, 1, 3),  # lot inconnu
+    ])
+    out = core.parse_table(data, (0, 200), 200, 0.45, [1, 10, 100, 1000])
+    assert {l: (r.value, r.confidence) for l, r in out.items()} == {1: (35, 95), 100: (1789, 88)}
+
+
+def test_parse_number_and_empty():
+    data = _data([("1", 15, 10, 8, 20, 91, 1, 1, 1)])
+    assert core.parse_number(data, (0, 50)).value == 1
+    assert core.parse_number(data, (60, 90)).value is None
+
+
+def test_stack_images():
+    imgs = [np.full((20, 50), 255, np.uint8), np.full((30, 80), 255, np.uint8)]
+    comp, bounds = core.stack_images(imgs, gap=10)
+    assert comp.shape == (60, 80) and bounds == [(0, 20), (30, 60)]
+
+
+def test_preprocess_inverts_and_removes_colored_icons():
+    img = np.full((20, 60, 3), 30, np.uint8)     # fond sombre
+    img[5:15, 10:20] = 255                       # texte blanc
+    img[5:15, 40:50] = (0, 200, 255)             # icône jaune (BGR)
+    out = core.preprocess(img, scale=2)
+    b = core.BORDER
+    assert out.mean() > 127                      # fond devenu blanc
+    assert out[b + 20, b + 30] == 0              # texte devenu noir
+    assert out[b + 20, b + 90] == 255            # icône effacée
+
+
+# ---------------- Config ----------------
+def test_config_v1_migration(tmp_path):
+    v1 = {"PRICE_REGIONS": {"1": [1041, 825, 130, 36]}, "UNDERCUT_MODE": "percent",
+          "UNDERCUT_VALUE": 1.5, "AUTO_PASTE": True, "WINDOW_TITLE": "Dofus",
+          "HOTKEYS": {"read": {"1": "f1"}, "calibrate_field": "ctrl+alt+f4", "optimize": "f4"}}
+    p = tmp_path / "cfg.json"
+    p.write_text(json.dumps(v1))
+    cfg = core.Config.load(p)
+    assert cfg.undercut_value == 1.5 and cfg.auto_paste is True
+    assert cfg.hotkeys == core.DEFAULT_HOTKEYS           # raccourcis v1 remplacés
+    assert cfg.window_title == " - Release"
+    assert cfg.lots == [1, 10, 100, 1000] and cfg.table_region is None
+    cfg.save(p)
+    data = json.loads(p.read_text())
+    assert data["CONFIG_VERSION"] == core.CONFIG_VERSION and "PRICE_REGIONS" not in data
+    assert cfg.input_method == "paste" and cfg.clear_method == "backspace"
+
+
+def test_config_v2_keeps_custom_hotkeys(tmp_path):
+    p = tmp_path / "cfg.json"
+    p.write_text(json.dumps({"CONFIG_VERSION": 4, "HOTKEYS": {"sell": "f6"}, "MIN_PRICE": "abc",
+                             "INPUT_METHOD": "type"}))
+    cfg = core.Config.load(p)
+    assert cfg.hotkeys["sell"] == "f6" and cfg.hotkeys["optimize"] == "f4"
+    assert cfg.min_price == 1
+    assert cfg.input_method == "type"                # choix explicite v4 conservé
+
+
+# ---------------- Historique ----------------
+def test_history_rotates_legacy_file(tmp_path):
+    h = tmp_path / "hist.csv"
+    h.write_text("ts,action,lot\n1,x,1\n")
+    core.log_history("sell", 1, 1, core.Reading(100, 90), 99, "collé", core.Config(), path=h)
+    assert h.read_text().splitlines()[0] == ",".join(core.HISTORY_HEADER)
+    assert len(list(tmp_path.glob("hist_old_*.csv"))) == 1
+
+
+# ---------------- Détection de la fenêtre du jeu ----------------
+@pytest.mark.parametrize("title,exe,expected", [
+    ("Ungrottas - Sadida - 3.4.12.5 - Release", "Dofus.exe", True),
+    ("Ungrottas - Sadida - 3.4.12.5 - Release", "", True),
+    ("Autre - Iop - 3.4 - Release", "Dofus.exe", True),
+    ("Discord", "Discord.exe", False),
+    ("Dofus wiki - Chrome", "chrome.exe", False),
+])
+def test_is_game_window(title, exe, expected):
+    assert core.is_game_window(title, exe, core.Config()) is expected
+
+
+# ---------------- Moteur (sans écran) ----------------
+R = core.Reading
+FULL = {1: R(35, 95), 10: R(184, 96), 100: R(1789, 90), 1000: R(17875, 92)}
+
+
+@pytest.fixture
+def engine(monkeypatch):
+    calls = []
+    monkeypatch.setattr(core, "input_price", lambda v, c, paste=True, validate=False:
+                        calls.append((v, paste, validate)) or
+                        ("collé + mis en vente" if validate else "collé" if paste else "copié"))
+    monkeypatch.setattr(core, "log_history", lambda *a, **k: None)
+    cfg = core.Config(table_region=[0, 0, 1, 1], qty_region=[0, 0, 1, 1],
+                      auto_paste=True, auto_validate=True)
+    eng = core.PriceEngine(cfg)
+
+    def screen(prices, selected):
+        monkeypatch.setattr(core, "read_screen", lambda c, d=None: core.ScreenRead(dict(prices), selected))
+    return eng, calls, screen
+
+
+def test_sell_selected_quantity(engine):
+    eng, calls, screen = engine
+    screen(FULL, 100)
+    res = eng.sell()
+    assert res.level == "ok" and res.lot == 100
+    assert calls == [(1788, True, True)]
+
+
+def test_sell_selected_quantity_unreadable(engine):
+    eng, calls, screen = engine
+    screen(FULL, None)
+    assert eng.sell().level == "error" and calls == []
+
+
+def test_optimize_asks_to_change_quantity(engine):
+    eng, calls, screen = engine
+    screen({1: R(35, 95), 10: R(184, 96)}, 10)       # meilleur = lot 1 (35/u), quantité = 10
+    res = eng.sell(optimize=True)
+    assert res.level == "warn" and res.lot == 1 and "quantité 1" in res.hint
+    assert calls == []                                 # rien collé : mauvaise quantité
+
+
+def test_optimize_matching_quantity(engine):
+    eng, calls, screen = engine
+    screen(FULL, 1)
+    res = eng.sell(optimize=True)
+    assert res.level == "ok" and calls == [(34, True, True)]
+
+
+def test_missing_lot_is_estimated_then_forced(engine):
+    eng, calls, screen = engine
+    screen({1: R(35, 95), 10: R(184, 96), 100: R(1789, 90)}, 1000)  # personne ne vend lot 1000
+    r1 = eng.sell()
+    assert r1.level == "warn" and calls[-1] == (17889, False, False)
+    r2 = eng.sell()                                     # 2e appui = forcer, sans validation auto
+    assert r2.level == "ok" and calls[-1] == (17889, True, False)
+
+
+def test_low_confidence_never_autovalidates(engine):
+    eng, calls, screen = engine
+    screen({1: R(500, 30)}, 1)
+    assert eng.sell().level == "warn"
+    assert calls == [(499, False, False)]
+
+
+def test_calibrate_rect_two_presses(tmp_path, monkeypatch):
+    monkeypatch.setattr(core.Config, "save", lambda self, path=None: None)
+    eng = core.PriceEngine(core.Config())
+    assert eng.calibrate_rect("table", (232, 620))[0] == "first"
+    state, region = eng.calibrate_rect("table", (88, 482))
+    assert state == "done" and eng.cfg.table_region == [88, 482, 144, 138]
+    eng.calibrate_point("price_field", (100, 205))
+    assert eng.cfg.click_field is True
+
+
+# ---------------- Saisie dans le jeu (claviers simulés) ----------------
+class _Fake:
+    def __init__(self):
+        self.log = []
+        self.clip = "ancien"
+
+
+@pytest.fixture
+def fake_io(monkeypatch):
+    import types
+    f = _Fake()
+    kb = types.SimpleNamespace(press_and_release=lambda k: f.log.append(k))
+    pg = types.SimpleNamespace(click=lambda x, y: f.log.append(f"click{(x, y)}"),
+                               moveTo=lambda x, y: f.log.append(f"move{(x, y)}"),
+                               position=lambda: (5, 5))
+    pc = types.SimpleNamespace(copy=lambda t: setattr(f, "clip", t), paste=lambda: f.clip)
+    monkeypatch.setitem(sys.modules, "keyboard", kb)
+    monkeypatch.setitem(sys.modules, "pyautogui", pg)
+    monkeypatch.setitem(sys.modules, "pyperclip", pc)
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    monkeypatch.setattr(core, "_clip_timer", None)   # pas d'état partagé entre tests
+    monkeypatch.setattr(core, "_clip_saved", None)
+    return f
+
+
+def _flush_restore():
+    t = core._clip_timer
+    if t is not None:
+        t.cancel()
+        t.function()                                 # exécute la restauration tout de suite
+
+
+def test_input_default_clears_then_pastes(fake_io):
+    cfg = core.Config(price_field=[100, 205], click_field=True, sell_button=[110, 370])
+    assert core.input_price(689, cfg, paste=True, validate=True) == "saisi + mis en vente"
+    assert fake_io.log == (["click(100, 205)", "end"] + ["backspace"] * 12
+                           + ["ctrl+v", "enter", "move(5, 5)"])  # Entrée par défaut, pas de clic
+    assert fake_io.clip == "689"                     # prix encore là pendant que le jeu colle
+    _flush_restore()
+    assert fake_io.clip == "ancien"                  # presse-papier de l'utilisateur restauré
+
+
+def test_rapid_pastes_never_paste_user_text(fake_io, monkeypatch):
+    # « Tout vendre » : ventes enchaînées avant la restauration -> chaque Ctrl+V doit voir le prix
+    seen = []
+    kb = sys.modules["keyboard"]
+    monkeypatch.setattr(kb, "press_and_release",
+                        lambda k: seen.append(fake_io.clip) if k == "ctrl+v" else None)
+    for _ in range(3):
+        core.input_price(69, core.Config())
+    assert seen == ["69", "69", "69"]
+    _flush_restore()
+    assert fake_io.clip == "ancien"                  # le texte d'origine, pas "69"
+
+
+def test_clipboard_failure_does_not_paste(fake_io, monkeypatch):
+    pc = sys.modules["pyperclip"]
+    monkeypatch.setattr(pc, "copy", lambda t: None)  # presse-papier bloqué : reste "ancien"
+    with pytest.raises(RuntimeError):
+        core.input_price(69, core.Config())
+    assert "ctrl+v" not in fake_io.log
+
+
+def test_input_type_mode(fake_io):
+    cfg = core.Config(input_method="type")
+    core.input_price(689, cfg)
+    assert fake_io.log[-3:] == ["6", "8", "9"] and fake_io.clip == "ancien"
+
+
+def test_validate_with_enter_when_no_button(fake_io):
+    core.input_price(689, core.Config(), validate=True)
+    assert fake_io.log[-1] == "enter"
+
+
+def test_validate_click_option(fake_io):
+    cfg = core.Config(validate_method="click", sell_button=[110, 370])
+    core.input_price(689, cfg, validate=True)
+    assert fake_io.log[-2:] == ["click(110, 370)", "move(5, 5)"]
+    fake_io.log.clear()
+    core.press_validate(cfg)
+    assert fake_io.log == ["click(110, 370)", "move(5, 5)"]
+
+
+def test_press_validate_default_is_enter(fake_io):
+    core.press_validate(core.Config(sell_button=[110, 370]))
+    assert fake_io.log == ["enter"]
+
+
+def test_input_copy_only(fake_io):
+    assert core.input_price(689, core.Config(), paste=False) == "copié"
+    assert fake_io.log == [] and fake_io.clip == "689"
+
+
+def test_input_paste_mode(fake_io):
+    cfg = core.Config(input_method="paste", clear_method="ctrl_a")
+    core.input_price(689, cfg)
+    assert fake_io.log == ["ctrl+a", "ctrl+v"]
+    _flush_restore()
+
+
+def test_ocr_config_survives_windows_shlex():
+    # pytesseract sous Windows : shlex.split(config, posix=False)
+    import shlex
+    for posix in (False, True):
+        args = shlex.split(core.OCR_CONFIG, posix=posix)
+        assert args[:3] == ["--psm", "6", "-c"] and len(args) == 4
+    assert not any(q in core.OCR_CONFIG for q in "\"'\\")
+    assert not any(d in args[3] for d in "0123456789")  # les chiffres ne sont pas bloqués
+
+
+def test_optimize_ignores_lots_above_displayed_quantity(engine):
+    # quantité affichée 1 = moins de 10 objets : lot 100 impossible même s'il est meilleur
+    eng, calls, screen = engine
+    screen({1: R(600, 95), 10: R(6939, 95), 100: R(99997, 95)}, 1)
+    res = eng.sell(optimize=True)
+    assert res.level == "ok" and res.lot == 1 and calls == [(599, True, True)]
+
+
+def test_optimize_can_suggest_smaller_lot(engine):
+    eng, calls, screen = engine
+    screen({1: R(900, 95), 10: R(6939, 95), 100: R(69997, 95)}, 100)  # lot 1 = 900/u
+    res = eng.sell(optimize=True)
+    assert res.level == "warn" and res.lot == 1 and calls == []
+
+
+# ---------------- « Tout vendre » (F2) et prix déjà à toi ----------------
+@pytest.fixture
+def seq_engine(monkeypatch):
+    """Moteur dont read_screen renvoie une suite d'écrans."""
+    calls = []
+    monkeypatch.setattr(core, "input_price", lambda v, c, paste=True, validate=False:
+                        calls.append((v, paste, validate)) or
+                        ("saisi + mis en vente" if validate else "saisi" if paste else "copié"))
+    monkeypatch.setattr(core, "log_history", lambda *a, **k: None)
+    monkeypatch.setattr(core, "press_validate", lambda c: calls.append("enter"))
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    cfg = core.Config(table_region=[0, 0, 1, 1], qty_region=[0, 0, 1, 1], auto_paste=True)
+    eng = core.PriceEngine(cfg)
+
+    def screens(*items):
+        it = iter([core.ScreenRead(dict(p), q) for p, q in items])
+        monkeypatch.setattr(core, "read_screen", lambda c, d=None: next(it))
+    return eng, calls, screens
+
+
+def test_sell_all_until_stock_empty(seq_engine):
+    eng, calls, screens = seq_engine
+    screens(({1: R(70, 95), 10: R(739, 95)}, 1),   # 1er : concurrent à 70 -> 69
+            ({1: R(69, 95), 10: R(739, 95)}, 1),   # notre lot en tête -> on remet
+            ({1: R(69, 95), 10: R(739, 95)}, 1),
+            ({}, None))                            # objet épuisé
+    res = eng.sell_all()
+    assert res.level == "ok" and "3×1 à 69" in res.message and "stock épuisé" in res.message
+    assert calls == [(69, True, True), "enter", "enter"]  # prix collé 1 fois, puis Entrée
+
+
+def test_sell_all_stops_on_other_item(seq_engine):
+    eng, calls, screens = seq_engine
+    screens(({1: R(70, 95)}, 1), ({1: R(120, 95)}, 1))  # autre objet sélectionné
+    res = eng.sell_all()
+    assert "1×1 à 69" in res.message and "≠ 69" in res.message and calls == [(69, True, True)]
+
+
+def test_sell_all_continues_with_smaller_lot(seq_engine):
+    # 42 cuivres : 4×10 puis 2×1
+    eng, calls, screens = seq_engine
+    screens(({1: R(80, 95), 10: R(740, 95)}, 10),
+            ({1: R(80, 95), 10: R(739, 95)}, 10), ({1: R(80, 95), 10: R(739, 95)}, 10),
+            ({1: R(80, 95), 10: R(739, 95)}, 10),
+            ({1: R(80, 95), 10: R(739, 95)}, 1),   # reste 2 : quantité passe à 1, même objet
+            ({1: R(79, 95), 10: R(739, 95)}, 1),
+            ({}, None))
+    res = eng.sell_all()
+    assert res.message.startswith("[TOUT] 4×10 à 739 + 2×1 à 79") and "stock épuisé" in res.message
+    assert calls == [(739, True, True)] + ["enter"] * 3 + [(79, True, True), "enter"]
+
+
+def test_sell_all_quantity_drop_on_other_item_stops(seq_engine):
+    eng, calls, screens = seq_engine
+    screens(({1: R(80, 95), 10: R(740, 95)}, 10),
+            ({1: R(50, 95), 10: R(900, 95)}, 1))   # autre objet : notre 739 n'est pas en tête
+    res = eng.sell_all()
+    assert "≠ 739" in res.message and calls == [(739, True, True)]
+
+
+def test_sell_all_never_goes_to_bigger_lot(seq_engine):
+    eng, calls, screens = seq_engine
+    screens(({1: R(80, 95), 10: R(740, 95)}, 1), ({1: R(79, 95), 10: R(740, 95)}, 10))
+    res = eng.sell_all()
+    assert "quantité passée à 10" in res.message and calls == [(79, True, True)]
+
+
+def test_sell_all_smaller_lot_suspect_stops(seq_engine):
+    eng, calls, screens = seq_engine
+    screens(({10: R(740, 95)}, 10), ({10: R(739, 95)}, 1))  # lot 1 absent : prix estimé
+    res = eng.sell_all()
+    assert "lot 1 non vendu" in res.message
+    assert calls == [(739, True, True), (72, False, False)]  # estimé : copié seulement
+
+
+def test_sell_all_never_loops_on_suspect(seq_engine):
+    eng, calls, screens = seq_engine
+    screens(({1: R(70, 30)}, 1))                   # confiance faible
+    assert eng.sell_all().level == "warn" and calls == [(69, False, False)]
+
+
+def test_no_undercut_against_own_listing(seq_engine):
+    eng, calls, screens = seq_engine
+    screens(({1: R(70, 95)}, 1), ({1: R(69, 95)}, 1), ({1: R(69, 95)}, 10))
+    eng.sell()                                      # 70 -> 69
+    res = eng.sell()                                # en tête : 69 = notre prix -> 69
+    assert calls[-1][0] == 69 and "(ton prix)" in res.message
+    eng.sell()                                      # autre lot (10) : pas concerné
+    assert len(calls) == 3
+
+
+def test_parse_table_infers_unreadable_lot_from_row_order():
+    data = _data([
+        ("27", 170, 10, 20, 20, 95, 1, 1, 1),                                   # « 1 » illisible
+        ("10", 15, 60, 16, 20, 96, 1, 1, 2), ("248", 170, 60, 25, 20, 96, 1, 1, 2),
+        ("1000", 15, 110, 30, 20, 96, 1, 1, 3), ("570", 180, 110, 25, 20, 92, 1, 1, 3),
+        ("28", 160, 110, 15, 20, 92, 1, 1, 3),
+    ])
+    out = core.parse_table(data, (0, 200), 200, 0.45, [1, 10, 100, 1000])
+    assert {l: r.value for l, r in out.items()} == {1: 27, 10: 248, 1000: 28570}
+
+
+def test_parse_table_does_not_guess_when_ambiguous():
+    data = _data([
+        ("10", 15, 10, 16, 20, 96, 1, 1, 1), ("248", 170, 10, 25, 20, 96, 1, 1, 1),
+        ("2390", 170, 60, 25, 20, 90, 1, 1, 2),                                 # 100 ou 1000 ?
+    ])
+    out = core.parse_table(data, (0, 200), 200, 0.45, [1, 10, 100, 1000])
+    assert out == {10: out[10]}
+
+
+# --- Prix moyen / compteur de lots
+def test_parse_counter():
+    assert core.parse_counter("21/100 lots en vente") == (21, 100)
+    assert core.parse_counter("12 / 98") == (12, 98)
+    assert core.parse_counter("lots en vente") is None
+    assert core.parse_counter("120/100") is None
+
+
+def test_avg_guard_blocks_too_cheap(seq_engine, monkeypatch):
+    eng, calls, screens = seq_engine
+    eng.cfg.auto_validate = True
+    sr = core.ScreenRead({1: R(30, 95), 10: R(290, 95)}, 1)
+    sr.avg = 100                                           # 29/u < 50 % de 100
+    monkeypatch.setattr(core, "read_screen", lambda c, d=None: sr)
+    res = eng.sell()
+    assert res.level == "warn" and "prix moyen" in res.message and calls == [(29, False, False)]
+
+
+def test_avg_guard_ok_when_close(seq_engine, monkeypatch):
+    eng, calls, screens = seq_engine
+    sr = core.ScreenRead({1: R(80, 95)}, 1)
+    sr.avg = 100
+    monkeypatch.setattr(core, "read_screen", lambda c, d=None: sr)
+    res = eng.sell()
+    assert res.level == "ok" and calls == [(79, True, False)]
+
+
+@pytest.fixture
+def counter(monkeypatch):
+    seq = []
+    monkeypatch.setattr(core, "read_counter", lambda c: seq.pop(0) if seq else None)
+    return seq
+
+
+def test_sell_all_counter_ok(seq_engine, counter):
+    eng, calls, screens = seq_engine
+    eng.cfg.count_region = [0, 0, 1, 1]
+    counter += [(5, 100), (6, 100), (7, 100), (7, 100)]
+    screens(({1: R(70, 95)}, 1), ({1: R(69, 95)}, 1), ({}, None))
+    res = eng.sell_all()
+    assert res.level == "ok" and "2×1 à 69" in res.message and "compteur 5→7" in res.message
+
+
+def test_sell_all_counter_mismatch_stops(seq_engine, counter):
+    eng, calls, screens = seq_engine
+    eng.cfg.count_region = [0, 0, 1, 1]
+    counter += [(5, 100), (5, 100), (5, 100)]          # la vente n'a pas été prise en compte
+    screens(({1: R(70, 95)}, 1), ({1: R(69, 95)}, 1))
+    res = eng.sell_all()
+    assert res.level == "warn" and "non confirmée" in res.message and calls == [(69, True, True)]
+
+
+def test_sell_all_counter_retry_when_slow(seq_engine, counter):
+    eng, calls, screens = seq_engine
+    eng.cfg.count_region = [0, 0, 1, 1]
+    counter += [(5, 100), (5, 100), (6, 100), (6, 100)]   # jeu lent : 2e lecture OK
+    screens(({1: R(70, 95)}, 1), ({}, None))
+    res = eng.sell_all()
+    assert res.level == "ok" and "stock épuisé" in res.message
+
+
+def test_sell_all_stops_when_full(seq_engine, counter):
+    eng, calls, screens = seq_engine
+    eng.cfg.count_region = [0, 0, 1, 1]
+    counter += [(99, 100), (100, 100)]
+    screens(({1: R(70, 95)}, 1), ({1: R(69, 95)}, 1))
+    res = eng.sell_all()
+    assert "plus de place" in res.message and calls == [(69, True, True)]
+
+
+def test_sell_all_refuses_when_already_full(seq_engine, counter):
+    eng, calls, screens = seq_engine
+    eng.cfg.count_region = [0, 0, 1, 1]
+    counter += [(100, 100)]
+    res = eng.sell_all()
+    assert res.level == "error" and calls == []
+
+
+# --- Mes ventes : mise à jour des prix (F3 / Ctrl+F3)
+@pytest.fixture
+def relist_engine(monkeypatch):
+    calls = []
+    state = {"mine": [], "screens": []}
+    monkeypatch.setattr(core, "input_price", lambda v, c, paste=True, validate=False:
+                        calls.append(("paste" if paste else "copy", v)) or "saisi")
+    monkeypatch.setattr(core, "press_modify", lambda c: calls.append("modify"))
+    monkeypatch.setattr(core, "log_history", lambda *a, **k: None)
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    monkeypatch.setattr(core, "read_mine",
+                        lambda c: core.Reading(state["mine"].pop(0), 95) if state["mine"] else core.Reading(None, -1))
+    monkeypatch.setattr(core, "read_screen", lambda c, d=None: state["screens"].pop(0))
+    cfg = core.Config(table_region=[0, 0, 1, 1], qty_region=[0, 0, 1, 1], mine_region=[0, 0, 1, 1])
+    return core.PriceEngine(cfg), calls, state
+
+
+def scr(prices, sel=1, avg=None):
+    s = core.ScreenRead({l: R(p, 95) for l, p in prices.items()}, sel)
+    s.avg = avg
+    return s
+
+
+def test_relist_undercuts_competitor(relist_engine):
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 760, 10: 6999})]
+    st["mine"] = [774, 759]                        # avant / après « Modifier »
+    res = eng.relist()
+    assert res.level == "ok" and "modifié" in res.message and calls == [("paste", 759), "modify"]
+
+
+def test_relist_nothing_when_cheapest(relist_engine):
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 774})]
+    st["mine"] = [774]
+    res = eng.relist()
+    assert "déjà le moins cher" in res.message and calls == []
+
+
+def test_relist_aligns_on_own_other_listing(relist_engine):
+    # 3 lignes du même objet : la 1re passe à 759, les suivantes s'alignent (pas 758, 757…)
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 760}), scr({1: 759})]
+    st["mine"] = [774, 759, 774, 759]
+    eng.relist()
+    res = eng.relist()
+    assert calls == [("paste", 759), "modify", ("paste", 759), "modify"] and "aligné" in res.message
+
+
+def test_relist_unconfirmed(relist_engine):
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 760})]
+    st["mine"] = [774, 774]                        # « Modifier » sans effet
+    res = eng.relist()
+    assert res.level == "warn" and "NON confirmée" in res.message
+
+
+def test_relist_avg_guard_then_force(relist_engine):
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 300}, avg=1189), scr({1: 300}, avg=1189)]
+    st["mine"] = [774, 774, 299]
+    res = eng.relist()
+    assert res.level == "warn" and "prix moyen" in res.message and calls == [("copy", 299)]
+    res = eng.relist()                             # ré-appui = forcer
+    assert "forcé" in res.message and calls[-2:] == [("paste", 299), "modify"]
+
+
+def test_relist_all_disabled_by_default(relist_engine):
+    eng, calls, st = relist_engine
+    res = eng.relist_all()
+    assert res.level == "warn" and "désactivé" in res.message
+
+
+def test_relist_all_scrolls_until_list_stops(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 2
+    clicks, scrolls = [], []
+    monkeypatch.setattr(core, "click_at", lambda p: clicks.append(p))
+    monkeypatch.setattr(core, "scroll_at", lambda p, n: scrolls.append(n))
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    pages = iter([np.zeros((2, 2, 3)), np.ones((2, 2, 3)),     # page 1 -> 2 : a bougé
+                  np.ones((2, 2, 3)), np.ones((2, 2, 3))])     # page 2 -> fin : immobile
+    monkeypatch.setattr(core, "grab_screen", lambda r: next(pages))
+    # page 1 : ligne à modifier (panneau vidé ensuite = accepté) -> la liste a bougé :
+    # reprise en 1re ligne (déjà OK), 2e ligne OK ; page 2 : deux lignes déjà OK
+    st["screens"] = [scr({1: 760}), scr({1: 759}), scr({1: 87}), scr({1: 76}), scr({1: 76})]
+    st["mine"] = [774, None, 759, 87, 76, 76]
+    res = eng.relist_all()
+    assert res.level == "ok" and "5 lignes" in res.message and "1 modifiées" in res.message
+    assert clicks == [(100, 100), (100, 100), (100, 150), (100, 100), (100, 150)]
+    assert len(scrolls) == 2
+
+
+def test_relist_panel_cleared_means_done(relist_engine):
+    # le jeu désélectionne la vente après « Modifier » : plus rien à lire = accepté
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 60})]
+    st["mine"] = [61, None]
+    res = eng.relist()
+    assert res.level == "ok" and "modifié" in res.message and calls == [("paste", 59), "modify"]
+
+
+def test_relist_all_stops_on_suspect(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step = True, [100, 100], 50
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    st["screens"] = [scr({1: 100, 10: 9000})]      # lot 1 incohérent
+    st["mine"] = [774]
+    res = eng.relist_all()
+    assert res.level == "warn" and "SUSPECT" in res.message and ("paste", 99) not in calls

@@ -1,201 +1,125 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Dofus Price Helper — FIXED REGIONS (Fullscreen OK)
---------------------------------------------------
-- Capture écran via mss (compatible plein écran).
-- 3 zones fixes pour les prix (lots 1/10/100), calibrées à la souris.
-- F1/F2/F3 lisent la zone correspondante, calculent l'undercut et collent dans le champ actif.
+Dofus Price Helper — version ligne de commande
+----------------------------------------------
+Même moteur que l'interface graphique (dofus_core.py), sans fenêtre.
 
-Raccourcis:
-  F1 / F2 / F3  : Lire & coller le prix (lots 1 / 10 / 100)
-  Ctrl+Alt+F1   : Calibrer la zone PRIX du lot 1 (pointer le centre du prix, puis appuyer)
-  Ctrl+Alt+F2   : Calibrer lot 10
-  Ctrl+Alt+F3   : Calibrer lot 100
-  Ctrl+Shift+P  : Afficher ce que lisent les 3 zones (debug rapide)
-  Ctrl+Shift+M  : Afficher la position de la souris
-  Esc           : Quitter
+Raccourcis par défaut (clé HOTKEYS de la config) :
+  F1                  vendre à la quantité affichée dans le jeu
+  F2                  tout vendre au même prix (s'arrête seul : stock épuisé, autre objet, concurrent)
+  F4                  optimiser (meilleur prix unitaire)
+  (même touche 2x)    forcer une lecture suspecte
+  Ctrl+Alt+F1 (x2)    calibrer le tableau « Actuellement en vente » (coin haut-gauche, puis bas-droit)
+  Ctrl+Alt+F2 (x2)    calibrer le menu « Quantité »
+  Ctrl+Alt+F3         calibrer le champ « Prix du lot »
+  Ctrl+Alt+F4         calibrer le bouton « Mettre en vente »
+  F3 / Ctrl+F3        mes ventes : mettre à jour la ligne sélectionnée / toute la liste
+  Ctrl+Alt+F7 (x2)    mes ventes : texte du champ « Prix du lot » ; Ctrl+Alt+F8 : bouton « Modifier »
+  Ctrl+Alt+F9 (x2)    mes ventes : 1re puis 2e ligne de la liste
+  Ctrl+Alt+F5 (x2)    (optionnel) calibrer la valeur du « Prix moyen »
+  Ctrl+Alt+F6 (x2)    (optionnel) calibrer le compteur « 21/100 lots en vente »
+  Ctrl+Shift+P        afficher ce qui est lu (debug)
+  Ctrl+Alt+P          pause / reprise
+  Ctrl+Alt+Q          quitter   (Échap n'est plus utilisé : il ferme les fenêtres du jeu)
 
-Installation:
-  pip install mss pyautogui pytesseract opencv-python numpy keyboard pyperclip pillow
-  + Tesseract OCR (Windows: https://github.com/UB-Mannheim/tesseract/wiki)
+Options de vente rapide : AUTO_PASTE, CLICK_FIELD, AUTO_VALIDATE dans la config.
+Option : --debug  enregistre les images envoyées à l'OCR dans captures/
 """
+from __future__ import annotations
 
-import os, re, time, json
-from typing import Tuple, Optional, Dict
-import numpy as np
-import cv2, mss, pyautogui, pytesseract, keyboard, pyperclip
+import sys
 
-# ------------- CONFIG -------------
-# Chemin de Tesseract si pas dans le PATH :
-TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"   # adapte si besoin
+import dofus_core as core
+import keyboard
 
-CONFIG_FILE = "dofus_price_helper_config.json"
 
-# Taille de la boîte lue autour du pointeur lors de la calibration :
-PRICE_W = 150     # largeur (px) de la zone prix
-ROW_H   = 40      # hauteur (px) de la zone prix
+def main() -> int:
+    debug_dir = core.BASE_DIR / "captures" if "--debug" in sys.argv else None
+    cfg = core.Config.load()
+    engine = core.PriceEngine(cfg, debug_dir=debug_dir)
 
-# Méthode d'undercut: "fixed" (en kamas) ou "percent" (en %)
-UNDERCUT_MODE  = "fixed"
-UNDERCUT_VALUE = 1
-MIN_PRICE      = 1
+    err = core.setup_tesseract(cfg)
+    if err:
+        print("[Erreur]", err)
+        return 1
 
-# Hotkeys
-HOTKEY_QTY1    = "f1"
-HOTKEY_QTY10   = "f2"
-HOTKEY_QTY100  = "f3"
-HOTKEY_CAL_1   = "ctrl+alt+f1"
-HOTKEY_CAL_10  = "ctrl+alt+f2"
-HOTKEY_CAL_100 = "ctrl+alt+f3"
-HOTKEY_PRINT   = "ctrl+shift+p"
-HOTKEY_MOUSE   = "ctrl+shift+m"
-HOTKEY_QUIT    = "esc"
+    def report(res: core.Result):
+        print(f"[{res.level.upper():5}] {res.message}")
+        core.beep(res.level, cfg)
 
-# OCR
-TESSERACT_CONFIG = r"--psm 6 -c tessedit_char_whitelist=0123456789"
-SCALE = 2  # upscaling pour améliorer l’OCR
+    def game_action(optimize: bool, all_: bool = False):
+        def cb():
+            if engine.paused:
+                return
+            if not core.game_has_focus(cfg):
+                info = core.foreground_info() or ("?", "?")
+                print(f"[Focus] Ignoré : fenêtre active « {info[0]} » ({info[1]})")
+                return
+            report(engine.sell_all() if all_ else engine.sell(optimize=optimize))
+        return cb
 
-# Debug
-DEBUG = False
-DEBUG_DIR = "captures"
-# ------------- END CONFIG ----------
+    def calib_rect(name):
+        state, val = engine.calibrate_rect(name)
+        if state == "first":
+            print(f"[Calib] {name} : coin 1 = {val}. Souris sur le coin opposé, puis ré-appuie.")
+        else:
+            print(f"[Calib] {name} = {val}")
 
-# Zones fixes (x, y, w, h). Remplies par calibration ou chargées du JSON.
-PRICE_REGIONS: Dict[str, Optional[Tuple[int,int,int,int]]] = {"1": None, "10": None, "100": None}
+    def calib_point(name):
+        print(f"[Calib] {name} = {engine.calibrate_point(name)}")
 
-def init():
-    if TESSERACT_CMD:
-        pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-    if DEBUG:
-        os.makedirs(DEBUG_DIR, exist_ok=True)
-    load_config()
+    def print_all():
+        sr = engine.read_only()
+        print(f"Quantité affichée : {sr.selected} (lu {sr.selected_raw!r})")
+        for lot, r in sr.prices.items():
+            new_p = core.compute_price(r.value, cfg.undercut_mode, cfg.undercut_value,
+                                       cfg.rounding, cfg.min_price)
+            print(f"  Lot {lot:>4}: {r.value} (conf {r.confidence:.0f}) -> {new_p}")
 
-def load_config():
-    global PRICE_REGIONS, PRICE_W, ROW_H
-    if not os.path.exists(CONFIG_FILE):
-        return
+    def toggle_pause():
+        engine.paused = not engine.paused
+        print("[Hotkeys]", "En pause" if engine.paused else "Actifs")
+
+    hk = cfg.hotkeys
+    keyboard.add_hotkey(hk["sell"], game_action(False))
+    keyboard.add_hotkey(hk["optimize"], game_action(True))
+    keyboard.add_hotkey(hk["sell_all"], game_action(False, all_=True))
+    keyboard.add_hotkey(hk["calibrate_table"], lambda: calib_rect("table"))
+    keyboard.add_hotkey(hk["calibrate_qty"], lambda: calib_rect("qty"))
+    keyboard.add_hotkey(hk["calibrate_avg"], lambda: calib_rect("avg"))
+    keyboard.add_hotkey(hk["calibrate_count"], lambda: calib_rect("count"))
+    keyboard.add_hotkey(hk["calibrate_field"], lambda: calib_point("price_field"))
+    keyboard.add_hotkey(hk["calibrate_button"], lambda: calib_point("sell_button"))
+    def relist_action(all_: bool):
+        def cb():
+            if engine.paused or not core.game_has_focus(cfg):
+                return
+            report(engine.relist_all() if all_ else engine.relist())
+        return cb
+
+    def calib_rows():
+        print(f"[Calib] lignes : {engine.calibrate_rows()}")
+
+    keyboard.add_hotkey(hk["relist"], relist_action(False))
+    keyboard.add_hotkey(hk["relist_all"], relist_action(True))
+    keyboard.add_hotkey(hk["calibrate_mine"], lambda: calib_rect("mine"))
+    keyboard.add_hotkey(hk["calibrate_modify"], lambda: calib_point("modify_button"))
+    keyboard.add_hotkey(hk["calibrate_rows"], calib_rows)
+    keyboard.add_hotkey(hk["pause"], toggle_pause)
+    keyboard.add_hotkey("ctrl+shift+p", print_all)
+
+    print("Dofus Price Helper (CLI) prêt.")
+    print(f"Tableau: {'OK' if cfg.table_region else 'à calibrer'} | "
+          f"Quantité: {'OK' if cfg.qty_region else 'à calibrer'} | coller auto : {cfg.auto_paste}")
+    print(f"Quitter : {hk['quit']}")
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if "PRICE_REGIONS" in data:
-            PRICE_REGIONS = {k: (tuple(v) if v else None) for k, v in data["PRICE_REGIONS"].items()}
-            print("[Config] Loaded PRICE_REGIONS:", PRICE_REGIONS)
-        PRICE_W = int(data.get("PRICE_W", PRICE_W))
-        ROW_H   = int(data.get("ROW_H", ROW_H))
-    except Exception as e:
-        print("[Config] Failed to load:", e)
-
-def save_config():
-    data = {
-        "PRICE_REGIONS": {k: list(v) if v else None for k,v in PRICE_REGIONS.items()},
-        "PRICE_W": PRICE_W,
-        "ROW_H": ROW_H,
-    }
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        print("[Config] Saved", CONFIG_FILE)
-    except Exception as e:
-        print("[Config] Save failed:", e)
-
-def grab_screen(region: Tuple[int,int,int,int]) -> np.ndarray:
-    x, y, w, h = region
-    with mss.mss() as sct:
-        img = np.array(sct.grab({"left": x, "top": y, "width": w, "height": h}))
-    return img[:, :, :3]  # BGR
-
-def preprocess_for_ocr(img_bgr: np.ndarray) -> np.ndarray:
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    up   = cv2.resize(gray, (gray.shape[1]*SCALE, gray.shape[0]*SCALE), interpolation=cv2.INTER_CUBIC)
-    up   = cv2.bilateralFilter(up, d=7, sigmaColor=55, sigmaSpace=55)
-    # Si besoin, inverse : THRESH_BINARY_INV
-    _, th = cv2.threshold(up, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return th
-
-def ocr_number_from_image(img_bgr: np.ndarray) -> Optional[int]:
-    pre = preprocess_for_ocr(img_bgr)
-    txt = pytesseract.image_to_string(pre, config=TESSERACT_CONFIG)
-    if DEBUG:
-        print("[OCR raw]", repr(txt))
-    digits = re.sub(r"[^0-9]", "", txt)
-    return int(digits) if digits else None
-
-def undercut(price: int) -> int:
-    if price is None:
-        return None
-    if UNDERCUT_MODE.lower() == "percent":
-        new_price = int(round(price * (1 - float(UNDERCUT_VALUE)/100.0)))
-    else:
-        new_price = price - int(UNDERCUT_VALUE)
-    return max(MIN_PRICE, new_price)
-
-def paste_price(p: int):
-    if p is None:
-        return
-    pyperclip.copy(str(p))
-    time.sleep(0.05)
-    keyboard.press_and_release("ctrl+v")
-
-# ---------- Calibration des zones fixes ----------
-def set_price_region_for(lot: str):
-    """Place le pointeur au centre du PRIX de la ligne (1/10/100) puis appuie sur le hotkey."""
-    x, y = pyautogui.position()
-    left = x - PRICE_W // 2
-    top  = y - ROW_H // 2
-    PRICE_REGIONS[lot] = (left, top, PRICE_W, ROW_H)
-    save_config()
-    print(f"[Calib] PRICE_REGIONS[{lot}] = {PRICE_REGIONS[lot]}")
-
-def read_price_from_fixed_region(lot: str) -> Optional[int]:
-    region = PRICE_REGIONS.get(lot)
-    if not region:
-        print(f"[Info] No fixed region for lot {lot}. Calibrate with Ctrl+Alt+F{1 if lot=='1' else 2 if lot=='10' else 3}.")
-        return None
-    img = grab_screen(region)
-    if DEBUG:
-        cv2.imwrite(os.path.join(DEBUG_DIR, f"price_{lot}_{int(time.time()*1000)}.png"), img)
-    return ocr_number_from_image(img)
-
-def print_all_prices():
-    p1   = read_price_from_fixed_region("1")
-    p10  = read_price_from_fixed_region("10")
-    p100 = read_price_from_fixed_region("100")
-    print(f"Lot 1:   {p1}  -> {undercut(p1) if p1 is not None else None}")
-    print(f"Lot 10:  {p10} -> {undercut(p10) if p10 is not None else None}")
-    print(f"Lot 100: {p100}-> {undercut(p100) if p100 is not None else None}")
-
-def show_mouse():
-    x, y = pyautogui.position()
-    print(f"Mouse: x={x}, y={y}")
-
-def main():
-    init()
-    print("Dofus Price Helper (FIXED).")
-    print("Calibre chaque lot: place la souris AU CENTRE du prix, puis:")
-    print("  Ctrl+Alt+F1 (lot 1) | Ctrl+Alt+F2 (lot 10) | Ctrl+Alt+F3 (lot 100)")
-    print("Ensuite utilise F1/F2/F3 dans le champ de prix pour coller l’undercut.")
-    # Hotkeys calibrage
-    keyboard.add_hotkey(HOTKEY_CAL_1,   lambda: set_price_region_for("1"))
-    keyboard.add_hotkey(HOTKEY_CAL_10,  lambda: set_price_region_for("10"))
-    keyboard.add_hotkey(HOTKEY_CAL_100, lambda: set_price_region_for("100"))
-    # Hotkeys lecture/collage
-    keyboard.add_hotkey(HOTKEY_QTY1,    lambda: (lambda p=read_price_from_fixed_region("1"):   paste_price(undercut(p)) if p is not None else print("No price for 1"))())
-    keyboard.add_hotkey(HOTKEY_QTY10,   lambda: (lambda p=read_price_from_fixed_region("10"):  paste_price(undercut(p)) if p is not None else print("No price for 10"))())
-    keyboard.add_hotkey(HOTKEY_QTY100,  lambda: (lambda p=read_price_from_fixed_region("100"): paste_price(undercut(p)) if p is not None else print("No price for 100"))())
-    # Debug
-    keyboard.add_hotkey(HOTKEY_PRINT, print_all_prices)
-    keyboard.add_hotkey(HOTKEY_MOUSE, show_mouse)
-    # Wait
-    try:
-        keyboard.wait(HOTKEY_QUIT)
+        keyboard.wait(hk["quit"])
     except KeyboardInterrupt:
         pass
-    finally:
-        print("Bye!")
+    print("Bye!")
+    return 0
+
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print("Error:", e)
+    sys.exit(main())

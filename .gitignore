@@ -1,0 +1,17 @@
+# Config perso (coordonnées écran) et historique de ventes
+dofus_price_helper_config.json
+dofus_price_history*.csv
+captures/
+*.tmp
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.spec
+
+.ven-win/

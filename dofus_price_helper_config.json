@@ -1,24 +1,109 @@
 {
-  "PRICE_REGIONS": {
-    "1": [
-      1039,
-      830,
-      130,
-      36
-    ],
-    "10": [
-      1035,
-      864,
-      130,
-      36
-    ],
-    "100": [
-      1026,
-      900,
-      130,
-      36
-    ]
-  },
-  "PRICE_W": 130,
-  "ROW_H": 36
+  "CONFIG_VERSION": 4,
+  "TESSERACT_CMD": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+  "LOTS": [
+    1,
+    10,
+    100,
+    1000
+  ],
+  "TABLE_REGION": [
+    869,
+    856,
+    216,
+    138
+  ],
+  "QTY_REGION": [
+    879,
+    624,
+    108,
+    23
+  ],
+  "PRICE_FIELD": [
+    929,
+    578
+  ],
+  "SELL_BUTTON": [
+    972,
+    768
+  ],
+  "AVG_REGION": [
+    876,
+    729,
+    17,
+    15
+  ],
+  "COUNT_REGION": [
+    1099,
+    1075,
+    49,
+    11
+  ],
+  "MINE_REGION": [
+    877,
+    550,
+    667,
+    513
+  ],
+  "MODIFY_BUTTON": [
+    1031,
+    770
+  ],
+  "RELIST_ROW": [
+    1346,
+    571
+  ],
+  "RELIST_STEP": 51,
+  "TABLE_SPLIT": 0.45,
+  "SCALE": 2,
+  "UNDERCUT_MODE": "fixed",
+  "UNDERCUT_VALUE": 1.0,
+  "MIN_PRICE": 1,
+  "ROUNDING": "none",
+  "TIE_TOLERANCE": 0.01,
+  "MIN_CONFIDENCE": 60.0,
+  "MAX_RATIO": 5.0,
+  "CONFIRM_WINDOW": 3.0,
+  "OWN_PRICE_TTL": 1800.0,
+  "MIN_AVG_RATIO": 0.5,
+  "SELL_ALL_MAX": 20,
+  "SELL_ALL_DELAY": 0.6,
+  "VERIFY_COUNT": true,
+  "RELIST_AUTO": true,
+  "RELIST_ROWS": 10,
+  "RELIST_SCROLL": 3,
+  "RELIST_MAX": 120,
+  "RELIST_DELAY": 0.5,
+  "AUTO_PASTE": true,
+  "CLICK_FIELD": true,
+  "INPUT_METHOD": "paste",
+  "CLEAR_METHOD": "backspace",
+  "AUTO_VALIDATE": true,
+  "VALIDATE_METHOD": "enter",
+  "RESTORE_CLIPBOARD": true,
+  "WINDOW_PROCESS": "dofus",
+  "WINDOW_TITLE": " - Release",
+  "REQUIRE_FOCUS": true,
+  "SOUND": true,
+  "TOAST": true,
+  "CALIB_COUNTDOWN": 3,
+  "HOTKEYS": {
+    "sell": "f1",
+    "sell_all": "f2",
+    "optimize": "f4",
+    "calibrate_table": "ctrl+alt+f1",
+    "calibrate_qty": "ctrl+alt+f2",
+    "calibrate_field": "ctrl+alt+f3",
+    "calibrate_button": "ctrl+alt+f4",
+    "calibrate_avg": "ctrl+alt+f5",
+    "calibrate_count": "ctrl+alt+f6",
+    "relist": "f3",
+    "relist_all": "ctrl+f3",
+    "calibrate_mine": "ctrl+alt+f7",
+    "calibrate_modify": "ctrl+alt+f8",
+    "calibrate_rows": "ctrl+alt+f9",
+    "show_zones": "ctrl+alt+v",
+    "pause": "ctrl+alt+p",
+    "quit": "ctrl+alt+q"
+  }
 }
