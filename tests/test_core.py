@@ -551,6 +551,7 @@ def relist_engine(monkeypatch):
     monkeypatch.setattr(core, "input_price", lambda v, c, paste=True, validate=False:
                         calls.append(("paste" if paste else "copy", v)) or "saisi")
     monkeypatch.setattr(core, "press_modify", lambda c: calls.append("modify"))
+    monkeypatch.setattr(core, "press_enter", lambda: calls.append("enter"))
     monkeypatch.setattr(core, "log_history", lambda *a, **k: None)
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     monkeypatch.setattr(core, "read_mine",
@@ -571,7 +572,7 @@ def scr(prices, sel=1, avg=None):
 def test_relist_undercuts_competitor(relist_engine):
     eng, calls, st = relist_engine
     st["screens"] = [scr({1: 760, 10: 6999})]
-    st["mine"] = [774, 759]                        # avant / après « Modifier »
+    st["mine"] = [774, None]                       # avant / après « Modifier » (panneau vidé)
     res = eng.relist()
     assert res.level == "ok" and "modifié" in res.message and calls == [("paste", 759), "modify"]
 
@@ -588,7 +589,7 @@ def test_relist_aligns_on_own_other_listing(relist_engine):
     # 3 lignes du même objet : la 1re passe à 759, les suivantes s'alignent (pas 758, 757…)
     eng, calls, st = relist_engine
     st["screens"] = [scr({1: 760}), scr({1: 759})]
-    st["mine"] = [774, 759, 774, 759]
+    st["mine"] = [774, None, 774, None]
     eng.relist()
     res = eng.relist()
     assert calls == [("paste", 759), "modify", ("paste", 759), "modify"] and "aligné" in res.message
@@ -597,7 +598,7 @@ def test_relist_aligns_on_own_other_listing(relist_engine):
 def test_relist_unconfirmed(relist_engine):
     eng, calls, st = relist_engine
     st["screens"] = [scr({1: 760})]
-    st["mine"] = [774, 774]                        # « Modifier » sans effet
+    st["mine"] = [774, 774, 774]                   # « Modifier » sans effet, même après Entrée
     res = eng.relist()
     assert res.level == "warn" and "NON confirmée" in res.message
 
@@ -606,7 +607,7 @@ def test_relist_avg_guard_then_force(relist_engine):
     eng, calls, st = relist_engine
     eng.cfg.floor_mode = "stop"
     st["screens"] = [scr({1: 300}, avg=1189), scr({1: 300}, avg=1189)]
-    st["mine"] = [774, 774, 299]
+    st["mine"] = [774, 774, None]
     res = eng.relist()
     assert res.level == "warn" and "prix moyen" in res.message and calls == [("copy", 299)]
     res = eng.relist()                             # ré-appui = forcer
@@ -802,7 +803,7 @@ def test_sell_all_continues_at_floor(seq_engine, monkeypatch):
 def test_relist_floor(relist_engine):
     eng, calls, st = relist_engine
     st["screens"] = [scr({1: 300}, avg=1189)]
-    st["mine"] = [1200, 833]
+    st["mine"] = [1200, None]
     res = eng.relist()
     assert res.level == "ok" and "plancher" in res.message and calls == [("paste", 833), "modify"]
 
@@ -827,7 +828,7 @@ def test_relist_keep_mode(relist_engine):
 def test_relist_above_floor_normal_undercut(relist_engine):
     eng, calls, st = relist_engine
     st["screens"] = [scr({1: 1000}, avg=1189)]            # 999 >= plancher 833 : undercut normal
-    st["mine"] = [1100, 999]
+    st["mine"] = [1100, None]
     eng.relist()
     assert calls == [("paste", 999), "modify"]
 
@@ -840,3 +841,37 @@ def test_same_row_sees_one_digit_change():
     other[12:28, 362:366] = 45                            # un seul chiffre change (76 -> 75)
     assert core._same_row(row, row.copy())
     assert not core._same_row(row, other)
+
+
+def test_relist_confirmation_popup_enter(relist_engine):
+    # après « Modifier » le panneau reste affiché (fenêtre de confirmation) : Entrée, puis vidé
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 760})]
+    st["mine"] = [774, 759, None]
+    res = eng.relist()
+    assert res.level == "ok" and "confirmation validée" in res.message
+    assert calls == [("paste", 759), "modify", "enter"]
+
+
+def test_relist_all_continues_at_modified_position(relist_engine, monkeypatch):
+    # modification sur la 2e ligne : on reprend à la 2e ligne (relue), pas en haut de page
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 3
+    clicks = []
+    monkeypatch.setattr(core, "click_at", lambda p: clicks.append(p))
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    n = [0]
+    monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
+                        np.random.default_rng(n[0]).integers(0, 255, (8, 8, 3)).astype(np.uint8))
+    st["screens"] = [scr({1: 87}), scr({1: 760}), scr({1: 50}), scr({1: 26})]
+    st["mine"] = [87, 774, None, 50, 26]
+    res = eng.relist_all()
+    assert "1 modifiées" in res.message
+    assert clicks == [(100, 100), (100, 150), (100, 150), (100, 200)]
+
+
+def test_config_v4_gets_new_relist_max(tmp_path):
+    p = tmp_path / "cfg.json"
+    p.write_text(json.dumps({"CONFIG_VERSION": 4, "RELIST_MAX": 120}))
+    assert core.Config.load(p).relist_max == 400

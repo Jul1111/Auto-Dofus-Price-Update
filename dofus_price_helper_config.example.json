@@ -1,5 +1,5 @@
 {
-  "CONFIG_VERSION": 4,
+  "CONFIG_VERSION": 5,
   "TESSERACT_CMD": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
   "LOTS": [
     1,
@@ -38,8 +38,10 @@
   "RELIST_AUTO": false,
   "RELIST_ROWS": 10,
   "RELIST_SCROLL_MAX": 40,
-  "RELIST_MAX": 120,
+  "RELIST_SCROLL_PAGE": 0.5,
+  "RELIST_MAX": 400,
   "RELIST_DELAY": 0.5,
+  "RELIST_CONFIRM_ENTER": true,
   "AUTO_PASTE": false,
   "CLICK_FIELD": false,
   "INPUT_METHOD": "paste",

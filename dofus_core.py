@@ -44,7 +44,7 @@ HISTORY_PATH = BASE_DIR / "dofus_price_history.csv"
 DIGITS_PATH = BASE_DIR / "digit_templates.npz"   # modèles de chiffres appris (lecture rapide)
 HISTORY_HEADER = ["ts", "datetime", "action", "lot", "selected_qty", "read_price", "confidence",
                   "new_price", "status", "mode", "value", "rounding"]
-CONFIG_VERSION = 4
+CONFIG_VERSION = 5
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -145,8 +145,10 @@ class Config:
     relist_auto: bool = False         # Ctrl+F3 : parcourir toute la liste seul (risque CGU : à toi de voir)
     relist_rows: int = 10             # lignes entièrement visibles dans la liste
     relist_scroll_max: int = 40       # crans de molette max pour passer une page
-    relist_max: int = 120             # lignes traitées max par appui
+    relist_scroll_page: float = 0.5   # défilement visé : 0.5 = une demi-page entre deux lectures
+    relist_max: int = 400             # garde-fou : lignes lues max par appui (boucle infinie impossible)
     relist_delay: float = 0.5         # s après un clic sur une ligne / une modification
+    relist_confirm_enter: bool = True # « Modifier » : Entrée si une fenêtre de confirmation reste ouverte
 
     # Saisie
     auto_paste: bool = False          # coller automatiquement (sinon copie seule)
@@ -180,7 +182,7 @@ class Config:
         except (OSError, json.JSONDecodeError) as e:
             print(f"[Config] Lecture impossible ({e}), valeurs par défaut.")
             return cfg
-        old = int(data.get("CONFIG_VERSION", 1)) < CONFIG_VERSION
+        old = int(data.get("CONFIG_VERSION", 1)) < 2  # v1 seulement : raccourcis incompatibles
         for name in cfg.__dataclass_fields__:
             key = name.upper()
             if key not in data or name == "config_version":
@@ -210,6 +212,8 @@ class Config:
             # v4 : la frappe chiffre par chiffre ne marche pas en AZERTY (touche "6" = "-")
             # -> collage Ctrl+V (validé en jeu) ; le champ est vidé par Fin + Retour arrière.
             cfg.input_method, cfg.clear_method = "paste", "backspace"
+        if int(data.get("CONFIG_VERSION", 1)) < 5 and cfg.relist_max == 120:
+            cfg.relist_max = cls.relist_max  # v5 : 120 était trop bas pour une liste de 100+ lots
         cfg.config_version = CONFIG_VERSION
         return cfg
 
@@ -541,17 +545,30 @@ def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool =
         cv2.imwrite(str(debug_dir / f"ocr_{int(time.time() * 1000)}.png"), comp)
     data, engine = _ocr(comp, bounds, cfg)
     inner_w = imgs[0].shape[1] - 2 * BORDER
+    res = _parse_screen(data, bounds, inner_w, cfg, len(regions), mine_img is not None)
+    if engine == "chiffres" and (not res.prices or (cfg.qty_region and res.selected is None)):
+        # Lecture rapide incomplète (tableau vide, quantité manquante) : Tesseract tranche.
+        data, engine = _ocr(comp, bounds, cfg, force_tesseract=True)
+        res = _parse_screen(data, bounds, inner_w, cfg, len(regions), mine_img is not None)
+    res.engine = engine
+    ENGINE_STATS[engine] = ENGINE_STATS.get(engine, 0) + 1
+    return res
+
+
+ENGINE_STATS: Dict[str, int] = {}   # nombre de lectures par moteur (« chiffres » / « tesseract »)
+
+
+def _parse_screen(data, bounds, inner_w: int, cfg: Config, n_regions: int, with_mine: bool) -> ScreenRead:
     res = ScreenRead(prices=parse_table(data, bounds[0], inner_w, cfg.table_split, cfg.lots))
     if cfg.qty_region:
         q = parse_number(data, bounds[1])
         res.selected_raw = q.raw
         res.selected = q.value if q.value in cfg.lots else None
     if cfg.avg_region:
-        a = parse_number(data, bounds[len(regions) - 1])
+        a = parse_number(data, bounds[n_regions - 1])
         res.avg = a.value if a.value and a.confidence >= cfg.min_confidence else None
-    if mine_img is not None:
+    if with_mine:
         res.mine_r = parse_number(data, bounds[-1])
-    res.engine = engine
     return res
 
 
@@ -572,13 +589,13 @@ def digit_reader():
         return _digits
 
 
-def _ocr(comp: np.ndarray, bounds, cfg: Config):
+def _ocr(comp: np.ndarray, bounds, cfg: Config, force_tesseract: bool = False):
     """Lecture rapide si les chiffres sont appris et tous reconnus avec certitude ;
     sinon Tesseract (qui sert aussi à apprendre). Contrôle croisé régulier."""
     import pytesseract
     global _fast_count
     dr = digit_reader() if cfg.fast_digits else None
-    fast = dr.read_data(comp, bounds) if dr else None
+    fast = dr.read_data(comp, bounds) if dr and not force_tesseract else None
     if fast is not None:
         _fast_count += 1
         if _fast_count % CROSS_CHECK_EVERY:
@@ -598,6 +615,30 @@ def _digits_disagree(a, b, bounds, cfg: Config) -> bool:
         if rb.confidence >= 90 and ra.value != rb.value:
             return True
     return False
+
+
+def detect_rows(strip_bgr: np.ndarray, top: int, step: int) -> List[int]:
+    """Centres (y écran) des lignes ENTIÈREMENT visibles de la liste « mes ventes ».
+    Les lignes (fond ~54, ~74 au survol) sont séparées par des bandes plus sombres (~32) :
+    on les retrouve sur le profil vertical, quel que soit le défilement."""
+    import cv2
+    if strip_bgr.size == 0:
+        return []
+    gray = cv2.cvtColor(strip_bgr, cv2.COLOR_BGR2GRAY) if strip_bgr.ndim == 3 else strip_bgr
+    prof = np.median(gray, axis=1)
+    level = float(np.percentile(prof, 75))
+    is_row = prof > level - 12
+    out, start = [], None
+    for i, r in enumerate(list(is_row) + [False]):
+        if r and start is None:
+            start = i
+        elif not r and start is not None:
+            n = i - start
+            # ligne complète : ni coupée en haut/bas de la zone, ni fusionnée avec la voisine
+            if 0.6 * step <= n <= 1.3 * step and start > 0 and i < len(prof):
+                out.append(top + (start + i - 1) // 2)
+            start = None
+    return out
 
 
 def _same_row(a: np.ndarray, b: np.ndarray) -> bool:
@@ -922,6 +963,11 @@ def press_modify(cfg: Config) -> None:
         keyboard.press_and_release("enter")
 
 
+def press_enter() -> None:
+    import keyboard
+    keyboard.press_and_release("enter")
+
+
 def click_at(p: Point) -> None:
     import pyautogui
     pyautogui.click(*p)
@@ -1201,8 +1247,19 @@ class PriceEngine:
         # Après « Modifier », le jeu désélectionne la vente : panneau vide (« Veuillez
         # sélectionner un objet ») = modification acceptée. Ancien prix encore affiché = échec.
         check = read_mine(cfg)
+        confirmed = ""
+        if check.value is not None and check.confidence >= cfg.min_confidence and cfg.relist_confirm_enter:
+            # Panneau pas vidé : souvent la fenêtre de confirmation du changement de prix.
+            # Entrée la valide (sans elle, la vente reste sélectionnée).
+            before = grab_screen(mine_box)
+            press_enter()
+            wait_change(mine_box, before, cfg.relist_delay)
+            check = read_mine(cfg)
+            confirmed = " (confirmation validée)"
         if check.value is None or check.confidence < cfg.min_confidence:
             log_history("relist", lot, lot, top, new_p, "forced" if forced else "modified", cfg)
+            return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}{confirmed}",
+                          sr, new_p, hint=f"Modifié : {new_p}")
             return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}", sr, new_p,
                           hint=f"Modifié : {new_p}")
         if check.value != new_p:
@@ -1211,8 +1268,22 @@ class PriceEngine:
                           f"{check.value if check.value is not None else '?'})", sr, new_p,
                           hint="Modif. non confirmée")
         log_history("relist", lot, lot, top, new_p, "forced" if forced else "modified", cfg)
-        return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}", sr, new_p,
-                      hint=f"Modifié : {new_p}")
+        return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}{confirmed}",
+                      sr, new_p, hint=f"Modifié : {new_p}")
+
+    def _page_rows(self, shift: int, base: int) -> List[Tuple[int, int]]:
+        """Lignes à cliquer : détectées à l'écran (centres exacts) si possible, sinon
+        calculées depuis le défilement mesuré. Numéro global = position depuis `base`
+        (centre de la 1re ligne au départ) + défilement cumulé."""
+        cfg = self.cfg
+        x0, y0 = cfg.relist_row
+        step = cfg.relist_step
+        top = y0 - step // 2 - step // 3
+        strip = grab_screen((x0 - 60, top, 240, step * cfg.relist_rows + 2 * (step // 3)))
+        ys = detect_rows(strip, top, step)
+        if len(ys) >= 2 and all(abs((b - a) - step) <= 0.25 * step for a, b in zip(ys, ys[1:])):
+            return [(y, int(round((y - base + shift) / step))) for y in ys]
+        return self._visible_rows(shift + (y0 - base))
 
     def _visible_rows(self, shift: int) -> List[Tuple[int, int]]:
         """Lignes cliquables après un défilement de `shift` px depuis le haut :
@@ -1290,18 +1361,31 @@ class PriceEngine:
         back = mouse_position()
         done = changed = same = pages = shift = 0
         seen = -1                     # plus grand numéro global de ligne déjà traité
+        # Origine = 1re ligne visible MAINTENANT (la liste a pu être défilée à la main).
+        first = self._page_rows(0, y0)
+        base = first[0][0] if first else y0
+        rows0 = self._page_rows(0, base)
+        # Souris posée sur une ligne de la liste : on commence à cette ligne (reprise).
+        mx, my = back
+        start_note = ""
+        if rows0 and x0 - 150 <= mx <= x0 + 420 and rows0[0][0] - step // 2 <= my <= rows0[-1][0] + step // 2:
+            y_s, g_s = min(rows0, key=lambda r: abs(r[0] - my))
+            seen = g_s - 1
+            start_note = f", départ ligne sous la souris"
+        last_click = None
         ok_rows: List[np.ndarray] = []  # images de lignes déjà au bon prix (même objet, même prix)
         bad: List[str] = []           # lignes douteuses laissées telles quelles
         fails = 0                     # lignes douteuses consécutives
         skipped = 0
         mine_box = (mine_regions(cfg) or [None])[0]
+        stats0 = dict(ENGINE_STATS)
         stop = "fin de la liste"
         try:
             while True:
-                rows = self._visible_rows(shift)
                 restart = True
                 while restart:
                     restart = False
+                    rows = self._page_rows(shift, base)   # relu à chaque fois : la liste a pu bouger
                     for y, g in rows:
                         if g <= seen:
                             continue
@@ -1321,6 +1405,7 @@ class PriceEngine:
                             continue
                         before = grab_screen(mine_box) if mine_box else None
                         click_at((x0, y))
+                        last_click = (x0, y)
                         wait_change(mine_box, before, cfg.relist_delay)
                         res = self._relist(auto=True)
                         if res.level != "ok" and "NON confirmée" not in res.message:
@@ -1341,19 +1426,21 @@ class PriceEngine:
                             continue
                         fails = 0
                         if "modifié" in res.message:
-                            # la ligne modifiée change de place : on reprend cette page
+                            # La ligne modifiée change de place : la liste se décale. On reprend
+                            # À CETTE POSITION (relue), lignes repérées à nouveau à l'écran.
                             changed += 1
-                            seen = rows[0][1] - 1
+                            seen = g - 1
                             restart = True
                             break
                         same += 1
                         seen = max(seen, g)
                         if len(ok_rows) < 200:
                             ok_rows.append(row_img)
-                # Marge de sécurité : on défile d'une page moins 2 lignes et on relit la
-                # dernière ligne traitée. Une erreur de mesure d'une ligne (lignes identiques)
-                # ne fait donc jamais sauter d'objet ; une ligne relue ne coûte presque rien.
-                moved, err = self._scroll_page(box, max(step, (len(rows) - 2) * step))
+                # Défilement d'une demi-page (RELIST_SCROLL_PAGE) et relecture de la dernière
+                # ligne traitée : une erreur de mesure d'une ligne ne fait jamais sauter
+                # d'objet ; les lignes déjà vues ne sont pas recliquées (numéro global).
+                target = max(step, int(len(rows) * cfg.relist_scroll_page) * step)
+                moved, err = self._scroll_page(box, target)
                 if err:
                     stop = err
                     break
@@ -1367,15 +1454,22 @@ class PriceEngine:
         finally:
             try:
                 import pyautogui
-                pyautogui.moveTo(*back)
+                # Arrêt en cours de route : souris laissée sur la dernière ligne traitée,
+                # Ctrl+F3 reprendra là. Fin de liste : souris remise à sa place.
+                if stop == "fin de la liste" or last_click is None:
+                    pyautogui.moveTo(*back)
+                else:
+                    pyautogui.moveTo(*last_click)
             except Exception:
                 pass
         level = "ok" if stop == "fin de la liste" and not bad else "warn"
-        detail = ""
+        fast_n = ENGINE_STATS.get("chiffres", 0) - stats0.get("chiffres", 0)
+        tess_n = ENGINE_STATS.get("tesseract", 0) - stats0.get("tesseract", 0)
+        detail = f" | lecture rapide {fast_n}/{fast_n + tess_n}" if fast_n + tess_n else ""
         if bad:
-            detail = f" | {len(bad)} ligne(s) douteuse(s) NON modifiée(s), à faire avec F3 : " + " / ".join(bad[:5])
+            detail += f" | {len(bad)} ligne(s) douteuse(s) NON modifiée(s), à faire avec F3 : " + " / ".join(bad[:5])
         return Result(None, level, f"[MAJ TOUT] {done + skipped} lignes vues ({pages + 1} pages, "
-                      f"{skipped} identiques sautées) : "
+                      f"{skipped} identiques sautées{start_note}) : "
                       f"{changed} modifiées, {same} déjà au bon prix | arrêt : {stop}{detail}",
                       hint=f"{changed} modifiées")
 

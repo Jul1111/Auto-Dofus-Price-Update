@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/9d1fd908-4398-410b-accb-64e54f98fd78
   - `stop` : ancien comportement, lecture suspecte si le prix tombe sous `MIN_AVG_RATIO` (50 %) du prix moyen.
 - **F2 vérifié par le compteur** (optionnel, Ctrl+Alt+F6) : après chaque mise en vente, le compteur « 21/100 lots en vente » doit avoir augmenté de 1. Sinon F2 s'arrête (« vente non confirmée »). Arrêt aussi quand l'HDV est plein.
 - **F3 « Mettre à jour mes ventes »** : dans la liste de vos ventes, sélectionnez une ligne puis F3. Si quelqu'un est moins cher, le nouveau prix est collé puis **Modifier** est validé, et le prix affiché ensuite est vérifié. Si le moins cher c'est vous : rien. Plusieurs lignes du même objet s'alignent sur votre nouveau prix (pas 759, 758, 757…).
-- **Ctrl+F3 « toute la liste »** ⚠️ (désactivé : interrupteur dans l'interface, ou `RELIST_AUTO`) : clique chaque ligne visible, met à jour, descend à la molette en mesurant de combien la liste a réellement bougé (cran par cran, jusqu'à une page), reprend à la 1re ligne pas encore vue, jusqu'en bas. Une modification réordonne la liste : la page est alors reprise depuis la 1re ligne (aucune ligne sautée). Une ligne douteuse est relue une fois, puis laissée telle quelle (listée à la fin, à refaire avec F3) ; arrêt après 3 lignes douteuses de suite, sur une modification non confirmée, ou Ctrl+Alt+P.
+- **Ctrl+F3 « toute la liste »** ⚠️ (désactivé : interrupteur dans l'interface, ou `RELIST_AUTO`) : clique chaque ligne visible, met à jour, descend à la molette d'une demi-page (`RELIST_SCROLL_PAGE`) en mesurant de combien la liste a réellement bougé, reprend à la 1re ligne pas encore vue, jusqu'en bas. Départ à la ligne sous la souris si elle est posée sur la liste (sinon en haut) ; arrêt en cours de route = souris laissée sur la dernière ligne traitée, Ctrl+F3 reprend là. Les lignes sont repérées à l'écran (bandes sombres entre elles), même après un défilement à la main. Fenêtre de confirmation du changement de prix : validée par Entrée (`RELIST_CONFIRM_ENTER`). Une modification réordonne la liste : la page est alors reprise depuis la 1re ligne (aucune ligne sautée). Une ligne douteuse est relue une fois, puis laissée telle quelle (listée à la fin, à refaire avec F3) ; arrêt après 3 lignes douteuses de suite, sur une modification non confirmée, ou Ctrl+Alt+P.
 - **Lecture rapide des chiffres** (`FAST_DIGITS`) : l'outil apprend tout seul la police du jeu à partir des lectures sûres de Tesseract (`digit_templates.npz`). Dès que les 10 chiffres sont connus, une lecture prend ~5 ms au lieu de ~100-300 ms. Au moindre chiffre douteux, Tesseract reprend la main ; 1 lecture rapide sur 25 est recontrôlée par Tesseract (désaccord = modèles effacés et réappris). « Lire (test) » affiche le moteur utilisé et le nombre de chiffres appris.
 - **Pas d'undercut contre vous-même** : si le prix en tête est celui que vous venez de mettre (même lot, < 30 min, `OWN_PRICE_TTL`), il est réutilisé tel quel.
 - **F4** : meilleur prix unitaire **parmi les lots possibles** (≤ quantité affichée, que le jeu met au maximum permis par votre stock). Si c'est un lot plus petit, la popup indique lequel choisir.
@@ -137,6 +137,12 @@ Le tableau « Actuellement en vente », la quantité et le prix moyen sont aux m
 3. Pour Ctrl+F3 seulement : souris au centre de la 1re ligne de la liste → **Ctrl+Alt+F9**, puis au centre de la 2e ligne → **Ctrl+Alt+F9**. Réglez `RELIST_ROWS` (lignes entièrement visibles, 10 par défaut), puis activez l'interrupteur « CTRL+F3 : toute la liste » (ou `"RELIST_AUTO": true`).
 
 Chaque modification de prix peut être taxée par le jeu : ne relancez pas en boucle pour 1 kama.
+
+---
+
+### Interface
+
+Onglets **Raccourcis** (aide + vente rapide), **Prix** (undercut, arrondi, plancher), **Mes ventes** (Ctrl+F3, défilement, garde-fou de lignes), **Calibration** (état ✓/✗ de chaque zone + bouton), **Options** (focus, sons, lecture rapide, réapprendre les chiffres). À droite : dernière lecture (quantité, prix par lot et par objet, prix moyen, ton prix, moteur). En-tête : état actif/pause, chiffres appris, compteurs de la session.
 
 ---
 
