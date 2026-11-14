@@ -198,3 +198,32 @@ def test_fast_digits_never_wrong_on_unseen_panel(monkeypatch):
         _, table, qty, avg, mine = PANELS[held_out]
         sr = _read_panel(monkeypatch, held_out)
         assert (sr.values, sr.selected, sr.avg, sr.mine_r.value) == (table, qty, avg, mine), held_out
+
+
+@pytest.mark.parametrize("fixture,name", [
+    ("nom_b5958d42.png", "Nageoire de Compétition"), ("nom_fd90eefb.png", "Cuivre"),
+    ("nom_660bbef6.png", "Bec du Tofu"), ("nom_5bd9b7bc.png", "Laine de Boufton Noir"),
+    ("nom_33bea070.png", "Laine Céleste"), ("nom_7d72b9f1.png", "Poils du Milimulou"),
+    ("nom_b75f7ca5.png", "Cuir de Bouftou Noir")])
+def test_reads_real_item_name(fixture, name):
+    from dofus_items import NameBook, NameReader, key
+    import cv2
+    assert core.setup_tesseract(core.Config()) is None
+    img = cv2.imread(str(Path(__file__).parent / "fixtures" / fixture))
+    got = NameReader(NameBook()).read(img)
+    assert key(got) == key(name) or got == name, got
+
+
+@pytest.mark.parametrize("fixture,mode", [("boutons_mesventes.png", "relist"), ("boutons_vente.png", "sell")])
+def test_detect_panel_mode(monkeypatch, fixture, mode):
+    # ligne des boutons : « Retirer | Modifier » (une de tes ventes) ou « Mettre en vente »
+    _patch_fixture(monkeypatch, fixture)
+    assert core.detect_panel(core.Config(modify_button=[165, 20])) == mode
+
+
+def test_reads_field_with_text_caret(monkeypatch):
+    # « 496| » : le curseur de saisie collé au 6 faisait lire 49 / 494 -> vente bloquée à tort
+    _patch_fixture(monkeypatch, "champ_curseur.png")
+    cfg = core.Config(price_field=[145, 35])
+    assert core.read_mine(cfg).value == 496
+    assert core.field_check(cfg, 496)[0]

@@ -8,53 +8,60 @@
     1000
   ],
   "TABLE_REGION": [
-    869,
-    856,
-    216,
-    138
+    1188,
+    760,
+    148,
+    121
   ],
   "QTY_REGION": [
-    879,
-    624,
-    108,
-    23
+    1156,
+    562,
+    70,
+    15
   ],
   "PRICE_FIELD": [
-    941,
-    576
+    1206,
+    520
   ],
   "SELL_BUTTON": [
-    972,
-    768
+    1238,
+    684
   ],
   "AVG_REGION": [
-    874,
-    707,
-    101,
-    39
+    1152,
+    649,
+    46,
+    16
   ],
   "COUNT_REGION": [
-    1097,
-    1066,
-    146,
+    1347,
+    947,
+    121,
     20
   ],
-  "ANCHOR_REGION": null,
-  "MINE_REGION": [
-    1106,
-    542,
-    437,
-    519
+  "ANCHOR_REGION": [
+    1401,
+    365,
+    121,
+    12
   ],
+  "NAME_REGION": [
+    1202,
+    434,
+    126,
+    37
+  ],
+  "READ_ITEM_NAMES": true,
+  "MINE_REGION": null,
   "MODIFY_BUTTON": [
-    1031,
-    770
+    1285,
+    683
   ],
   "RELIST_ROW": [
-    1346,
-    571
+    1564,
+    515
   ],
-  "RELIST_STEP": 51,
+  "RELIST_STEP": 44,
   "TABLE_SPLIT": 0.45,
   "SCALE": 2,
   "FAST_DIGITS": true,
@@ -85,6 +92,10 @@
   "INPUT_METHOD": "paste",
   "CLEAR_METHOD": "backspace",
   "AUTO_VALIDATE": true,
+  "VERIFY_BEFORE_ENTER": true,
+  "SMART_F1": true,
+  "BANNER": true,
+  "ALWAYS_ON_TOP": true,
   "VALIDATE_METHOD": "enter",
   "RESTORE_CLIPBOARD": true,
   "WINDOW_PROCESS": "dofus",
@@ -109,6 +120,7 @@
     "calibrate_modify": "ctrl+alt+f8",
     "calibrate_rows": "ctrl+alt+f9",
     "calibrate_anchor": "ctrl+alt+f10",
+    "calibrate_name": "ctrl+alt+f11",
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
     "quit": "ctrl+alt+q"

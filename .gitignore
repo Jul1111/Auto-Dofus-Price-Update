@@ -15,4 +15,3 @@ dist/
 *.spec
 digit_templates*.npz
 hdv_anchor.png
-dashboard.html

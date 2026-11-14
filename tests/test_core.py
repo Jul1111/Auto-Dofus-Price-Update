@@ -1,3 +1,4 @@
+import csv
 import json
 import sys
 from pathlib import Path
@@ -260,7 +261,8 @@ def _flush_restore():
         t.function()                                 # exécute la restauration tout de suite
 
 
-def test_input_default_clears_then_pastes(fake_io):
+def test_input_default_clears_then_pastes(fake_io, monkeypatch):
+    monkeypatch.setattr(core, "read_mine", lambda c: core.Reading(689, 95))  # champ relu = bon prix
     cfg = core.Config(price_field=[100, 205], click_field=True, sell_button=[110, 370])
     assert core.input_price(689, cfg, paste=True, validate=True) == "saisi + mis en vente"
     assert fake_io.log == (["click(100, 205)", "end"] + ["backspace"] * 12
@@ -362,8 +364,10 @@ def seq_engine(monkeypatch):
                         calls.append((v, paste, validate)) or
                         ("saisi + mis en vente" if validate else "saisi" if paste else "copié"))
     monkeypatch.setattr(core, "log_history", lambda *a, **k: None)
-    monkeypatch.setattr(core, "press_validate", lambda c: calls.append("enter"))
+    monkeypatch.setattr(core, "press_validate", lambda c, expected=None: calls.append("enter") or True)
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    monkeypatch.setattr(core, "grab_screen", lambda r: np.zeros((2, 2, 3), np.uint8))
+    monkeypatch.setattr(core, "wait_any_change", lambda *a, **k: False)
     cfg = core.Config(table_region=[0, 0, 1, 1], qty_region=[0, 0, 1, 1], auto_paste=True)
     eng = core.PriceEngine(cfg)
 
@@ -559,7 +563,8 @@ def relist_engine(monkeypatch):
     monkeypatch.setattr(core, "read_screen", lambda c, d=None, with_mine=False: state["screens"].pop(0))
     monkeypatch.setattr(core, "grab_screen", lambda r: np.zeros((2, 2, 3), np.uint8))
     monkeypatch.setattr(core, "wait_change", lambda *a, **k: None)
-    cfg = core.Config(table_region=[0, 0, 1, 1], qty_region=[0, 0, 1, 1], mine_region=[0, 0, 1, 1])
+    cfg = core.Config(table_region=[0, 0, 1, 1], qty_region=[0, 0, 1, 1], mine_region=[0, 0, 1, 1],
+                      verify_before_enter=False)  # vérification testée à part
     return core.PriceEngine(cfg), calls, state
 
 
@@ -935,6 +940,129 @@ def test_dashboard_builds(tmp_path):
     data = dash.compute(dash.load_rows(h))
     assert data["count"]["vente"] == 2 and data["count"]["modif"] == 1 and data["count"]["suspect"] == 1
     assert data["kamas"] == 599 + 5999 and data["lots"] == {1: 1, 10: 1}
-    out = dash.build(h, tmp_path / "d.html")
-    page = out.read_text(encoding="utf-8")
-    assert "Tableau de bord" in page and "6 598" in page and "<svg" in page
+    assert dash.fmt(data["kamas"]) == "6 598" and list(data["days"]) == ["2026-11-13", "2026-11-14"]
+
+
+# --- Nom des objets
+def test_clean_name():
+    from dofus_items import clean_name
+    assert clean_name("Nageoire de\nCompétition\nNIV. 18") == "Nageoire de Compétition"
+    assert clean_name("Laine Céleste\nNIv, 3") == "Laine Céleste"
+    assert clean_name("Cuivre\n") == "Cuivre"
+    assert clean_name("|\n,,") == ""
+
+
+def test_name_snap_and_group():
+    from dofus_items import NameBook, group_names
+    book = NameBook(["Nageoire de Compétition"] * 5 + ["Cuivre"])
+    assert book.snap("Nagcoire de Compétition") == "Nageoire de Compétition"
+    assert book.snap("Bec du Tofu") is None
+    g = group_names(["Poils du Milimulou"] * 4 + ["Poiis du Milimulou", "Cuivre"])
+    assert g["Poiis du Milimulou"] == "Poils du Milimulou" and g["Cuivre"] == "Cuivre"
+
+
+def test_history_migrates_old_header_and_writes_item(tmp_path, monkeypatch):
+    h = tmp_path / "h.csv"
+    old = core.HISTORY_HEADER[:-1]
+    h.write_text(",".join(old) + "\n1,2026-11-13 22:05:01,sell,1,1,600,95,599,saisi,fixed,1.0,none\n",
+                 encoding="utf-8")
+
+    class FakeReader:
+        def read(self, img):
+            return "Cuivre"
+    monkeypatch.setattr(core, "name_reader", lambda: FakeReader())
+    cfg = core.Config()
+    core.log_history("relist", 1, 1, core.Reading(77, 95), 76, "modified", cfg, path=h,
+                     item_img=np.zeros((4, 4, 3), np.uint8))
+    core.flush_history(3)
+    rows = list(csv.DictReader(h.open(encoding="utf-8")))
+    assert list(rows[0]) == core.HISTORY_HEADER and len(rows) == 2
+    assert rows[0]["item"] == "" and rows[1]["item"] == "Cuivre" and rows[1]["new_price"] == "76"
+    assert not list(tmp_path.glob("*_old_*"))          # rien d'archivé, colonne ajoutée
+
+
+def test_relist_logs_observation_when_cheapest(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    logged = []
+    monkeypatch.setattr(core, "log_history", lambda *a, **k: logged.append(a[0]))
+    st["screens"] = [scr({1: 774})]
+    st["mine"] = [774]
+    eng.relist()
+    assert logged == ["observe"]
+
+
+def test_dashboard_items(tmp_path):
+    import dofus_dashboard as dash
+    h = tmp_path / "dofus_price_history.csv"
+    lines = [",".join(core.HISTORY_HEADER)]
+    for i, (act, read, new, st, item) in enumerate([
+            ("sell", 80, 79, "saisi + mis en vente", "Cuivre"),
+            ("observe", 79, 79, "cheapest", "Cuivre"),
+            ("relist", 75, 74, "modified", "Cuivrc"),            # variante de lecture
+            ("relist", 400, 399, "modified", "Nageoire de Compétition")]):
+        lines.append(f"{1794603900 + i * 60},2026-11-13 22:0{i}:00,{act},1,1,{read},95,{new},{st},fixed,1.0,none,{item}")
+    h.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    items = dash.compute(dash.load_rows(h))["items"]
+    assert list(items) == ["Cuivre", "Nageoire de Compétition"]
+    c = items["Cuivre"]
+    assert c["ventes"] == 1 and c["modifs"] == 1 and [p[1] for p in c["points"]] == [80, 79, 75]
+    assert c["last_low"] == 75 and c["points"][1][2] == 79
+
+
+
+# --- Vérification du prix avant validation
+def test_input_price_blocks_wrong_paste(monkeypatch):
+    sent = []
+    import types
+    kb = types.SimpleNamespace(press_and_release=lambda k: sent.append(k))
+    monkeypatch.setitem(sys.modules, "keyboard", kb)
+    monkeypatch.setitem(sys.modules, "pyautogui", types.SimpleNamespace(click=lambda *a: None,
+                                                                         moveTo=lambda *a: None))
+    monkeypatch.setitem(sys.modules, "pyperclip", types.SimpleNamespace(copy=lambda t: None,
+                                                                         paste=lambda: "", ))
+    monkeypatch.setattr(core, "_set_clipboard", lambda pc, t, tries=3: True)
+    monkeypatch.setattr(core, "_take_clipboard", lambda pc, cfg: None)
+    monkeypatch.setattr(core, "_schedule_restore", lambda pc, d=1.0: None)
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    reads = iter([core.Reading(4, 95), core.Reading(4, 95)])   # le champ montre « 4 » (mauvais collage)
+    monkeypatch.setattr(core, "read_mine", lambda c: next(reads))
+    cfg = core.Config(price_field=[10, 10])
+    done = core.input_price(69, cfg, paste=True, validate=True)
+    assert "PAS validé" in done and "enter" not in sent
+    reads2 = iter([core.Reading(69, 95)])
+    monkeypatch.setattr(core, "read_mine", lambda c: next(reads2))
+    sent.clear()
+    assert core.input_price(69, cfg, paste=True, validate=True) == "saisi + mis en vente" and "enter" in sent
+
+
+def test_press_validate_checks_field(monkeypatch):
+    import types
+    sent = []
+    monkeypatch.setitem(sys.modules, "keyboard", types.SimpleNamespace(press_and_release=lambda k: sent.append(k)))
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    monkeypatch.setattr(core, "read_mine", lambda c: core.Reading(70, 95))
+    cfg = core.Config(price_field=[10, 10])
+    assert core.press_validate(cfg, expected=69) is False and sent == []
+    assert core.press_validate(cfg, expected=70) is True and sent == ["enter"]
+
+
+def test_relist_not_modified_if_field_wrong(relist_engine):
+    eng, calls, st = relist_engine
+    eng.cfg.verify_before_enter = True
+    st["screens"] = [scr({1: 760})]
+    st["mine"] = [774, 774, 774]                  # après collage, le champ affiche encore 774
+    res = eng.relist()
+    assert res.level == "warn" and "PAS modifié" in res.message and "modify" not in calls
+
+
+def test_smart_f1_routes_by_panel(monkeypatch):
+    eng = core.PriceEngine(core.Config(modify_button=[1, 1]))
+    monkeypatch.setattr(eng, "relist", lambda: "relist")
+    monkeypatch.setattr(eng, "sell", lambda optimize=False: "sell")
+    monkeypatch.setattr(core, "detect_panel", lambda c: "relist")
+    assert eng.smart() == "relist"
+    monkeypatch.setattr(core, "detect_panel", lambda c: "sell")
+    assert eng.smart() == "sell"
+    eng.cfg.smart_f1 = False
+    monkeypatch.setattr(core, "detect_panel", lambda c: "relist")
+    assert eng.smart() == "sell"

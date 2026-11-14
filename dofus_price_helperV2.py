@@ -57,7 +57,7 @@ def main() -> int:
                 info = core.foreground_info() or ("?", "?")
                 print(f"[Focus] Ignoré : fenêtre active « {info[0]} » ({info[1]})")
                 return
-            report(engine.sell_all() if all_ else engine.sell(optimize=optimize))
+            report(engine.sell_all() if all_ else engine.sell(optimize=True) if optimize else engine.smart())
         return cb
 
     def calib_rect(name):
@@ -109,6 +109,7 @@ def main() -> int:
     keyboard.add_hotkey(hk["relist_all"], relist_action(True))
     keyboard.add_hotkey(hk["calibrate_mine"], lambda: calib_rect("mine"))
     keyboard.add_hotkey(hk["calibrate_anchor"], lambda: calib_rect("anchor"))
+    keyboard.add_hotkey(hk["calibrate_name"], lambda: calib_rect("name"))
     keyboard.add_hotkey(hk["calibrate_modify"], lambda: calib_point("modify_button"))
     keyboard.add_hotkey(hk["calibrate_rows"], calib_rows)
     keyboard.add_hotkey(hk["pause"], toggle_pause)

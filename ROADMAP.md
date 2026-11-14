@@ -35,9 +35,9 @@ Reste : **7** (version .exe).
 
 ## 📊 Suivi
 
-### 6. Tableau de bord — ✅ FAIT (`dofus_dashboard.py`, bouton « Tableau de bord »)
-- Page `dashboard.html` générée depuis l'historique, sans internet : lots et kamas mis en vente, prix modifiés, activité par heure, taille des lots, baisse moyenne, lectures suspectes, dernières actions.
-- Limite : l'historique ne contient pas le nom des objets (pas de détail par objet).
+### 6. Tableau de bord — ✅ FAIT (onglet de l'interface)
+- Onglet « Tableau de bord » calculé depuis l'historique (`dofus_dashboard.py`), actualisé à chaque action : lots et kamas mis en vente, prix modifiés, activité par heure, taille des lots, baisse moyenne, lectures suspectes, dernières actions.
+- Nom des objets lu en arrière-plan (`dofus_items.py`) → détail par objet : courbe « moins cher lu / ton prix » dans le temps et liste des objets.
 
 ### 7. Version .exe
 - Un seul fichier à lancer (PyInstaller), sans Python ni terminal.
@@ -55,8 +55,13 @@ Reste : **7** (version .exe).
 - Lecture rapide des chiffres apprise (~5 ms au lieu de ~100-300 ms), Tesseract en secours.
 - Prix plancher (70 % du prix moyen par défaut) : au plancher / garder mon prix / arrêt.
 - Zones qui suivent l'HDV déplacé (repère « Hôtel de vente »).
-- Tableau de bord HTML de l'historique.
+- Tableau de bord intégré à l'interface (onglet), avec prix par objet (nom lu en arrière-plan).
 - Interface à onglets (Raccourcis, Prix, Mes ventes, Calibration, Options).
+- Prix relu dans « Prix du lot » avant chaque validation (F1, F2, F3) : jamais un mauvais collage validé.
+- F2 sans pause fixe : attend le changement à l'écran (compteur, quantité, tableau).
+- F1 intelligent : vend ou met à jour selon le panneau (« Mettre en vente » ou « Retirer | Modifier »).
+- Assistant de calibration pas à pas avec vérification finale.
+- Bandeau de résultat fixe au-dessus de l'HDV.
 
 ## ⚠️ Rappel
 

@@ -1,0 +1,1 @@
+Captures du README : interface.png, hdv-vente.png, tableau-de-bord.png, assistant.png (voir les commentaires dans README.md).
