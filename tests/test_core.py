@@ -475,6 +475,7 @@ def test_parse_counter():
 def test_avg_guard_blocks_too_cheap(seq_engine, monkeypatch):
     eng, calls, screens = seq_engine
     eng.cfg.auto_validate = True
+    eng.cfg.floor_mode = "stop"                            # ancien comportement : arrêt
     sr = core.ScreenRead({1: R(30, 95), 10: R(290, 95)}, 1)
     sr.avg = 100                                           # 29/u < 50 % de 100
     monkeypatch.setattr(core, "read_screen", lambda c, d=None: sr)
@@ -603,6 +604,7 @@ def test_relist_unconfirmed(relist_engine):
 
 def test_relist_avg_guard_then_force(relist_engine):
     eng, calls, st = relist_engine
+    eng.cfg.floor_mode = "stop"
     st["screens"] = [scr({1: 300}, avg=1189), scr({1: 300}, avg=1189)]
     st["mine"] = [774, 774, 299]
     res = eng.relist()
@@ -627,14 +629,15 @@ def test_relist_all_scrolls_until_list_stops(relist_engine, monkeypatch):
     monkeypatch.setattr(eng, "_scroll_page", lambda box, target: next(moves))
     n = [0]                                          # chaque capture différente : rien d'identique
     monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
-                        np.full((4, 4, 3), n[0] * 7 % 250, np.uint8))
+                        np.random.default_rng(n[0]).integers(0, 255, (8, 8, 3)).astype(np.uint8))
     # page 1 : ligne à modifier (panneau vidé ensuite = accepté) -> la liste a bougé :
     # reprise en 1re ligne (déjà OK), 2e ligne OK ; page 2 : seule la nouvelle ligne est lue
-    st["screens"] = [scr({1: 760}), scr({1: 759}), scr({1: 87}), scr({1: 76})]
-    st["mine"] = [774, None, 759, 87, 76]
+    # page 2 : la dernière ligne vue est relue (marge de sécurité), puis la nouvelle
+    st["screens"] = [scr({1: 760}), scr({1: 759}), scr({1: 87}), scr({1: 87}), scr({1: 76})]
+    st["mine"] = [774, None, 759, 87, 87, 76]
     res = eng.relist_all()
-    assert res.level == "ok" and "4 lignes" in res.message and "1 modifiées" in res.message
-    assert clicks == [(100, 100), (100, 100), (100, 150), (100, 150)]
+    assert res.level == "ok" and "5 lignes" in res.message and "1 modifiées" in res.message
+    assert clicks == [(100, 100), (100, 100), (100, 150), (100, 100), (100, 150)]
 
 
 def test_visible_rows_after_pixel_scroll():
@@ -704,15 +707,35 @@ def test_relist_panel_cleared_means_done(relist_engine):
     assert res.level == "ok" and "modifié" in res.message and calls == [("paste", 59), "modify"]
 
 
-def test_relist_all_stops_on_suspect(relist_engine, monkeypatch):
+def test_relist_all_skips_suspect_row_and_continues(relist_engine, monkeypatch):
     eng, calls, st = relist_engine
-    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step = True, [100, 100], 50
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 2
     monkeypatch.setattr(core, "click_at", lambda p: None)
     monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
-    st["screens"] = [scr({1: 100, 10: 9000})]      # lot 1 incohérent
-    st["mine"] = [774]
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    n = [0]
+    monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
+                        np.random.default_rng(n[0]).integers(0, 255, (8, 8, 3)).astype(np.uint8))
+    # ligne 1 incohérente (lue 2 fois) : laissée telle quelle ; ligne 2 normale
+    st["screens"] = [scr({1: 100, 10: 9000}), scr({1: 100, 10: 9000}), scr({1: 87})]
+    st["mine"] = [774, 774, 87]
     res = eng.relist_all()
-    assert res.level == "warn" and "SUSPECT" in res.message and ("paste", 99) not in calls
+    assert res.level == "warn" and "1 ligne(s) douteuse(s)" in res.message and "fin de la liste" in res.message
+    assert ("paste", 99) not in calls
+
+
+def test_relist_all_stops_after_3_doubtful(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 5
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    n = [0]
+    monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
+                        np.random.default_rng(n[0]).integers(0, 255, (8, 8, 3)).astype(np.uint8))
+    st["screens"] = [scr({1: 50}) for _ in range(6)]
+    st["mine"] = [None] * 6                               # ton prix illisible partout
+    res = eng.relist_all()
+    assert "3 lignes douteuses" in res.message and calls == []
 
 
 def test_relist_all_skips_identical_rows(relist_engine, monkeypatch):
@@ -744,3 +767,76 @@ def test_find_field_in_large_zone():
     assert f is not None and f.shape[:2] == (25, 130)
     img[100:125, 50:180] = 40                            # vente désélectionnée : plus de champ
     assert core._find_field(img) is None
+
+
+# --- Prix plancher (FLOOR_MODE / FLOOR_RATIO)
+def test_floor_price():
+    assert core.floor_price(1, 1189, 0.7) == 833          # 832,3 -> arrondi au-dessus
+    assert core.floor_price(10, 81, 0.7) == 567
+    assert core.floor_price(1, None, 0.7) is None and core.floor_price(1, 100, 0) is None
+
+
+def test_sell_goes_to_floor_not_dumper(seq_engine, monkeypatch):
+    eng, calls, screens = seq_engine
+    eng.cfg.auto_validate = True
+    sr = core.ScreenRead({1: R(300, 95), 10: R(8000, 95)}, 1)
+    sr.avg = 1189                                        # quelqu'un brade à 300 (prix moyen 1 189)
+    monkeypatch.setattr(core, "read_screen", lambda c, d=None: sr)
+    res = eng.sell()
+    assert res.level == "ok" and "plancher" in res.message and calls == [(833, True, True)]
+
+
+def test_sell_all_continues_at_floor(seq_engine, monkeypatch):
+    eng, calls, screens = seq_engine
+    a = core.ScreenRead({1: R(300, 95)}, 1)
+    a.avg = 1189
+    b = core.ScreenRead({1: R(300, 95)}, 1)               # en tête : toujours le brader
+    b.avg = 1189
+    it = iter([a, b, core.ScreenRead({}, None)])
+    monkeypatch.setattr(core, "read_screen", lambda c, d=None: next(it))
+    res = eng.sell_all()
+    assert "2×1 à 833" in res.message and "stock épuisé" in res.message
+    assert calls == [(833, True, True), "enter"]
+
+
+def test_relist_floor(relist_engine):
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 300}, avg=1189)]
+    st["mine"] = [1200, 833]
+    res = eng.relist()
+    assert res.level == "ok" and "plancher" in res.message and calls == [("paste", 833), "modify"]
+
+
+def test_relist_already_at_floor(relist_engine):
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 300}, avg=1189)]
+    st["mine"] = [833]
+    res = eng.relist()
+    assert "déjà au plancher" in res.message and calls == []
+
+
+def test_relist_keep_mode(relist_engine):
+    eng, calls, st = relist_engine
+    eng.cfg.floor_mode = "keep"
+    st["screens"] = [scr({1: 300}, avg=1189)]
+    st["mine"] = [1200]
+    res = eng.relist()
+    assert "ton prix gardé" in res.message and calls == []
+
+
+def test_relist_above_floor_normal_undercut(relist_engine):
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 1000}, avg=1189)]            # 999 >= plancher 833 : undercut normal
+    st["mine"] = [1100, 999]
+    eng.relist()
+    assert calls == [("paste", 999), "modify"]
+
+
+def test_same_row_sees_one_digit_change():
+    row = np.full((40, 400, 3), 45, np.uint8)
+    row[12:28, 350:358] = 230                             # « 7 »
+    row[12:28, 360:368] = 230                             # « 6 »
+    other = row.copy()
+    other[12:28, 362:366] = 45                            # un seul chiffre change (76 -> 75)
+    assert core._same_row(row, row.copy())
+    assert not core._same_row(row, other)

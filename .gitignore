@@ -13,5 +13,4 @@ __pycache__/
 build/
 dist/
 *.spec
-
-.ven-win/
+digit_templates*.npz

@@ -50,6 +50,7 @@ ZONE_COLORS = {"table": "#66d9ef", "qty": "#ae81ff", "avg": "#a6e22e", "count": 
                "mine": "#f92672"}
 ZONE_LABELS = {"table": "Tableau", "qty": "Quantité", "avg": "Prix moyen", "count": "Compteur",
                "mine": "Ton prix"}
+FLOOR_LABELS = {"floor": "au plancher", "keep": "garder mon prix", "stop": "arrêt (suspect)"}
 POINT_COLORS = {"price_field": "#e74c3c", "sell_button": "#2ecc71", "modify_button": "#3498db"}
 POINT_LABELS = {"price_field": "Champ « Prix du lot »", "sell_button": "Bouton « Mettre en vente »",
                 "modify_button": "Bouton « Modifier »"}
@@ -95,6 +96,8 @@ class App(ctk.CTk):
             "undercut_value": ctk.StringVar(value=f"{c.undercut_value:g}"),
             "rounding": ctk.StringVar(value=c.rounding),
             "min_price": ctk.StringVar(value=str(c.min_price)),
+            "floor_mode": ctk.StringVar(value=FLOOR_LABELS.get(c.floor_mode, FLOOR_LABELS["floor"])),
+            "floor_ratio": ctk.StringVar(value=f"{c.floor_ratio * 100:g}"),
             "auto_paste": ctk.BooleanVar(value=c.auto_paste),
             "click_field": ctk.BooleanVar(value=c.click_field),
             "auto_validate": ctk.BooleanVar(value=c.auto_validate),
@@ -124,6 +127,15 @@ class App(ctk.CTk):
                           variable=self.v["rounding"], width=110).pack(side="left", padx=(0, 14))
         ctk.CTkLabel(top, text="Prix min").pack(side="left", padx=(0, 4))
         ctk.CTkEntry(top, textvariable=self.v["min_price"], width=70).pack(side="left", padx=(0, 14))
+
+        fl = ctk.CTkFrame(self)
+        fl.pack(fill="x", padx=12, pady=4)
+        ctk.CTkLabel(fl, text="Prix plancher :", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=8)
+        ctk.CTkEntry(fl, textvariable=self.v["floor_ratio"], width=50).pack(side="left")
+        ctk.CTkLabel(fl, text="% du prix moyen  |  concurrent en dessous :").pack(side="left", padx=(4, 4))
+        ctk.CTkOptionMenu(fl, values=list(FLOOR_LABELS.values()), variable=self.v["floor_mode"],
+                          width=150).pack(side="left")
+        ctk.CTkLabel(fl, text="(nécessite la zone Prix moyen)", text_color="#888").pack(side="left", padx=8)
 
         # --- Vente rapide
         fast = ctk.CTkFrame(self)
@@ -168,7 +180,7 @@ class App(ctk.CTk):
         rl = ctk.CTkFrame(self)
         rl.pack(fill="x", padx=12, pady=4)
         ctk.CTkLabel(rl, text="Mes ventes (F3) :").pack(side="left", padx=8)
-        ctk.CTkButton(rl, text="Ton prix (2 coins)", width=130,
+        ctk.CTkButton(rl, text="Ton prix (optionnel)", width=140,
                       command=lambda: self._calib_rect_ui("mine", "ton prix")).pack(side="left", padx=3)
         ctk.CTkButton(rl, text="Modifier", width=90,
                       command=lambda: self._countdown("bouton Modifier",
@@ -236,11 +248,13 @@ class App(ctk.CTk):
         try:
             c.undercut_value = float(v["undercut_value"].get().replace(",", "."))
             c.min_price = int(v["min_price"].get())
+            c.floor_ratio = max(0.0, float(v["floor_ratio"].get().replace(",", ".") or 0) / 100)
         except ValueError:
             self._log("[Param] Valeur numérique invalide, non sauvegardé.", "ERROR")
             return
         c.undercut_mode = v["undercut_mode"].get()
         c.rounding = v["rounding"].get()
+        c.floor_mode = {lbl: k for k, lbl in FLOOR_LABELS.items()}.get(v["floor_mode"].get(), "floor")
         was_auto = c.relist_auto
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
                      "relist_auto"):
@@ -358,6 +372,9 @@ class App(ctk.CTk):
                         extra += f" | ton prix: {fmt(arg.mine) if arg.mine else '?'}"
                     if self.cfg.count_region:
                         extra += f" | lots en vente: {'%d/%d' % arg.listed if arg.listed else '?'}"
+                    dr = core.digit_reader()
+                    extra += (f" | lecture : {arg.engine or '?'} (chiffres appris "
+                              f"{len(dr.known())}/10)")
                     self._log(f"[Test] quantité: {arg.selected or '?'} | {txt or 'rien lu'}{extra}", "INFO")
                 elif name == "calib_rect":
                     self._on_calib_rect(*arg)

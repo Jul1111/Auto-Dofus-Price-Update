@@ -138,3 +138,63 @@ def test_reads_table_with_pale_item_icons(monkeypatch):
     w, h = _patch_fixture(monkeypatch, "tableau_laine_celeste.png")
     sr = core.read_screen(core.Config(table_region=[0, 0, w, h]))
     assert sr.values == {1: 149, 10: 1499, 100: 22294}
+
+
+# --- Lecture rapide des chiffres (apprise sur Tesseract)
+PANELS = {
+    "hdv_mesventes.png": (dict(table_region=[30, 462, 180, 128], qty_region=[16, 229, 90, 22],
+                               avg_region=[14, 331, 60, 20], mine_region=[16, 172, 125, 22]),
+                          {1: 760, 10: 6999, 100: 83199, 1000: 844000}, 1, 1189, 774),
+    "hdv_mesventes_celeste.png": (dict(table_region=[16, 466, 215, 138], qty_region=[20, 238, 110, 24],
+                                       avg_region=[18, 342, 60, 20], mine_region=[20, 182, 130, 26]),
+                                  {1: 149, 10: 1499, 100: 22294}, 10, 282, 1662),
+    "hdv_mesventes_cuir.png": (dict(table_region=[38, 466, 215, 138], qty_region=[42, 238, 90, 24],
+                                    avg_region=[40, 342, 60, 20], mine_region=[40, 180, 130, 26]),
+                               {1: 49, 10: 738, 100: 8989, 1000: 89999}, 1, 81, 49),
+    "hdv_mesventes_cuivre.png": (dict(table_region=[32, 475, 216, 138], qty_region=[42, 243, 108, 23],
+                                      avg_region=[36, 342, 60, 22], mine_region=[40, 169, 667, 513]),
+                                 {1: 76, 10: 629, 100: 4367, 1000: 43677}, 1, 51, 76),
+}
+
+
+def _read_panel(monkeypatch, name):
+    _patch_fixture(monkeypatch, name)
+    regions, *_ = PANELS[name]
+    return core.read_screen(core.Config(**regions), with_mine=True)
+
+
+def _train_extra(monkeypatch):
+    # tableaux de l'onglet vente (Bois 1789/17875, Corne 28570) : apportent des « 5 »
+    for name, p1, p2 in (("hdv_vente.png", (48, 242), (192, 380)), ("hdv_corne.png", (50, 242), (195, 380))):
+        _patch_fixture(monkeypatch, name)
+        core.read_screen(core.Config(table_region=list(core.rect_from_points(p1, p2))))
+
+
+def test_fast_digits_learn_then_read(monkeypatch):
+    # 1ers passages : Tesseract (et apprentissage) ; ensuite lecture rapide, mêmes valeurs
+    for _ in range(2):
+        _train_extra(monkeypatch)
+        for name in PANELS:
+            assert _read_panel(monkeypatch, name).engine == "tesseract" or core.digit_reader().ready
+    assert core.digit_reader().ready
+    fast = 0
+    for name, (_, table, qty, avg, mine) in PANELS.items():
+        sr = _read_panel(monkeypatch, name)
+        fast += sr.engine == "chiffres"
+        assert (sr.values, sr.selected, sr.avg, sr.mine_r.value) == (table, qty, avg, mine), name
+    assert fast == len(PANELS)
+
+
+def test_fast_digits_never_wrong_on_unseen_panel(monkeypatch):
+    # appris sur 3 captures, testé sur la 4e : lecture rapide OU repli Tesseract, jamais faux
+    names = list(PANELS)
+    for held_out in names:
+        monkeypatch.setattr(core, "_digits", core.digit_reader().__class__(None))
+        for _ in range(2):
+            _train_extra(monkeypatch)
+            for name in names:
+                if name != held_out:
+                    _read_panel(monkeypatch, name)
+        _, table, qty, avg, mine = PANELS[held_out]
+        sr = _read_panel(monkeypatch, held_out)
+        assert (sr.values, sr.selected, sr.avg, sr.mine_r.value) == (table, qty, avg, mine), held_out

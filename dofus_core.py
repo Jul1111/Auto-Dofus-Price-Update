@@ -41,6 +41,7 @@ Point = Tuple[int, int]
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "dofus_price_helper_config.json"
 HISTORY_PATH = BASE_DIR / "dofus_price_history.csv"
+DIGITS_PATH = BASE_DIR / "digit_templates.npz"   # modèles de chiffres appris (lecture rapide)
 HISTORY_HEADER = ["ts", "datetime", "action", "lot", "selected_qty", "read_price", "confidence",
                   "new_price", "status", "mode", "value", "rounding"]
 CONFIG_VERSION = 4
@@ -116,6 +117,7 @@ class Config:
     relist_step: int = 0                      # mes ventes : hauteur d'une ligne (px)
     table_split: float = 0.45  # séparation colonne Lot / colonne Prix (fraction de largeur)
     scale: int = 2
+    fast_digits: bool = True          # lecture rapide des chiffres (apprise), Tesseract en secours
 
     # Prix
     undercut_mode: str = "fixed"      # "fixed" | "percent"
@@ -129,7 +131,10 @@ class Config:
     max_ratio: float = 5.0            # écart max de prix unitaire entre lots
     confirm_window: float = 3.0       # ré-appuyer dans ce délai = forcer
     own_price_ttl: float = 1800.0     # s : prix en tête = ton dernier prix -> pas d'undercut
-    min_avg_ratio: float = 0.5        # prix unitaire < 50 % du « Prix moyen » = suspect (0 = off)
+    min_avg_ratio: float = 0.5        # FLOOR_MODE "stop" : prix unitaire < 50 % du prix moyen = suspect
+    floor_mode: str = "floor"         # concurrent sous le plancher : "floor" (se mettre au plancher)
+                                      # | "keep" (garder ton prix en F3) | "stop" (suspect, arrêt)
+    floor_ratio: float = 0.7          # plancher = 70 % du « Prix moyen » (par objet) ; 0 = off
 
     # « Tout vendre » (F2)
     sell_all_max: int = 20            # nombre max de mises en vente par appui
@@ -238,6 +243,13 @@ def rect_from_points(p1: Point, p2: Point) -> Region:
 # --------------------------------------------------------------------------
 # Calcul du prix (pur, testé)
 # --------------------------------------------------------------------------
+def floor_price(lot: int, avg: Optional[int], ratio: float) -> Optional[int]:
+    """Prix plancher du lot = ratio × prix moyen (par objet) × lot, arrondi au-dessus."""
+    if not avg or ratio <= 0:
+        return None
+    return max(1, int(-(-avg * ratio * lot // 1)))
+
+
 def smart_round(p: int, mode: str) -> int:
     """Arrondi toujours VERS LE BAS (ne doit jamais remonter le prix)."""
     if mode == "down_10":
@@ -325,6 +337,7 @@ class ScreenRead:
     listed: Optional[Tuple[int, int]] = None  # compteur (n, max), rempli par le test de lecture
     mine: Optional[int] = None                # ton prix (mes ventes), rempli par le test de lecture
     mine_r: Optional["Reading"] = None        # ton prix lu dans le même appel OCR (mes ventes)
+    engine: str = ""                          # "chiffres" (rapide) | "tesseract"
 
     @property
     def values(self) -> Dict[int, Optional[int]]:
@@ -516,9 +529,9 @@ def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool =
         regions.append(tuple(cfg.avg_region))
     imgs = [preprocess(grab_screen(r), cfg.scale) for r in regions]
     mine_img = None
-    if with_mine and cfg.mine_region:
+    if with_mine:
         # même échelle que le reste : à ×4 le texte est trop grand pour cet appel groupé
-        mine_img = preprocess_field(grab_screen(tuple(cfg.mine_region)), cfg.scale)
+        mine_img = mine_field_image(cfg, cfg.scale)
         if mine_img is not None:
             imgs.append(mine_img)
     comp, bounds = stack_images(imgs)
@@ -526,7 +539,7 @@ def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool =
         import cv2
         debug_dir.mkdir(exist_ok=True)
         cv2.imwrite(str(debug_dir / f"ocr_{int(time.time() * 1000)}.png"), comp)
-    data = pytesseract.image_to_data(comp, config=OCR_CONFIG, output_type=pytesseract.Output.DICT)
+    data, engine = _ocr(comp, bounds, cfg)
     inner_w = imgs[0].shape[1] - 2 * BORDER
     res = ScreenRead(prices=parse_table(data, bounds[0], inner_w, cfg.table_split, cfg.lots))
     if cfg.qty_region:
@@ -538,14 +551,65 @@ def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool =
         res.avg = a.value if a.value and a.confidence >= cfg.min_confidence else None
     if mine_img is not None:
         res.mine_r = parse_number(data, bounds[-1])
+    res.engine = engine
     return res
 
 
+RELIST_READ_TRIES = 8   # F3 : relectures max si le tableau n'est pas encore chargé (~1 s)
+
+_digits = None
+_digits_lock = threading.Lock()
+_fast_count = 0
+CROSS_CHECK_EVERY = 25   # 1 lecture rapide sur 25 est recontrôlée par Tesseract
+
+
+def digit_reader():
+    global _digits
+    with _digits_lock:
+        if _digits is None:
+            from dofus_digits import DigitReader
+            _digits = DigitReader(DIGITS_PATH)
+        return _digits
+
+
+def _ocr(comp: np.ndarray, bounds, cfg: Config):
+    """Lecture rapide si les chiffres sont appris et tous reconnus avec certitude ;
+    sinon Tesseract (qui sert aussi à apprendre). Contrôle croisé régulier."""
+    import pytesseract
+    global _fast_count
+    dr = digit_reader() if cfg.fast_digits else None
+    fast = dr.read_data(comp, bounds) if dr else None
+    if fast is not None:
+        _fast_count += 1
+        if _fast_count % CROSS_CHECK_EVERY:
+            return fast, "chiffres"
+    data = pytesseract.image_to_data(comp, config=OCR_CONFIG, output_type=pytesseract.Output.DICT)
+    if fast is not None and _digits_disagree(fast, data, bounds, cfg):
+        print("[Chiffres] Contrôle : désaccord avec Tesseract, modèles réinitialisés.")
+        dr.reset()
+    if dr:
+        dr.learn(comp, data, bounds)
+    return data, "tesseract"
+
+
+def _digits_disagree(a, b, bounds, cfg: Config) -> bool:
+    for y0, y1 in bounds:
+        ra, rb = parse_number(a, (y0, y1)), parse_number(b, (y0, y1))
+        if rb.confidence >= 90 and ra.value != rb.value:
+            return True
+    return False
+
+
 def _same_row(a: np.ndarray, b: np.ndarray) -> bool:
-    """Deux lignes de la liste identiques (au survol / anticrénelage près)."""
+    """Deux lignes de la liste STRICTEMENT identiques (même objet, même prix, même durée).
+    On compte les pixels vraiment différents : une moyenne globale ne voyait pas un seul
+    chiffre de prix changé (76 vs 75 -> ligne sautée à tort)."""
+    import cv2
     if a.shape != b.shape:
         return False
-    return float(np.abs(a.astype(np.int16) - b.astype(np.int16)).mean()) < 2.0
+    ga = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY) if a.ndim == 3 else a
+    gb = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY) if b.ndim == 3 else b
+    return int((np.abs(ga.astype(np.int16) - gb.astype(np.int16)) > 40).sum()) <= 6
 
 
 def wait_change(region: Optional[Region], before: Optional[np.ndarray], timeout: float,
@@ -568,6 +632,8 @@ def _find_field(img_bgr: np.ndarray) -> Optional[np.ndarray]:
     """Dans une zone trop large, isole le champ « Prix du lot » : rectangle presque NOIR
     (bien plus sombre que le panneau), large et peu haut."""
     import cv2
+    if img_bgr.size == 0:
+        return None
     if img_bgr.shape[1] < 220 and img_bgr.shape[0] < 60:
         return img_bgr  # zone déjà ajustée au champ
     best = None
@@ -613,12 +679,30 @@ def preprocess_field(img_bgr: np.ndarray, scale: int = 4) -> Optional[np.ndarray
     return cv2.copyMakeBorder(th, BORDER, BORDER, BORDER, BORDER, cv2.BORDER_CONSTANT, value=255)
 
 
+def mine_regions(cfg: Config) -> List[Region]:
+    """Où chercher le champ « Prix du lot » : autour du point calibré du champ
+    (Ctrl+Alt+F3, le plus fiable), puis la zone « Ton prix » (Ctrl+Alt+F7)."""
+    out = []
+    if cfg.price_field:
+        x, y = cfg.price_field
+        out.append((max(0, x - 140), max(0, y - 30), 280, 60))
+    if cfg.mine_region:
+        out.append(tuple(cfg.mine_region))
+    return out
+
+
+def mine_field_image(cfg: Config, scale: int = 4) -> Optional[np.ndarray]:
+    for region in mine_regions(cfg):
+        img = preprocess_field(grab_screen(region), scale)
+        if img is not None:
+            return img
+    return None
+
+
 def read_mine(cfg: Config) -> Reading:
     """Ton prix actuel (champ « Prix du lot » de la vente sélectionnée)."""
     import pytesseract
-    if not cfg.mine_region:
-        return Reading(None, -1.0, "")
-    img = preprocess_field(grab_screen(tuple(cfg.mine_region)))
+    img = mine_field_image(cfg)
     if img is None:
         return Reading(None, -1.0, "")
     data = pytesseract.image_to_data(img, config=OCR_CONFIG, output_type=pytesseract.Output.DICT)
@@ -945,6 +1029,7 @@ class Result:
     screen: ScreenRead = field(default_factory=ScreenRead)
     new_price: Optional[int] = None
     hint: str = ""          # texte court pour la popup
+    floored_top: Optional[int] = None  # prix concurrent ignoré car sous le plancher
 
 
 class PriceEngine:
@@ -1028,11 +1113,19 @@ class PriceEngine:
         if not cfg.table_region or not cfg.qty_region:
             return Result(None, "error", f"[{tag}] Calibre d'abord le tableau et la quantité.",
                           hint="Calibration manquante")
-        if not cfg.mine_region:
+        if not mine_regions(cfg):
             return Result(None, "error",
-                          f"[{tag}] Zone « ton prix » non calibrée ({cfg.hotkeys['calibrate_mine']} ×2).",
-                          hint="Calibre ton prix")
-        sr = read_screen(cfg, self.debug_dir, with_mine=True)
+                          f"[{tag}] Champ « Prix du lot » non calibré ({cfg.hotkeys['calibrate_field']}).",
+                          hint="Calibre Prix du lot")
+        # Après un clic sur une vente, le panneau s'affiche tout de suite mais le tableau
+        # « Actuellement en vente » arrive du serveur un peu après (vide entre-temps) :
+        # on relit jusqu'à ~1 s tant que quantité ou prix du lot manquent.
+        for attempt in range(RELIST_READ_TRIES):
+            sr = read_screen(cfg, self.debug_dir, with_mine=True)
+            if sr.selected is not None and sr.prices.get(sr.selected) is not None:
+                break
+            if attempt < RELIST_READ_TRIES - 1:
+                time.sleep(0.12)
         mine = sr.mine_r
         if mine is None or mine.value is None or mine.confidence < cfg.min_confidence:
             alone = read_mine(cfg)  # 2e lecture seule, plus grande : garder la plus sûre
@@ -1058,6 +1151,17 @@ class PriceEngine:
         own = last is not None and top.value == last[0] and time.time() - last[1] <= cfg.own_price_ttl
         new_p = top.value if own else compute_price(top.value, cfg.undercut_mode, cfg.undercut_value,
                                                     cfg.rounding, cfg.min_price)
+        # ---- plancher : un concurrent qui brade ne fait pas baisser sous FLOOR_RATIO × prix moyen
+        fp = floor_price(lot, sr.avg, cfg.floor_ratio) if cfg.floor_mode != "stop" else None
+        floored = fp is not None and new_p < fp
+        if floored:
+            if cfg.floor_mode == "keep":
+                return Result(lot, "ok", f"{head} | sous le plancher ({fp}) : ton prix gardé, rien à faire",
+                              sr, mine.value, hint="Plancher : prix gardé", floored_top=top.value)
+            new_p = fp
+            if mine.value <= new_p:
+                return Result(lot, "ok", f"{head} | déjà au plancher ({fp}), rien à faire", sr,
+                              mine.value, hint="Déjà au plancher", floored_top=top.value)
         problems = []
         for name, r in (("tableau", top), ("ton prix", mine)):
             if r.confidence < cfg.min_confidence:
@@ -1066,12 +1170,16 @@ class PriceEngine:
         if incoh:
             problems.append(incoh)
         unit = new_p / lot
-        if cfg.min_avg_ratio > 0 and sr.avg and unit < sr.avg * cfg.min_avg_ratio:
+        if (cfg.floor_mode == "stop" and cfg.min_avg_ratio > 0 and sr.avg
+                and unit < sr.avg * cfg.min_avg_ratio):
             problems.append(f"{unit:.0f}/u < {cfg.min_avg_ratio:.0%} du prix moyen ({sr.avg}/u)")
         if new_p < mine.value / cfg.max_ratio:
             problems.append(f"baisse énorme : {mine.value} -> {new_p}")
+        if floored:  # le concurrent brade : son prix ne sert pas, la cohérence entre lots non plus
+            problems = [p for p in problems if not p.startswith("prix unitaire")]
 
-        prefix = f"{head} -> {new_p}{' (aligné sur ton autre vente)' if own else ''}"
+        prefix = (f"{head} -> {new_p}{' (aligné sur ton autre vente)' if own else ''}"
+                  f"{f' (plancher {cfg.floor_ratio:.0%} du prix moyen {sr.avg})' if floored else ''}")
         now = time.time()
         forced = (not auto and self._pending is not None and self._pending[:2] == (-lot, new_p)
                   and now - self._pending[2] <= cfg.confirm_window)
@@ -1085,7 +1193,7 @@ class PriceEngine:
         self._pending = None
         input_price(new_p, cfg, paste=True, validate=False)
         time.sleep(0.1)
-        mine_box = tuple(cfg.mine_region)
+        mine_box = mine_regions(cfg)[0]
         before = grab_screen(mine_box)
         press_modify(cfg)
         self._my_last[lot] = (new_p, time.time())
@@ -1183,8 +1291,10 @@ class PriceEngine:
         done = changed = same = pages = shift = 0
         seen = -1                     # plus grand numéro global de ligne déjà traité
         ok_rows: List[np.ndarray] = []  # images de lignes déjà au bon prix (même objet, même prix)
+        bad: List[str] = []           # lignes douteuses laissées telles quelles
+        fails = 0                     # lignes douteuses consécutives
         skipped = 0
-        mine_box = tuple(cfg.mine_region) if cfg.mine_region else None
+        mine_box = (mine_regions(cfg) or [None])[0]
         stop = "fin de la liste"
         try:
             while True:
@@ -1213,10 +1323,23 @@ class PriceEngine:
                         click_at((x0, y))
                         wait_change(mine_box, before, cfg.relist_delay)
                         res = self._relist(auto=True)
+                        if res.level != "ok" and "NON confirmée" not in res.message:
+                            time.sleep(0.15)          # lecture douteuse : on relit une fois
+                            res = self._relist(auto=True)
                         done += 1
                         if res.level != "ok":
-                            stop = f"ligne {g + 1} : {res.message}"
-                            raise StopIteration
+                            if "NON confirmée" in res.message:
+                                stop = f"ligne {g + 1} : {res.message}"  # sécurité : arrêt
+                                raise StopIteration
+                            # ligne douteuse : on n'y touche pas et on passe à la suivante
+                            bad.append(f"ligne {g + 1} : {res.message}")
+                            fails += 1
+                            seen = max(seen, g)
+                            if fails >= 3:
+                                stop = f"3 lignes douteuses de suite (calibration ?) : {res.message}"
+                                raise StopIteration
+                            continue
+                        fails = 0
                         if "modifié" in res.message:
                             # la ligne modifiée change de place : on reprend cette page
                             changed += 1
@@ -1227,13 +1350,17 @@ class PriceEngine:
                         seen = max(seen, g)
                         if len(ok_rows) < 200:
                             ok_rows.append(row_img)
-                moved, err = self._scroll_page(box, max(step, (len(rows) - 1) * step))
+                # Marge de sécurité : on défile d'une page moins 2 lignes et on relit la
+                # dernière ligne traitée. Une erreur de mesure d'une ligne (lignes identiques)
+                # ne fait donc jamais sauter d'objet ; une ligne relue ne coûte presque rien.
+                moved, err = self._scroll_page(box, max(step, (len(rows) - 2) * step))
                 if err:
                     stop = err
                     break
                 if moved <= 0:
                     break  # la liste ne bouge plus : en bas
                 shift += moved
+                seen -= 1
                 pages += 1
         except StopIteration:
             pass
@@ -1243,10 +1370,13 @@ class PriceEngine:
                 pyautogui.moveTo(*back)
             except Exception:
                 pass
-        level = "ok" if stop == "fin de la liste" else "warn"
+        level = "ok" if stop == "fin de la liste" and not bad else "warn"
+        detail = ""
+        if bad:
+            detail = f" | {len(bad)} ligne(s) douteuse(s) NON modifiée(s), à faire avec F3 : " + " / ".join(bad[:5])
         return Result(None, level, f"[MAJ TOUT] {done + skipped} lignes vues ({pages + 1} pages, "
                       f"{skipped} identiques sautées) : "
-                      f"{changed} modifiées, {same} déjà au bon prix | arrêt : {stop}",
+                      f"{changed} modifiées, {same} déjà au bon prix | arrêt : {stop}{detail}",
                       hint=f"{changed} modifiées")
 
     # ---- actions ----
@@ -1285,6 +1415,7 @@ class PriceEngine:
         if first.level != "ok" or "mis en vente" not in first.message:
             return first  # lecture suspecte / erreur : on ne boucle pas
         lot, price = first.lot, first.new_price
+        dumper = first.floored_top  # prix au plancher : en tête, ce sera toujours le brader
         segments = [[lot, price, 1]]          # [lot, prix, nombre] — ex. 4×10 puis 2×1
         n, stop = 1, "limite atteinte"
         sr = first.screen
@@ -1311,7 +1442,7 @@ class PriceEngine:
                 stop = "stock épuisé"
                 break
             top = sr.prices.get(lot)
-            if top is None or top.value != price:
+            if top is None or top.value not in (price, dumper):
                 # ta dernière vente n'est plus en tête de son lot : autre objet ou concurrent
                 stop = f"prix en tête du lot {lot} : {top.value if top else '?'} ≠ {price}"
                 break
@@ -1331,7 +1462,7 @@ class PriceEngine:
             if res.level != "ok" or "mis en vente" not in res.message:
                 stop = f"lot {sr.selected} non vendu ({res.message})"
                 break
-            lot, price = res.lot, res.new_price
+            lot, price, dumper = res.lot, res.new_price, res.floored_top
             segments.append([lot, price, 1])
             n += 1
         detail = " + ".join(f"{c}×{l} à {p}" for l, p, c in segments)
@@ -1361,7 +1492,7 @@ class PriceEngine:
         with self._lock:
             sr = read_screen(self.cfg, self.debug_dir)
             sr.listed = read_counter(self.cfg)
-            sr.mine = read_mine(self.cfg).value if self.cfg.mine_region else None
+            sr.mine = read_mine(self.cfg).value if mine_regions(self.cfg) else None
             return sr
 
     def _sell(self, optimize: bool, force_validate: bool = False,
@@ -1433,11 +1564,18 @@ class PriceEngine:
                 problems.append(incoh)
         if sel is None:
             problems.append("quantité non vérifiée")
+        fp = floor_price(lot, sr.avg, cfg.floor_ratio) if cfg.floor_mode != "stop" else None
+        floored = fp is not None and new_p < fp
+        if floored:  # concurrent qui brade : on vend au plancher, pas sous son prix
+            new_p = fp
+            problems = [p for p in problems if not p.startswith("prix unitaire")]
         unit = new_p / lot
-        if cfg.min_avg_ratio > 0 and sr.avg and unit < sr.avg * cfg.min_avg_ratio:
+        if (cfg.floor_mode == "stop" and cfg.min_avg_ratio > 0 and sr.avg
+                and unit < sr.avg * cfg.min_avg_ratio):
             problems.append(f"{unit:.0f}/u < {cfg.min_avg_ratio:.0%} du prix moyen ({sr.avg}/u)")
 
-        prefix = f"[{tag}] Lot {lot} | Lu: {r.value} -> {new_p}{' (ton prix)' if own else ''}"
+        prefix = (f"[{tag}] Lot {lot} | Lu: {r.value} -> {new_p}{' (ton prix)' if own else ''}"
+                  f"{f' (plancher {cfg.floor_ratio:.0%} du prix moyen {sr.avg})' if floored else ''}")
         now = time.time()
         forced = (self._pending is not None and self._pending[:2] == (lot, new_p)
                   and now - self._pending[2] <= cfg.confirm_window)
@@ -1460,4 +1598,4 @@ class PriceEngine:
         log_history("sell" if paste else "copy", lot, sel, r, new_p,
                     "forced" if forced else done, cfg)
         return Result(lot, "ok", f"{prefix} | {done}{' (forcé)' if forced else ''}",
-                      sr, new_p, hint=done.capitalize())
+                      sr, new_p, hint=done.capitalize(), floored_top=r.value if floored else None)
