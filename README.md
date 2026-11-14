@@ -17,7 +17,10 @@ Il lit l'écran (OCR), calcule un prix juste sous le moins cher, le colle dans �
      5. Ctrl+F3 qui parcourt la liste « mes ventes » avec le défilement.
      6. Fin sur l'onglet Tableau de bord (courbe de prix d'un objet).
      Glisser le .mp4 dans l'éditeur GitHub (README ou issue) et coller ici le lien généré. -->
-> 📹 *Vidéo de présentation à venir.*
+> 📹 <img width="800" height="268" alt="Presentation_Dofus_Helper-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/3b3db749-3152-4c0f-8426-fd12c3622800" />
+
+
+
 
 | | |
 |---|---|
