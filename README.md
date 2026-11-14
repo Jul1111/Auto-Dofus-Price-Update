@@ -20,8 +20,6 @@ Il lit l'écran (OCR), calcule un prix juste sous le moins cher, le colle dans �
 |---|---|
 | <!-- CAPTURE 1 — docs/interface.png : l'interface complète, onglet « Raccourcis », panneau « Dernière lecture » rempli après un F1. --> Interface 
 | <!-- CAPTURE 2 — docs/hdv-vente.png : l'HDV du jeu, onglet Vente, avec le bandeau du résultat affiché au-dessus. --> Vente
-| 
-
 | <!-- CAPTURE 3 — docs/tableau-de-bord.png : onglet « Tableau de bord » avec un objet choisi dans « Prix par objet ». --> 📷 *Tableau de bord* | <!-- CAPTURE 4 — docs/assistant.png : l'assistant de calibration, page « Vérification » avec les ✓ après « Tester ». --> 
  |
 
