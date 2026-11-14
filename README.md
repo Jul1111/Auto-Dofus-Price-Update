@@ -8,23 +8,18 @@ Il lit l'écran (OCR), calcule un prix juste sous le moins cher, le colle dans �
 ---
 
 ## 🎬 Présentation
+> <img width="800" height="268" alt="Presentation_Dofus_Helper-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/c0b4e31f-562e-45e9-8127-4ed8c1cc7a45" />
 
-<!-- VIDÉO — à capturer (60-90 s, 1080p, sans son ou avec musique douce) :
-     1. L'interface ouverte à côté du jeu (onglet Raccourcis visible).
-     2. Onglet Vente de l'HDV : un objet sélectionné dans l'inventaire -> F1 -> le prix est collé, le bandeau affiche « Lot 1 -> 367 ».
-     3. F2 sur un objet en grande quantité : plusieurs lots partent d'affilée (4×10 puis 2×1).
-     4. Une de tes ventes sélectionnée -> F1 -> le prix est mis à jour (« Modifier »).
-     5. Ctrl+F3 qui parcourt la liste « mes ventes » avec le défilement.
-     6. Fin sur l'onglet Tableau de bord (courbe de prix d'un objet).
-     Glisser le .mp4 dans l'éditeur GitHub (README ou issue) et coller ici le lien généré. -->
-> 📹 *Vidéo de présentation à venir.*
+
+
+
+
+
 
 | | |
 |---|---|
-| <!-- CAPTURE 1 — docs/interface.png : l'interface complète, onglet « Raccourcis », panneau « Dernière lecture » rempli après un F1. --> 📷 *Interface* | <!-- CAPTURE 2 — docs/hdv-vente.png : l'HDV du jeu, onglet Vente, avec le bandeau du résultat affiché au-dessus. --> 📷 *Vente avec F1* |
-| <!-- CAPTURE 3 — docs/tableau-de-bord.png : onglet « Tableau de bord » avec un objet choisi dans « Prix par objet ». --> 📷 *Tableau de bord* | <!-- CAPTURE 4 — docs/assistant.png : l'assistant de calibration, page « Vérification » avec les ✓ après « Tester ». --> 📷 *Assistant de calibration* |
-
-<!-- Pour afficher une capture : remplacer « 📷 *…* » par ![Interface](docs/interface.png) -->
+| ![Interface](docs/interface.png) | ![Vente avec F1](docs/calibrage.png) |
+| ![Tableau de bord](docs/tableau-de-bord.png) | ![Assistant de calibration](docs/assistant.png) |
 
 ---
 
