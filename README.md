@@ -22,7 +22,7 @@ Il lit l'écran (OCR), calcule un prix juste sous le moins cher, le colle dans �
 | <!-- CAPTURE 2 — docs/hdv-vente.png : l'HDV du jeu, onglet Vente, avec le bandeau du résultat affiché au-dessus. --> Vente
 | 
 
-| <!-- CAPTURE 3 — docs/tableau-de-bord.png : onglet « Tableau de bord » avec un objet choisi dans « Prix par objet ». --> 📷 *Tableau de bord* | <!-- CAPTURE 4 — docs/assistant.png : l'assistant de calibration, page « Vérification » avec les ✓ après « Tester ». --> <img width="1127" height="841" alt="Capture d&#39;écran 2026-11-14 155218" src="https://github.com/user-attachments/assets/cff47ead-9bb7-4e45-a230-747f41d53c23" />
+| <!-- CAPTURE 3 — docs/tableau-de-bord.png : onglet « Tableau de bord » avec un objet choisi dans « Prix par objet ». --> 📷 *Tableau de bord* | <!-- CAPTURE 4 — docs/assistant.png : l'assistant de calibration, page « Vérification » avec les ✓ après « Tester ». --> 
  |
 
 <!-- Pour afficher une capture : remplacer « 📷 *…* » par ![Interface](docs/interface.png) -->
