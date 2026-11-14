@@ -18,8 +18,7 @@ Il lit l'écran (OCR), calcule un prix juste sous le moins cher, le colle dans �
 
 | | |
 |---|---|
-| <!-- CAPTURE 1 — docs/interface.png : l'interface complète, onglet « Raccourcis », panneau « Dernière lecture » rempli après un F1. --> Interface
- <img width="1754" height="843" alt="Capture d&#39;écran 2026-11-14 155130" src="https://github.com/user-attachments/assets/f25af94a-6dc4-4eb6-a385-47e0d739cd69" />
+| <!-- CAPTURE 1 — docs/interface.png : l'interface complète, onglet « Raccourcis », panneau « Dernière lecture » rempli après un F1. --> Interface |
 | <!-- CAPTURE 2 — docs/hdv-vente.png : l'HDV du jeu, onglet Vente, avec le bandeau du résultat affiché au-dessus. --> Vente
 | 
 
