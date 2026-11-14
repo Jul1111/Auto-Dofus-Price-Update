@@ -18,12 +18,8 @@ Il lit l'écran (OCR), calcule un prix juste sous le moins cher, le colle dans �
 
 | | |
 |---|---|
-| <!-- CAPTURE 1 — docs/interface.png : l'interface complète, onglet « Raccourcis », panneau « Dernière lecture » rempli après un F1. --> Interface 
-<img width="1754" height="843" alt="Capture d&#39;écran 2026-11-14 155130" src="https://github.com/user-attachments/assets/cb63970b-fcab-4fbe-a55d-a327595861e8" />
-| <!-- CAPTURE 2 — docs/hdv-vente.png : l'HDV du jeu, onglet Vente, avec le bandeau du résultat affiché au-dessus. --> Vente
-| <!-- CAPTURE 3 — docs/tableau-de-bord.png : onglet « Tableau de bord » avec un objet choisi dans « Prix par objet ». --> 📷 *Tableau de bord* | <!-- CAPTURE 4 — docs/assistant.png : l'assistant de calibration, page « Vérification » avec les ✓ après « Tester ». --> 
-
-<!-- Pour afficher une capture : remplacer « 📷 *…* » par ![Interface](docs/interface.png) -->
+| ![Interface](docs/interface.png) | ![Vente avec F1](docs/hdv-vente.png) |
+| ![Tableau de bord](docs/tableau-de-bord.png) | ![Assistant de calibration](docs/assistant.png) |
 
 ---
 
