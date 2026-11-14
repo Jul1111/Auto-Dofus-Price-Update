@@ -8,16 +8,10 @@ Il lit l'écran (OCR), calcule un prix juste sous le moins cher, le colle dans �
 ---
 
 ## 🎬 Présentation
+> <img width="800" height="268" alt="Presentation_Dofus_Helper-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/c0b4e31f-562e-45e9-8127-4ed8c1cc7a45" />
 
-<!-- VIDÉO — à capturer (60-90 s, 1080p, sans son ou avec musique douce) :
-     1. L'interface ouverte à côté du jeu (onglet Raccourcis visible).
-     2. Onglet Vente de l'HDV : un objet sélectionné dans l'inventaire -> F1 -> le prix est collé, le bandeau affiche « Lot 1 -> 367 ».
-     3. F2 sur un objet en grande quantité : plusieurs lots partent d'affilée (4×10 puis 2×1).
-     4. Une de tes ventes sélectionnée -> F1 -> le prix est mis à jour (« Modifier »).
-     5. Ctrl+F3 qui parcourt la liste « mes ventes » avec le défilement.
-     6. Fin sur l'onglet Tableau de bord (courbe de prix d'un objet).
-     Glisser le .mp4 dans l'éditeur GitHub (README ou issue) et coller ici le lien généré. -->
-> 📹 <img width="800" height="268" alt="Presentation_Dofus_Helper-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/3b3db749-3152-4c0f-8426-fd12c3622800" />
+
+
 
 
 
