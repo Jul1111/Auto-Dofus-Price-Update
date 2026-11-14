@@ -18,7 +18,7 @@ Il lit l'Ã©cran (OCR), calcule un prix juste sous le moins cher, le colle dans Â
 
 | | |
 |---|---|
-| ![Interface](docs/interface.png) | ![Vente avec F1](docs/hdv-vente.png) |
+| ![Interface](docs/interface.png) | ![Vente avec F1](docs/calibrage.png) |
 | ![Tableau de bord](docs/tableau-de-bord.png) | ![Assistant de calibration](docs/assistant.png) |
 
 ---
