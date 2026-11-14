@@ -20,6 +20,7 @@ Raccourcis par défaut (modifiables dans la config, clé HOTKEYS) :
   Ctrl+Alt+F7 (x2)    mes ventes : calibrer le texte du champ « Prix du lot » (ton prix actuel)
   Ctrl+Alt+F8         mes ventes : calibrer le bouton « Modifier » (sinon Entrée)
   Ctrl+Alt+F9 (x2)    mes ventes : 1re ligne puis 2e ligne de la liste (pour Ctrl+F3)
+  Ctrl+Alt+F10 (x2)   repère : titre « Hôtel de vente » (les zones suivent l'HDV déplacé)
   Ctrl+Alt+V          afficher les zones calibrées
   Ctrl+Alt+P          pause / reprise des raccourcis
 """
@@ -47,9 +48,9 @@ TAG_COLORS = {
 }
 LEVEL_COLORS = {"ok": "#2ecc71", "warn": "#f1c40f", "error": "#e74c3c"}
 ZONE_COLORS = {"table": "#66d9ef", "qty": "#ae81ff", "avg": "#a6e22e", "count": "#fd971f",
-               "mine": "#f92672"}
+               "mine": "#f92672", "anchor": "#ffffff"}
 ZONE_LABELS = {"table": "Tableau", "qty": "Quantité", "avg": "Prix moyen", "count": "Compteur",
-               "mine": "Ton prix"}
+               "mine": "Ton prix", "anchor": "Repère HDV"}
 FLOOR_LABELS = {"floor": "au plancher", "keep": "garder mon prix", "stop": "arrêt (suspect)"}
 UNDERCUT_LABELS = {"fixed": "kamas", "percent": "%"}
 ROUNDING_LABELS = {"none": "aucun", "down_10": "dizaine inférieure", "down_100": "centaine inférieure",
@@ -168,6 +169,8 @@ class App(ctk.CTk):
         ctk.CTkLabel(head, textvariable=self.stats_var, text_color=MUTED).pack(side="left", padx=10)
         ctk.CTkButton(head, text="Voir zones", width=90, fg_color=BTN2,
                       command=self._show_zones).pack(side="right", padx=(4, 12))
+        ctk.CTkButton(head, text="📊 Tableau de bord", width=140, fg_color=BTN2,
+                      command=self._open_dashboard).pack(side="right", padx=4)
         ctk.CTkButton(head, text="Lire (test)", width=90, fg_color=BTN2,
                       command=lambda: self.jobs.put(("read", None))).pack(side="right", padx=4)
         self.pause_btn = ctk.CTkButton(head, text="⏸ Pause", width=90, command=self._toggle_pause)
@@ -323,6 +326,8 @@ class App(ctk.CTk):
         hk = self.cfg.hotkeys
         self.calib_labels = {}
         items = [
+            ("anchor", "Repère : titre « Hôtel de vente » (suivi)",
+             hk["calibrate_anchor"] + " ×2", False, lambda: self._calib_rect_ui("anchor", "titre de l'HDV")),
             ("table", "Tableau « Actuellement en vente »", hk["calibrate_table"] + " ×2", True,
              lambda: self._calib_rect_ui("table", "tableau")),
             ("qty", "Menu « Quantité »", hk["calibrate_qty"] + " ×2", True,
@@ -365,6 +370,18 @@ class App(ctk.CTk):
         ctk.CTkSwitch(b, text="Utiliser la lecture rapide", variable=self.v["fast_digits"]).pack(anchor="w", pady=2)
         ctk.CTkButton(b, text="Réapprendre les chiffres", width=180, fg_color=BTN2,
                       command=self._reset_digits).pack(anchor="w", pady=4)
+
+    def _open_dashboard(self):
+        def run():
+            try:
+                import webbrowser
+                import dofus_dashboard
+                out = dofus_dashboard.build()
+                webbrowser.open(out.as_uri())
+                self.ui_events.put(("dashboard", f"ouvert dans le navigateur ({out.name})."))
+            except Exception as e:
+                self.ui_events.put(("log", (f"[Tableau de bord] Erreur : {e}", "ERROR")))
+        threading.Thread(target=run, daemon=True).start()
 
     def _reset_digits(self):
         core.digit_reader().reset()
@@ -475,6 +492,7 @@ class App(ctk.CTk):
             keyboard.add_hotkey(hk["calibrate_mine"], lambda: self.jobs.put(("calib_rect", "mine")))
             keyboard.add_hotkey(hk["calibrate_modify"], lambda: self.jobs.put(("calib_point", "modify_button")))
             keyboard.add_hotkey(hk["calibrate_rows"], lambda: self.jobs.put(("calib_rows", None)))
+            keyboard.add_hotkey(hk["calibrate_anchor"], lambda: self.jobs.put(("calib_rect", "anchor")))
             keyboard.add_hotkey(hk["calibrate_table"], lambda: self.jobs.put(("calib_rect", "table")))
             keyboard.add_hotkey(hk["calibrate_qty"], lambda: self.jobs.put(("calib_rect", "qty")))
             keyboard.add_hotkey(hk["calibrate_avg"], lambda: self.jobs.put(("calib_rect", "avg")))
@@ -514,6 +532,10 @@ class App(ctk.CTk):
                     self.ui_events.put(("calib_point", (arg, self.engine.calibrate_point(arg))))
             except Exception as e:
                 self.ui_events.put(("log", (f"[Erreur] {e}", "ERROR")))
+            msg, self.engine.last_anchor_msg = self.engine.last_anchor_msg, ""
+            if msg:
+                self.ui_events.put(("log", (f"[Repère] {msg}", "CAL" if "recalées" in msg else "WARN")))
+                self.ui_events.put(("refresh", None))
 
     def _poll_ui(self):
         try:
@@ -548,6 +570,10 @@ class App(ctk.CTk):
                     self._show_zones()
                 elif name == "pause":
                     self._toggle_pause()
+                elif name == "refresh":
+                    self._refresh_status()
+                elif name == "dashboard":
+                    self._log(f"[Tableau de bord] {arg}", "INFO")
         except queue.Empty:
             pass
         self.after(30, self._poll_ui)
@@ -742,7 +768,8 @@ class App(ctk.CTk):
                            f"  |  {self.stats['suspects']} suspects{fast}")
         values = {"table": c.table_region, "qty": c.qty_region, "price_field": c.price_field,
                   "avg": c.avg_region, "count": c.count_region, "modify_button": c.modify_button,
-                  "rows": c.relist_row, "sell_button": c.sell_button, "mine": c.mine_region}
+                  "rows": c.relist_row, "sell_button": c.sell_button, "mine": c.mine_region,
+                  "anchor": c.anchor_region}
         names = {"table": "tableau", "qty": "quantité", "price_field": "Prix du lot"}
         missing = []
         for key, (lbl, required) in getattr(self, "calib_labels", {}).items():

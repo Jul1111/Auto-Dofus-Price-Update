@@ -42,6 +42,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "dofus_price_helper_config.json"
 HISTORY_PATH = BASE_DIR / "dofus_price_history.csv"
 DIGITS_PATH = BASE_DIR / "digit_templates.npz"   # modèles de chiffres appris (lecture rapide)
+ANCHOR_PATH = BASE_DIR / "hdv_anchor.png"        # image du titre « Hôtel de vente » (repère)
 HISTORY_HEADER = ["ts", "datetime", "action", "lot", "selected_qty", "read_price", "confidence",
                   "new_price", "status", "mode", "value", "rounding"]
 CONFIG_VERSION = 5
@@ -87,6 +88,7 @@ DEFAULT_HOTKEYS = {
     "calibrate_mine": "ctrl+alt+f7",   # 2 appuis : texte du champ « Prix du lot » (ton prix actuel)
     "calibrate_modify": "ctrl+alt+f8", # 1 appui sur « Modifier »
     "calibrate_rows": "ctrl+alt+f9",   # 2 appuis : 1re ligne puis 2e ligne de la liste de tes ventes
+    "calibrate_anchor": "ctrl+alt+f10",  # 2 appuis : titre « Hôtel de vente » (les zones suivent l'HDV)
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
     "quit": "ctrl+alt+q",
@@ -111,6 +113,7 @@ class Config:
     sell_button: Optional[List[int]] = None   # (x, y) bouton « Mettre en vente »
     avg_region: Optional[List[int]] = None    # chiffres sous « PRIX MOYEN » (optionnel)
     count_region: Optional[List[int]] = None  # texte « 21/100 lots en vente » (optionnel)
+    anchor_region: Optional[List[int]] = None # repère : titre « Hôtel de vente » (zones suivent l'HDV)
     mine_region: Optional[List[int]] = None   # mes ventes : texte du champ « Prix du lot »
     modify_button: Optional[List[int]] = None # mes ventes : (x, y) bouton « Modifier »
     relist_row: Optional[List[int]] = None    # mes ventes : (x, y) centre de la 1re ligne visible
@@ -224,6 +227,100 @@ class Config:
         os.replace(tmp, path)  # écriture atomique
 
 
+# --------------------------------------------------------------------------
+# Repère HDV : les zones suivent la fenêtre de l'Hôtel de vente
+# --------------------------------------------------------------------------
+ANCHOR_OK = 0.90      # score au même endroit : pas bougé
+ANCHOR_FOUND = 0.80   # score mini pour accepter une nouvelle position
+REGION_FIELDS = ("table_region", "qty_region", "avg_region", "count_region", "mine_region", "anchor_region")
+POINT_FIELDS = ("price_field", "sell_button", "modify_button", "relist_row")
+
+
+def save_anchor(img_bgr: np.ndarray, path: Optional[Path] = None) -> None:
+    import cv2
+    cv2.imwrite(str(path or ANCHOR_PATH), img_bgr)
+
+
+_anchor_cache: Dict[str, Tuple[float, np.ndarray]] = {}
+
+
+def load_anchor(path: Optional[Path] = None) -> Optional[np.ndarray]:
+    import cv2
+    p = Path(path or ANCHOR_PATH)
+    if not p.exists():
+        return None
+    mt = p.stat().st_mtime
+    cached = _anchor_cache.get(str(p))
+    if cached and cached[0] == mt:
+        return cached[1]
+    img = cv2.imread(str(p))
+    if img is not None:
+        _anchor_cache[str(p)] = (mt, img)
+    return img
+
+
+def _gray(img: np.ndarray) -> np.ndarray:
+    import cv2
+    return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+
+
+def anchor_score(img: np.ndarray, tpl: np.ndarray) -> float:
+    import cv2
+    a, t = _gray(img), _gray(tpl)
+    if a.shape != t.shape or a.size == 0:
+        return 0.0
+    return float(cv2.matchTemplate(a, t, cv2.TM_CCOEFF_NORMED)[0, 0])
+
+
+def screen_bounds() -> Region:
+    """Rectangle de TOUS les écrans (peut commencer en négatif)."""
+    import mss
+    with mss.mss() as sct:
+        m = sct.monitors[0]
+        return m["left"], m["top"], m["width"], m["height"]
+
+
+def find_anchor(tpl: np.ndarray) -> Optional[Point]:
+    """Cherche le titre de l'HDV sur tout l'écran : d'abord en demi-résolution (rapide),
+    puis précisément autour du meilleur endroit. Retourne le coin haut-gauche ou None."""
+    import cv2
+    sx, sy, sw, sh = screen_bounds()
+    full = _gray(grab_screen((sx, sy, sw, sh)))
+    t = _gray(tpl)
+    th, tw = t.shape
+    if th >= full.shape[0] or tw >= full.shape[1]:
+        return None
+    small = cv2.resize(full, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+    ts = cv2.resize(t, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+    _, best, _, loc = cv2.minMaxLoc(cv2.matchTemplate(small, ts, cv2.TM_CCOEFF_NORMED))
+    if best < ANCHOR_FOUND - 0.1:
+        # image très détaillée : la demi-résolution la brouille -> recherche pleine résolution
+        _, best, _, loc = cv2.minMaxLoc(cv2.matchTemplate(full, t, cv2.TM_CCOEFF_NORMED))
+        if best < ANCHOR_FOUND:
+            return None
+        return sx + loc[0], sy + loc[1]
+    cx, cy = loc[0] * 2, loc[1] * 2
+    x0, y0 = max(0, cx - 6), max(0, cy - 6)
+    win = full[y0:y0 + th + 12, x0:x0 + tw + 12]
+    if win.shape[0] < th or win.shape[1] < tw:
+        return None
+    _, best, _, loc = cv2.minMaxLoc(cv2.matchTemplate(win, t, cv2.TM_CCOEFF_NORMED))
+    if best < ANCHOR_FOUND:
+        return None
+    return sx + x0 + loc[0], sy + y0 + loc[1]
+
+
+def shift_zones(cfg: "Config", dx: int, dy: int) -> None:
+    for f in REGION_FIELDS:
+        r = getattr(cfg, f)
+        if r:
+            setattr(cfg, f, [r[0] + dx, r[1] + dy, r[2], r[3]])
+    for f in POINT_FIELDS:
+        p = getattr(cfg, f)
+        if p:
+            setattr(cfg, f, [p[0] + dx, p[1] + dy])
+
+
 def zone_hint(name: str, region) -> Optional[str]:
     """Conseil si une zone calibrée semble mal taillée (trop serrée = chiffres coupés)."""
     x, y, w, h = region
@@ -233,6 +330,8 @@ def zone_hint(name: str, region) -> Optional[str]:
         return f"zone large de {w} px seulement : prends tout le nombre avec de la marge"
     if name == "count" and w < 70:
         return "prends toute la ligne « 21/100 lots en vente »"
+    if name == "anchor" and (w < 80 or h < 14):
+        return "prends tout le titre « Hôtel de vente » (et un peu de la barre autour)"
     if name == "table" and h < 60:
         return "le tableau doit couvrir les 4 lignes (lot 1 à lot 1000)"
     return None
@@ -1089,6 +1188,7 @@ class PriceEngine:
         self._pending: Optional[Tuple[int, int, float]] = None  # (lot, prix, t) à confirmer
         self._first_point: Dict[str, Tuple[Point, float]] = {}
         self._my_last: Dict[int, Tuple[int, float]] = {}  # lot -> (prix mis en vente, t)
+        self.last_anchor_msg = ""  # dernier message du repère HDV (lu puis vidé par l'interface)
 
     # ---- calibration ----
     def calibrate_rect(self, name: str, pos: Optional[Point] = None) -> Tuple[str, object]:
@@ -1102,8 +1202,40 @@ class PriceEngine:
         del self._first_point[name]
         region = rect_from_points(first[0], p)
         setattr(self.cfg, f"{name}_region", list(region))
+        if name == "anchor":
+            save_anchor(grab_screen(region))
         self.cfg.save()
         return "done", region
+
+    # ---- repère : l'HDV a bougé -> toutes les zones suivent
+    def _reanchor(self) -> Optional[Tuple[int, int]]:
+        """Si le titre « Hôtel de vente » n'est plus à sa place, le retrouve à l'écran et
+        décale TOUTES les zones et tous les points d'autant. Retourne le décalage (dx, dy)
+        appliqué, ou None (pas de repère, pas bougé, ou introuvable)."""
+        cfg = self.cfg
+        if not cfg.anchor_region:
+            return None
+        tpl = load_anchor()
+        if tpl is None:
+            return None
+        x, y, w, h = cfg.anchor_region
+        try:
+            if anchor_score(grab_screen((x, y, w, h)), tpl) >= ANCHOR_OK:
+                return None                       # pas bougé (cas normal, ~1 ms)
+            found = find_anchor(tpl)
+        except Exception as e:
+            self.last_anchor_msg = f"Repère HDV : erreur ({e})"
+            return None
+        if found is None:
+            self.last_anchor_msg = "Repère HDV introuvable : HDV fermé ou caché ? Zones inchangées."
+            return None
+        dx, dy = found[0] - x, found[1] - y
+        if dx == 0 and dy == 0:
+            return None
+        shift_zones(cfg, dx, dy)
+        cfg.save()
+        self.last_anchor_msg = f"HDV déplacé de ({dx:+d}, {dy:+d}) px : zones recalées."
+        return dx, dy
 
     def calibrate_point(self, name: str, pos: Optional[Point] = None) -> Point:
         """name = "price_field" | "sell_button" | "modify_button"."""
@@ -1136,6 +1268,7 @@ class PriceEngine:
         if not self._lock.acquire(blocking=False):
             return Result(None, "warn", "Lecture déjà en cours, ignoré.")
         try:
+            self._reanchor()
             return self._relist()
         except Exception as e:
             return Result(None, "error", f"Erreur: {e}", hint="Erreur")
@@ -1146,6 +1279,7 @@ class PriceEngine:
         if not self._lock.acquire(blocking=False):
             return Result(None, "warn", "Lecture déjà en cours, ignoré.")
         try:
+            self._reanchor()
             return self._relist_all()
         except Exception as e:
             return Result(None, "error", f"Erreur: {e}", hint="Erreur")
@@ -1478,6 +1612,7 @@ class PriceEngine:
         if not self._lock.acquire(blocking=False):
             return Result(None, "warn", "Lecture déjà en cours, ignoré.")
         try:
+            self._reanchor()
             return self._sell(optimize)
         except Exception as e:  # ne jamais tuer le thread des hotkeys
             return Result(None, "error", f"Erreur: {e}", hint="Erreur")
@@ -1492,6 +1627,7 @@ class PriceEngine:
         if not self._lock.acquire(blocking=False):
             return Result(None, "warn", "Lecture déjà en cours, ignoré.")
         try:
+            self._reanchor()
             return self._sell_all()
         except Exception as e:
             return Result(None, "error", f"Erreur: {e}", hint="Erreur")
@@ -1584,6 +1720,7 @@ class PriceEngine:
 
     def read_only(self) -> ScreenRead:
         with self._lock:
+            self._reanchor()
             sr = read_screen(self.cfg, self.debug_dir)
             sr.listed = read_counter(self.cfg)
             sr.mine = read_mine(self.cfg).value if mine_regions(self.cfg) else None

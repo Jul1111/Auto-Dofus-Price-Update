@@ -13,6 +13,7 @@
   "SELL_BUTTON": null,
   "AVG_REGION": null,
   "COUNT_REGION": null,
+  "ANCHOR_REGION": null,
   "MINE_REGION": null,
   "MODIFY_BUTTON": null,
   "RELIST_ROW": null,
@@ -70,6 +71,7 @@
     "calibrate_mine": "ctrl+alt+f7",
     "calibrate_modify": "ctrl+alt+f8",
     "calibrate_rows": "ctrl+alt+f9",
+    "calibrate_anchor": "ctrl+alt+f10",
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
     "quit": "ctrl+alt+q"

@@ -1,7 +1,7 @@
 # 🗺️ Roadmap — Dofus Price Helper
 
 Pistes d'amélioration, de la plus utile à la moins utile.
-Priorité conseillée : **2** ou **4** (1 et 3 faits).
+Reste : **7** (version .exe).
 
 ---
 
@@ -15,10 +15,10 @@ Priorité conseillée : **2** ou **4** (1 et 3 faits).
 - **Sécurité** : Tesseract reste en secours si un chiffre n'est pas reconnu.
 - **Réalisé autrement** : pas de captures à fournir. Les modèles sont appris sur l'écran de l'utilisateur, à partir des lectures Tesseract très sûres (`dofus_digits.py`, `digit_templates.npz`). Chiffres collés : découpe automatique. Formes parasites (flèche, coin de cadre) : apprises et ignorées. Contrôle croisé 1 lecture sur 25.
 
-### 2. Zones liées à la fenêtre du jeu
-- **Problème** : si la fenêtre de l'HDV bouge ou change de taille, il faut tout recalibrer.
-- **Idée** : repérer la fenêtre (ex. titre « Hôtel de vente ») et placer toutes les zones par rapport à elle.
-- **Gain** : une seule calibration, valable partout.
+### 2. Zones liées à la fenêtre de l'HDV — ✅ FAIT (repère « Hôtel de vente »)
+- Calibration du titre « Hôtel de vente » (Ctrl+Alt+F10 ×2) : son image sert de repère (`hdv_anchor.png`).
+- Avant chaque action, l'outil vérifie que le titre est toujours à sa place (~1 ms). S'il a bougé, il le retrouve sur tout l'écran (~20 ms) et décale toutes les zones et tous les points d'autant.
+- Limite : suit un déplacement, pas un changement de taille d'interface (dans ce cas, recalibrer).
 
 ---
 
@@ -31,19 +31,13 @@ Priorité conseillée : **2** ou **4** (1 et 3 faits).
   - ou se mettre au prix plancher (ex. 70 % du prix moyen).
 - **Gain** : pas de vente bradée à cause d'un dumper, et Ctrl+F3 ne s'arrête plus en cours de route.
 
-### 4. Baisse adaptée au prix
-- −1 kama sur les petits prix, −1 % sur les gros.
-- Arrondi propre : 1 499 plutôt que 1 498.
-
-### 5. Anti guerre des prix
-- Si un concurrent repasse sous toi plusieurs fois de suite sur le même objet, l'outil arrête de baisser et te prévient.
-
 ---
 
 ## 📊 Suivi
 
-### 6. Tableau de bord
-- À partir de `dofus_price_history.csv` : kamas mis en vente, nombre de modifications par objet, évolution des prix.
+### 6. Tableau de bord — ✅ FAIT (`dofus_dashboard.py`, bouton « Tableau de bord »)
+- Page `dashboard.html` générée depuis l'historique, sans internet : lots et kamas mis en vente, prix modifiés, activité par heure, taille des lots, baisse moyenne, lectures suspectes, dernières actions.
+- Limite : l'historique ne contient pas le nom des objets (pas de détail par objet).
 
 ### 7. Version .exe
 - Un seul fichier à lancer (PyInstaller), sans Python ni terminal.
@@ -60,6 +54,9 @@ Priorité conseillée : **2** ou **4** (1 et 3 faits).
 - Alertes de calibration (zone trop serrée).
 - Lecture rapide des chiffres apprise (~5 ms au lieu de ~100-300 ms), Tesseract en secours.
 - Prix plancher (70 % du prix moyen par défaut) : au plancher / garder mon prix / arrêt.
+- Zones qui suivent l'HDV déplacé (repère « Hôtel de vente »).
+- Tableau de bord HTML de l'historique.
+- Interface à onglets (Raccourcis, Prix, Mes ventes, Calibration, Options).
 
 ## ⚠️ Rappel
 

@@ -17,6 +17,7 @@ Raccourcis par défaut (clé HOTKEYS de la config) :
   F3 / Ctrl+F3        mes ventes : mettre à jour la ligne sélectionnée / toute la liste
   Ctrl+Alt+F7 (x2)    mes ventes : texte du champ « Prix du lot » ; Ctrl+Alt+F8 : bouton « Modifier »
   Ctrl+Alt+F9 (x2)    mes ventes : 1re puis 2e ligne de la liste
+  Ctrl+Alt+F10 (x2)   repère : titre « Hôtel de vente » (les zones suivent l'HDV déplacé)
   Ctrl+Alt+F5 (x2)    (optionnel) calibrer la valeur du « Prix moyen »
   Ctrl+Alt+F6 (x2)    (optionnel) calibrer le compteur « 21/100 lots en vente »
   Ctrl+Shift+P        afficher ce qui est lu (debug)
@@ -107,6 +108,7 @@ def main() -> int:
     keyboard.add_hotkey(hk["relist"], relist_action(False))
     keyboard.add_hotkey(hk["relist_all"], relist_action(True))
     keyboard.add_hotkey(hk["calibrate_mine"], lambda: calib_rect("mine"))
+    keyboard.add_hotkey(hk["calibrate_anchor"], lambda: calib_rect("anchor"))
     keyboard.add_hotkey(hk["calibrate_modify"], lambda: calib_point("modify_button"))
     keyboard.add_hotkey(hk["calibrate_rows"], calib_rows)
     keyboard.add_hotkey(hk["pause"], toggle_pause)

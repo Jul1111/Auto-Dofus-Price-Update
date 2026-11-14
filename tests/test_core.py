@@ -875,3 +875,66 @@ def test_config_v4_gets_new_relist_max(tmp_path):
     p = tmp_path / "cfg.json"
     p.write_text(json.dumps({"CONFIG_VERSION": 4, "RELIST_MAX": 120}))
     assert core.Config.load(p).relist_max == 400
+
+
+# --- Repère HDV : les zones suivent la fenêtre
+def _fake_screen(win, x, y, bg):
+    sc = bg.copy()
+    h, w = win.shape[:2]
+    sc[y:y + h, x:x + w] = win
+    return sc
+
+
+def test_reanchor_follows_moved_hdv(monkeypatch, tmp_path):
+    rng = np.random.default_rng(1)
+    bg = rng.integers(20, 60, (700, 1000, 3)).astype(np.uint8)
+    win = rng.integers(0, 255, (200, 300, 3)).astype(np.uint8)  # « fenêtre HDV » texturée
+    cur = {"img": _fake_screen(win, 100, 50, bg)}
+    monkeypatch.setattr(core, "grab_screen", lambda r: cur["img"][r[1]:r[1] + r[3], r[0]:r[0] + r[2]])
+    monkeypatch.setattr(core, "screen_bounds", lambda: (0, 0, 1000, 700))
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "anchor.png")
+    monkeypatch.setattr(core.Config, "save", lambda self, path=None: None)
+    cfg = core.Config(anchor_region=[110, 55, 120, 20], table_region=[130, 150, 100, 60],
+                      price_field=[150, 100], relist_row=[300, 120])
+    core.save_anchor(cur["img"][55:75, 110:230])
+    eng = core.PriceEngine(cfg)
+    assert eng._reanchor() is None                       # pas bougé
+    cur["img"] = _fake_screen(win, 420, 310, bg)          # HDV déplacé de (+320, +260)
+    assert eng._reanchor() == (320, 260)
+    assert cfg.table_region == [450, 410, 100, 60] and cfg.price_field == [470, 360]
+    assert cfg.relist_row == [620, 380] and cfg.anchor_region == [430, 315, 120, 20]
+    assert "recalées" in eng.last_anchor_msg
+
+
+def test_reanchor_hdv_closed_keeps_zones(monkeypatch, tmp_path):
+    rng = np.random.default_rng(2)
+    bg = rng.integers(20, 60, (400, 600, 3)).astype(np.uint8)
+    win = rng.integers(0, 255, (100, 200, 3)).astype(np.uint8)
+    cur = {"img": _fake_screen(win, 50, 50, bg)}
+    monkeypatch.setattr(core, "grab_screen", lambda r: cur["img"][r[1]:r[1] + r[3], r[0]:r[0] + r[2]])
+    monkeypatch.setattr(core, "screen_bounds", lambda: (0, 0, 600, 400))
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "anchor.png")
+    cfg = core.Config(anchor_region=[60, 60, 100, 20], table_region=[70, 90, 50, 40])
+    core.save_anchor(cur["img"][60:80, 60:160])
+    cur["img"] = bg                                       # HDV fermé
+    eng = core.PriceEngine(cfg)
+    assert eng._reanchor() is None and cfg.table_region == [70, 90, 50, 40]
+    assert "introuvable" in eng.last_anchor_msg
+
+
+# --- Tableau de bord
+def test_dashboard_builds(tmp_path):
+    import dofus_dashboard as dash
+    h = tmp_path / "dofus_price_history.csv"
+    h.write_text(",".join(core.HISTORY_HEADER) + "\n"
+                 "1794603901,2026-11-13 22:05:01,sell,1,1,600,95,599,saisi + mis en vente,fixed,1.0,none\n"
+                 "1794603917,2026-11-13 22:05:17,sell,10,10,6000,95,5999,sell_all,fixed,1.0,none\n"
+                 "1794651321,2026-11-14 11:15:21,relist,1,1,757,83,756,modified,fixed,1.0,none\n"
+                 "1794651322,2026-11-14 11:15:22,read,1,1,757,40,756,suspect,fixed,1.0,none\n",
+                 encoding="utf-8")
+    data = dash.compute(dash.load_rows(h))
+    assert data["count"]["vente"] == 2 and data["count"]["modif"] == 1 and data["count"]["suspect"] == 1
+    assert data["kamas"] == 599 + 5999 and data["lots"] == {1: 1, 10: 1}
+    out = dash.build(h, tmp_path / "d.html")
+    page = out.read_text(encoding="utf-8")
+    assert "Tableau de bord" in page and "6 598" in page and "<svg" in page

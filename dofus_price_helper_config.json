@@ -1,5 +1,5 @@
 {
-  "CONFIG_VERSION": 4,
+  "CONFIG_VERSION": 5,
   "TESSERACT_CMD": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
   "LOTS": [
     1,
@@ -39,6 +39,7 @@
     146,
     20
   ],
+  "ANCHOR_REGION": null,
   "MINE_REGION": [
     1106,
     542,
@@ -76,7 +77,7 @@
   "RELIST_ROWS": 10,
   "RELIST_SCROLL_MAX": 40,
   "RELIST_SCROLL_PAGE": 0.5,
-  "RELIST_MAX": 120,
+  "RELIST_MAX": 400,
   "RELIST_DELAY": 0.5,
   "RELIST_CONFIRM_ENTER": true,
   "AUTO_PASTE": true,
@@ -107,6 +108,7 @@
     "calibrate_mine": "ctrl+alt+f7",
     "calibrate_modify": "ctrl+alt+f8",
     "calibrate_rows": "ctrl+alt+f9",
+    "calibrate_anchor": "ctrl+alt+f10",
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
     "quit": "ctrl+alt+q"
