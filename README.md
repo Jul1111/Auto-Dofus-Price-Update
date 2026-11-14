@@ -18,9 +18,10 @@ Il lit l'écran (OCR), calcule un prix juste sous le moins cher, le colle dans �
 
 | | |
 |---|---|
-| <!-- CAPTURE 1 — docs/interface.png : l'interface complète, onglet « Raccourcis », panneau « Dernière lecture » rempli après un F1. --> <img width="1754" height="843" alt="Capture d&#39;écran 2026-11-14 155130" src="https://github.com/user-attachments/assets/15eb454f-4eb7-4ac5-b38a-8a6e521002b1" />
- | <!-- CAPTURE 2 — docs/hdv-vente.png : l'HDV du jeu, onglet Vente, avec le bandeau du résultat affiché au-dessus. --> <img width="1131" height="842" alt="Capture d&#39;écran 2026-11-14 155202" src="https://github.com/user-attachments/assets/f96ad07a-d3e9-4436-a478-22e590c62bd2" />
- | 
+| <!-- CAPTURE 1 — docs/interface.png : l'interface complète, onglet « Raccourcis », panneau « Dernière lecture » rempli après un F1. --> Interface
+ <img width="1754" height="843" alt="Capture d&#39;écran 2026-11-14 155130" src="https://github.com/user-attachments/assets/f25af94a-6dc4-4eb6-a385-47e0d739cd69" />
+| <!-- CAPTURE 2 — docs/hdv-vente.png : l'HDV du jeu, onglet Vente, avec le bandeau du résultat affiché au-dessus. --> Vente
+| 
 
 | <!-- CAPTURE 3 — docs/tableau-de-bord.png : onglet « Tableau de bord » avec un objet choisi dans « Prix par objet ». --> 📷 *Tableau de bord* | <!-- CAPTURE 4 — docs/assistant.png : l'assistant de calibration, page « Vérification » avec les ✓ après « Tester ». --> <img width="1127" height="841" alt="Capture d&#39;écran 2026-11-14 155218" src="https://github.com/user-attachments/assets/cff47ead-9bb7-4e45-a230-747f41d53c23" />
  |
