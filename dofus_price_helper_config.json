@@ -8,60 +8,60 @@
     1000
   ],
   "TABLE_REGION": [
-    1188,
-    760,
-    148,
-    121
+    1359,
+    840,
+    168,
+    144
   ],
   "QTY_REGION": [
-    1156,
-    562,
-    70,
-    15
-  ],
-  "PRICE_FIELD": [
-    1206,
-    520
-  ],
-  "SELL_BUTTON": [
-    1238,
-    684
-  ],
-  "AVG_REGION": [
-    1152,
-    649,
-    46,
-    16
-  ],
-  "COUNT_REGION": [
-    1347,
-    947,
-    121,
+    1320,
+    613,
+    83,
     20
   ],
+  "PRICE_FIELD": [
+    1377,
+    566
+  ],
+  "SELL_BUTTON": [
+    1411,
+    757
+  ],
+  "AVG_REGION": [
+    1316,
+    716,
+    51,
+    17
+  ],
+  "COUNT_REGION": [
+    1539,
+    1058,
+    141,
+    17
+  ],
   "ANCHOR_REGION": [
-    1401,
-    365,
-    121,
-    12
+    1597,
+    387,
+    151,
+    19
   ],
   "NAME_REGION": [
-    1202,
-    434,
-    126,
-    37
+    1376,
+    470,
+    137,
+    35
   ],
   "READ_ITEM_NAMES": true,
   "MINE_REGION": null,
   "MODIFY_BUTTON": [
-    1285,
-    683
+    1468,
+    754
   ],
   "RELIST_ROW": [
-    1564,
-    515
+    1794,
+    560
   ],
-  "RELIST_STEP": 44,
+  "RELIST_STEP": 52,
   "TABLE_SPLIT": 0.45,
   "SCALE": 2,
   "FAST_DIGITS": true,
@@ -76,7 +76,7 @@
   "OWN_PRICE_TTL": 1800.0,
   "MIN_AVG_RATIO": 0.5,
   "FLOOR_MODE": "floor",
-  "FLOOR_RATIO": 0.7,
+  "FLOOR_RATIO": 0.0,
   "SELL_ALL_MAX": 20,
   "SELL_ALL_DELAY": 0.6,
   "VERIFY_COUNT": true,

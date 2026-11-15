@@ -412,3 +412,181 @@ ts,datetime,action,lot,selected_qty,read_price,confidence,new_price,status,mode,
 1794667638,2026-11-14 15:47:18,read,1,1,15,99,33,relist_suspect,fixed,1.0,none,Viande Faisandée
 1794667638,2026-11-14 15:47:18,read,1,1,15,99,33,relist_suspect,fixed,1.0,none,Viande Faisandée
 1794667877,2026-11-14 15:51:17,observe,1,1,148,98,197,at_floor,fixed,1.0,none,Laine Céleste
+1794670727,2026-11-14 16:38:47,observe,1,1,1495,87,1495,cheapest,fixed,1.0,none,Cawotte
+1794670728,2026-11-14 16:38:48,relist,1,1,1480,90,1479,modified,fixed,1.0,none,Laine de Bouftou Royal
+1794670729,2026-11-14 16:38:49,observe,1,1,1479,90,1479,cheapest,fixed,1.0,none,Laine de Bouftou Royal
+1794670730,2026-11-14 16:38:50,relist,1,1,1180,89,1179,modified,fixed,1.0,none,Cuir de Scelérat Strubien
+1794670730,2026-11-14 16:38:50,observe,1,1,1179,90,1179,cheapest,fixed,1.0,none,Cuir de Scelérat Strubien
+1794670730,2026-11-14 16:38:50,observe,1,1,430,98,864,at_floor,fixed,1.0,none,Cuir de Scelérat Strubien
+1794670730,2026-11-14 16:38:50,observe,1,1,380,90,852,at_floor,fixed,1.0,none,Rondelles de Milirat Strubien
+1794670731,2026-11-14 16:38:51,observe,1,1,666,97,759,at_floor,fixed,1.0,none,Langue de Gargrouille
+1794670732,2026-11-14 16:38:52,relist,1,1,666,97,665,modified,fixed,1.0,none,CEil de Pikdoa
+1794670733,2026-11-14 16:38:53,relist,1,1,665,95,665,modified,fixed,1.0,none,CEil de Pikdoa
+1794670734,2026-11-14 16:38:54,relist,1,1,670,96,669,modified,fixed,1.0,none,Patte d'Arakne des Egouts
+1794670734,2026-11-14 16:38:54,observe,1,1,669,95,669,cheapest,fixed,1.0,none,Patte d'Arakne des Egouts
+1794670734,2026-11-14 16:38:54,observe,1,1,665,95,665,cheapest,fixed,1.0,none,CEil de Pikdoa
+1794670735,2026-11-14 16:38:55,observe,1,1,665,95,665,cheapest,fixed,1.0,none,CEil de Pikdoa
+1794670735,2026-11-14 16:38:55,observe,1,1,642,92,649,at_floor,fixed,1.0,none,Peau de Larve Orange
+1794670737,2026-11-14 16:38:57,observe,1,1,642,92,649,at_floor,fixed,1.0,none,Peau de Larve Orange
+1794670737,2026-11-14 16:38:57,observe,1,1,642,92,649,at_floor,fixed,1.0,none,Peau de Larve Orange
+1794670737,2026-11-14 16:38:57,observe,1,1,642,92,649,at_floor,fixed,1.0,none,Peau de Larve Orange
+1794670737,2026-11-14 16:38:57,observe,1,1,642,92,649,at_floor,fixed,1.0,none,Peau de Larve Orange
+1794670737,2026-11-14 16:38:57,observe,1,1,642,92,649,at_floor,fixed,1.0,none,Peau de Larve Orange
+1794670739,2026-11-14 16:38:59,relist,10,10,623,96,622,modified,fixed,1.0,none,Trefle a 5 feuilles
+1794670740,2026-11-14 16:39:00,relist,10,10,622,92,622,modified,fixed,1.0,none,Trefle a 5 feuilles
+1794670740,2026-11-14 16:39:00,observe,10,10,622,92,622,cheapest,fixed,1.0,none,Trefle a 5 feuilles
+1794670742,2026-11-14 16:39:02,observe,10,10,622,92,622,cheapest,fixed,1.0,none,Trefle a 5 feuilles
+1794670742,2026-11-14 16:39:02,observe,10,10,576,94,576,cheapest,fixed,1.0,none,Volve d'Aminite
+1794670743,2026-11-14 16:39:03,observe,10,10,576,100,576,cheapest,fixed,1.0,none,Volve d'Aminite
+1794670743,2026-11-14 16:39:03,observe,1,1,494,97,494,cheapest,fixed,1.0,none,Manuel du Directeur Grunob
+1794670743,2026-11-14 16:39:03,observe,1,1,494,97,494,cheapest,fixed,1.0,none,Manuel du Directeur Grunob
+1794670743,2026-11-14 16:39:03,observe,1,1,494,97,494,cheapest,fixed,1.0,none,Manuel du Directeur Grunob
+1794670745,2026-11-14 16:39:05,relist,1,1,445,92,444,modified,fixed,1.0,none,Pierre de Granit
+1794670745,2026-11-14 16:39:05,observe,1,1,444,98,444,cheapest,fixed,1.0,none,Pierre de Granit
+1794670747,2026-11-14 16:39:07,observe,1,1,444,98,444,cheapest,fixed,1.0,none,Pierre de Granit
+1794670748,2026-11-14 16:39:08,relist,1,1,333,95,352,modified,fixed,1.0,none,Slip en Cuir Moulant du Gargly
+1794670748,2026-11-14 16:39:08,observe,1,1,333,95,352,at_floor,fixed,1.0,none,Slip en Cuir Moulant du Gargly
+1794670748,2026-11-14 16:39:08,observe,1,1,336,95,336,cheapest,fixed,1.0,none,Pic de Prespic
+1794670749,2026-11-14 16:39:09,relist,10,10,296,90,295,modified,fixed,1.0,none,Viande Minérale
+1794670749,2026-11-14 16:39:09,observe,1,1,296,91,296,cheapest,fixed,1.0,none,Nagcoire de Compétition
+1794670750,2026-11-14 16:39:10,observe,1,1,296,91,296,cheapest,fixed,1.0,none,Nagcoire de Compétition
+1794670750,2026-11-14 16:39:10,observe,1,1,296,91,296,cheapest,fixed,1.0,none,Nagcoire de Compétition
+1794670750,2026-11-14 16:39:10,observe,10,10,295,90,295,cheapest,fixed,1.0,none,Viande Minérale
+1794670752,2026-11-14 16:39:12,observe,10,10,295,90,295,cheapest,fixed,1.0,none,Viande Minérale
+1794670752,2026-11-14 16:39:12,observe,1,1,154,98,248,at_floor,fixed,1.0,none,Peau Egrotante
+1794670752,2026-11-14 16:39:12,observe,1,1,44,97,231,at_floor,fixed,1.0,none,Tete de Marteau en Jade
+1794670753,2026-11-14 16:39:13,observe,1,1,226,90,226,cheapest,fixed,1.0,none,Pétale Diaphane
+1794670753,2026-11-14 16:39:13,observe,1,1,226,90,226,cheapest,fixed,1.0,none,Pétale Diaphane
+1794670753,2026-11-14 16:39:13,observe,1,1,226,90,226,cheapest,fixed,1.0,none,Pétale Diaphane
+1794670755,2026-11-14 16:39:15,observe,1,1,226,90,226,cheapest,fixed,1.0,none,Pétale Diaphane
+1794670755,2026-11-14 16:39:15,observe,1,1,182,88,198,at_floor,fixed,1.0,none,Créme a bronze
+1794670755,2026-11-14 16:39:15,observe,1,1,182,88,186,at_floor,fixed,1.0,none,Créme a bronze
+1794670755,2026-11-14 16:39:15,observe,1,1,182,96,185,at_floor,fixed,1.0,none,Créme a bronze
+1794670756,2026-11-14 16:39:16,observe,1,1,170,91,179,at_floor,fixed,1.0,none,Bec du Tofu
+1794670756,2026-11-14 16:39:16,read,1,1,15,92,33,relist_suspect,fixed,1.0,none,Viande Faisandée
+1794670756,2026-11-14 16:39:16,read,1,1,15,92,33,relist_suspect,fixed,1.0,none,Viande Faisandée
+1794670758,2026-11-14 16:39:18,read,1,1,15,92,33,relist_suspect,fixed,1.0,none,Viande Faisandée
+1794670758,2026-11-14 16:39:18,read,1,1,15,92,33,relist_suspect,fixed,1.0,none,Viande Faisandée
+1794670758,2026-11-14 16:39:18,read,1,1,15,95,14,relist_suspect,fixed,1.0,none,Viande Faisandée
+1794670758,2026-11-14 16:39:18,read,1,1,15,98,33,relist_suspect,fixed,1.0,none,Viande Faisandée
+1794670803,2026-11-14 16:40:03,observe,1,1,1479,90,1479,cheapest,fixed,1.0,none,Laine de Bouftou Royal
+1794670803,2026-11-14 16:40:03,observe,1,1,1179,90,1179,cheapest,fixed,1.0,none,Cuir de Scelérat Strubien
+1794670804,2026-11-14 16:40:04,relist,1,1,430,98,429,modified,fixed,1.0,none,Cuir de Scelérat Strubien
+1794670805,2026-11-14 16:40:05,relist,1,1,380,91,379,modified,fixed,1.0,none,Rondelles de Milirat Strubien
+1794670806,2026-11-14 16:40:06,relist,1,1,666,97,665,modified,fixed,1.0,none,Langue de Gargrouille
+1794670807,2026-11-14 16:40:07,observe,1,1,669,95,669,cheapest,fixed,1.0,none,Patte d'Arakne des Egouts
+1794670807,2026-11-14 16:40:07,observe,1,1,665,96,665,cheapest,fixed,1.0,none,Langue de Gargrouille
+1794670807,2026-11-14 16:40:07,observe,1,1,665,96,665,cheapest,fixed,1.0,none,CEil de Pikdoa
+1794670807,2026-11-14 16:40:07,observe,1,1,665,96,665,cheapest,fixed,1.0,none,CEil de Pikdoa
+1794670808,2026-11-14 16:40:08,relist,1,1,642,98,641,modified,fixed,1.0,none,Peau de Larve Orange
+1794670809,2026-11-14 16:40:09,relist,1,1,641,90,641,modified,fixed,1.0,none,Peau de Larve Orange
+1794670810,2026-11-14 16:40:10,relist,1,1,641,90,641,modified,fixed,1.0,none,Peau de Larve Orange
+1794670812,2026-11-14 16:40:12,relist,1,1,641,90,641,modified,fixed,1.0,none,Peau de Larve Orange
+1794670813,2026-11-14 16:40:13,relist,1,1,641,90,641,modified,fixed,1.0,none,Peau de Larve Orange
+1794670814,2026-11-14 16:40:14,relist,1,1,641,90,641,modified,fixed,1.0,none,Peau de Larve Orange
+1794670814,2026-11-14 16:40:14,observe,1,1,641,90,641,cheapest,fixed,1.0,none,Peau de Larve Orange
+1794670814,2026-11-14 16:40:14,observe,1,1,641,90,641,cheapest,fixed,1.0,none,Peau de Larve Orange
+1794670814,2026-11-14 16:40:14,observe,1,1,641,90,641,cheapest,fixed,1.0,none,Peau de Larve Orange
+1794670815,2026-11-14 16:40:15,observe,1,1,641,96,641,cheapest,fixed,1.0,none,Peau de Larve Orange
+1794670816,2026-11-14 16:40:16,observe,1,1,641,98,641,cheapest,fixed,1.0,none,Peau de Larve Orange
+1794670817,2026-11-14 16:40:17,observe,1,1,641,98,641,cheapest,fixed,1.0,none,Peau de Larve Orange
+1794670817,2026-11-14 16:40:17,observe,10,10,622,99,622,cheapest,fixed,1.0,none,Trefle a 5 feuilles
+1794670817,2026-11-14 16:40:17,observe,10,10,622,99,622,cheapest,fixed,1.0,none,Trefle a 5 feuilles
+1794670817,2026-11-14 16:40:17,observe,10,10,576,100,576,cheapest,fixed,1.0,none,Volve d'Aminite
+1794670818,2026-11-14 16:40:18,observe,10,10,576,100,576,cheapest,fixed,1.0,none,Volve d'Aminite
+1794670819,2026-11-14 16:40:19,observe,10,10,576,100,576,cheapest,fixed,1.0,none,Volve d'Aminite
+1794670820,2026-11-14 16:40:20,observe,1,1,494,98,494,cheapest,fixed,1.0,none,Manuel du Directeur Grunob
+1794670820,2026-11-14 16:40:20,observe,1,1,494,98,494,cheapest,fixed,1.0,none,Manuel du Directeur Grunob
+1794670820,2026-11-14 16:40:20,observe,1,1,494,98,494,cheapest,fixed,1.0,none,Manuel du Directeur Grunob
+1794670820,2026-11-14 16:40:20,observe,1,1,429,96,429,cheapest,fixed,1.0,none,Cuir de Scelérat Strubien
+1794670821,2026-11-14 16:40:21,observe,1,1,379,90,379,cheapest,fixed,1.0,none,Rondelles de Milirat Strubien
+1794670822,2026-11-14 16:40:22,relist,1,1,333,95,332,modified,fixed,1.0,none,Slip en Cuir Moulant du Gargly
+1794670822,2026-11-14 16:40:22,observe,1,1,336,95,336,cheapest,fixed,1.0,none,Pic de Prespic
+1794670824,2026-11-14 16:40:24,observe,1,1,336,95,336,cheapest,fixed,1.0,none,Pic de Prespic
+1794670824,2026-11-14 16:40:24,observe,1,1,332,98,332,cheapest,fixed,1.0,none,Slip en Cuir Moulant du Gargly
+1794670824,2026-11-14 16:40:24,observe,1,1,296,97,296,cheapest,fixed,1.0,none,Nagcoire de Compétition
+1794670824,2026-11-14 16:40:24,observe,1,1,296,97,296,cheapest,fixed,1.0,none,Nagcoire de Compétition
+1794670825,2026-11-14 16:40:25,observe,1,1,296,97,296,cheapest,fixed,1.0,none,Nagcoire de Compétition
+1794670825,2026-11-14 16:40:25,observe,10,10,295,94,295,cheapest,fixed,1.0,none,Viande Minérale
+1794670826,2026-11-14 16:40:26,relist,1,1,154,98,153,modified,fixed,1.0,none,Peau Egrotante
+1794670826,2026-11-14 16:40:26,read,1,1,44,98,43,relist_suspect,fixed,1.0,none,Tete de Marteau en Jade
+1794670826,2026-11-14 16:40:26,read,1,1,44,98,43,relist_suspect,fixed,1.0,none,Tete de Marteau en Jade
+1794670828,2026-11-14 16:40:28,read,1,1,44,95,43,relist_suspect,fixed,1.0,none,Tete de Marteau en Jade
+1794670828,2026-11-14 16:40:28,read,1,1,44,98,43,relist_suspect,fixed,1.0,none,Tete de Marteau en Jade
+1794670828,2026-11-14 16:40:28,observe,1,1,226,96,226,cheapest,fixed,1.0,none,Pétale Diaphane
+1794670829,2026-11-14 16:40:29,observe,1,1,226,92,226,cheapest,fixed,1.0,none,Pétale Diaphane
+1794670829,2026-11-14 16:40:29,observe,1,1,226,92,226,cheapest,fixed,1.0,none,Pétale Diaphane
+1794670830,2026-11-14 16:40:30,relist,1,1,182,100,181,modified,fixed,1.0,none,Créme a bronze
+1794670831,2026-11-14 16:40:31,relist,1,1,148,96,147,modified,fixed,1.0,none,Laine Céleste
+1794670832,2026-11-14 16:40:32,relist,1,1,181,96,180,modified,fixed,1.0,none,Créme a bronze
+1794670833,2026-11-14 16:40:33,relist,1,1,180,94,180,modified,fixed,1.0,none,Créme a bronze
+1794670834,2026-11-14 16:40:34,relist,1,1,180,94,180,modified,fixed,1.0,none,Créme a bronze
+1794670835,2026-11-14 16:40:35,observe,1,1,180,89,180,cheapest,fixed,1.0,none,Créme a bronze
+1794670835,2026-11-14 16:40:35,observe,1,1,180,94,180,cheapest,fixed,1.0,none,Créme a bronze
+1794670837,2026-11-14 16:40:37,observe,1,1,180,94,180,cheapest,fixed,1.0,none,Créme a bronze
+1794670837,2026-11-14 16:40:37,observe,1,1,180,94,180,cheapest,fixed,1.0,none,Créme a bronze
+1794670838,2026-11-14 16:40:38,relist,10,10,40,98,39,modified,fixed,1.0,none,Antennes de Vilinsekt
+1794670839,2026-11-14 16:40:39,relist,1,1,138,97,137,modified,fixed,1.0,none,Langue d'Epouvanteur
+1794670840,2026-11-14 16:40:40,relist,1,1,137,97,137,modified,fixed,1.0,none,Langue d'Epouvanteur
+1794670841,2026-11-14 16:40:41,relist,1,1,137,97,137,modified,fixed,1.0,none,Langue d'Epouvanteur
+1794670841,2026-11-14 16:40:41,observe,1,1,153,96,153,cheapest,fixed,1.0,none,Peau Egrotante
+1794670842,2026-11-14 16:40:42,observe,1,1,147,97,147,cheapest,fixed,1.0,none,Laine Céleste
+1794670843,2026-11-14 16:40:43,relist,1,1,137,97,137,modified,fixed,1.0,none,Langue d'Epouvanteur
+1794670844,2026-11-14 16:40:44,relist,1,1,137,97,137,modified,fixed,1.0,none,Intestin d'Araknosé
+1794670844,2026-11-14 16:40:44,observe,1,1,137,97,137,cheapest,fixed,1.0,none,Intestin d'Araknosé
+1794670846,2026-11-14 16:40:46,observe,1,1,137,97,137,cheapest,fixed,1.0,none,Intestin d'Araknosé
+1794670846,2026-11-14 16:40:46,observe,1,1,137,97,137,cheapest,fixed,1.0,none,Langue d'Epouvanteur
+1794670846,2026-11-14 16:40:46,observe,1,1,137,97,137,cheapest,fixed,1.0,none,Langue d'Epouvanteur
+1794670847,2026-11-14 16:40:47,observe,1,1,137,97,137,cheapest,fixed,1.0,none,Langue d'Epouvanteur
+1794670847,2026-11-14 16:40:47,observe,1,1,137,96,137,cheapest,fixed,1.0,none,Langue d'Epouvanteur
+1794670848,2026-11-14 16:40:48,relist,10,10,99,98,98,modified,fixed,1.0,none,Viande Frelatée
+1794670849,2026-11-14 16:40:49,relist,1,1,110,98,109,modified,fixed,1.0,none,Conque Marine
+1794670850,2026-11-14 16:40:50,relist,1,1,109,95,109,modified,fixed,1.0,none,Conque Marine
+1794670851,2026-11-14 16:40:51,relist,1,1,109,95,109,modified,fixed,1.0,none,Conque Marine
+1794670851,2026-11-14 16:40:51,observe,1,1,109,95,109,cheapest,fixed,1.0,none,Conque Marine
+1794670853,2026-11-14 16:40:53,observe,1,1,109,95,109,cheapest,fixed,1.0,none,Conque Marine
+1794670853,2026-11-14 16:40:53,observe,1,1,109,95,109,cheapest,fixed,1.0,none,Conque Marine
+1794670854,2026-11-14 16:40:54,observe,1,1,109,95,109,cheapest,fixed,1.0,none,Conque Marine
+1794670855,2026-11-14 16:40:55,relist,1,1,95,97,94,modified,fixed,1.0,none,Sauge
+1794670856,2026-11-14 16:40:56,relist,1,1,94,98,94,modified,fixed,1.0,none,Sauge
+1794670857,2026-11-14 16:40:57,relist,1,1,94,98,94,modified,fixed,1.0,none,Sauge
+1794670858,2026-11-14 16:40:58,relist,1,1,94,98,94,modified,fixed,1.0,none,Sauge
+1794670859,2026-11-14 16:40:59,relist,1,1,94,98,94,modified,fixed,1.0,none,Sauge
+1794670859,2026-11-14 16:40:59,observe,10,10,98,97,98,cheapest,fixed,1.0,none,Viande Frelatée
+1794670859,2026-11-14 16:40:59,observe,1,1,94,98,94,cheapest,fixed,1.0,none,Sauge
+1794670859,2026-11-14 16:40:59,observe,1,1,94,98,94,cheapest,fixed,1.0,none,Sauge
+1794670860,2026-11-14 16:41:00,observe,1,1,94,98,94,cheapest,fixed,1.0,none,Sauge
+1794670862,2026-11-14 16:41:02,observe,1,1,94,98,94,cheapest,fixed,1.0,none,Sauge
+1794670862,2026-11-14 16:41:02,observe,1,1,94,98,94,cheapest,fixed,1.0,none,Sauge
+1794670862,2026-11-14 16:41:02,observe,1,1,94,98,94,cheapest,fixed,1.0,none,Sauge
+1794670863,2026-11-14 16:41:03,relist,1,1,70,93,69,modified,fixed,1.0,none,Cuivre
+1794670864,2026-11-14 16:41:04,relist,1,1,69,97,69,modified,fixed,1.0,none,Cuivre
+1794670865,2026-11-14 16:41:05,relist,1,1,69,97,69,modified,fixed,1.0,none,Cuivre
+1794670866,2026-11-14 16:41:06,relist,1,1,69,97,69,modified,fixed,1.0,none,Cuivre
+1794670868,2026-11-14 16:41:08,relist,1,1,69,91,69,modified,fixed,1.0,none,Cuivre
+1794670868,2026-11-14 16:41:08,observe,1,1,69,97,69,cheapest,fixed,1.0,none,Cuivre
+1794670868,2026-11-14 16:41:08,observe,1,1,69,97,69,cheapest,fixed,1.0,none,Cuivre
+1794670868,2026-11-14 16:41:08,observe,1,1,69,97,69,cheapest,fixed,1.0,none,Cuivre
+1794670869,2026-11-14 16:41:09,observe,1,1,69,97,69,cheapest,fixed,1.0,none,Cuivre
+1794670870,2026-11-14 16:41:10,observe,1,1,94,98,94,cheapest,fixed,1.0,none,Sauge
+1794670870,2026-11-14 16:41:10,observe,1,1,69,97,69,cheapest,fixed,1.0,none,Cuivre
+1794670871,2026-11-14 16:41:11,observe,1,1,69,97,69,cheapest,fixed,1.0,none,Cuivre
+1794670871,2026-11-14 16:41:11,observe,1,1,69,97,69,cheapest,fixed,1.0,none,Cuivre
+1794670871,2026-11-14 16:41:11,observe,1,1,69,97,69,cheapest,fixed,1.0,none,Cuivre
+1794670871,2026-11-14 16:41:11,observe,10,10,39,97,39,cheapest,fixed,1.0,none,Antennes de Vilinsekt
+1794670873,2026-11-14 16:41:13,observe,10,10,39,97,39,cheapest,fixed,1.0,none,Antennes de Vilinsekt
+1794670874,2026-11-14 16:41:14,relist,1,1,33,96,32,modified,fixed,1.0,none,Bois de Chataic
+1794670875,2026-11-14 16:41:15,relist,1,1,15,98,14,modified,fixed,1.0,none,Viande Faisandée
+1794670876,2026-11-14 16:41:16,relist,1,1,14,98,14,modified,fixed,1.0,none,Viande Faisandée
+1794670877,2026-11-14 16:41:17,observe,1,1,32,94,32,cheapest,fixed,1.0,none,Bois de Chataic
+1794670877,2026-11-14 16:41:17,observe,1,1,28,98,28,cheapest,fixed,1.0,none,Viande Frelatée
+1794670877,2026-11-14 16:41:17,observe,1,1,28,98,28,cheapest,fixed,1.0,none,Viande Frelatée
+1794670877,2026-11-14 16:41:17,observe,1,1,28,98,28,cheapest,fixed,1.0,none,Viande Frelatée
+1794670878,2026-11-14 16:41:18,observe,1,1,28,98,28,cheapest,fixed,1.0,none,Viande Frelatée
+1794670878,2026-11-14 16:41:18,observe,1,1,28,98,28,cheapest,fixed,1.0,none,Viande Frelatée
+1794670880,2026-11-14 16:41:20,observe,1,1,28,98,28,cheapest,fixed,1.0,none,Viande Frelatée
+1794670881,2026-11-14 16:41:21,observe,1,1,19,97,19,cheapest,fixed,1.0,none,Viande Minérale
+1794670881,2026-11-14 16:41:21,observe,1,1,19,97,19,cheapest,fixed,1.0,none,Viande Minérale
+1794670881,2026-11-14 16:41:21,observe,1,1,19,97,19,cheapest,fixed,1.0,none,Viande Minérale
+1794670881,2026-11-14 16:41:21,observe,1,1,14,93,14,cheapest,fixed,1.0,none,Viande Faisandée
+1794670882,2026-11-14 16:41:22,observe,1,1,14,98,14,cheapest,fixed,1.0,none,Viande Faisandée
