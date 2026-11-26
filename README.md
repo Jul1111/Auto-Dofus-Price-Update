@@ -83,8 +83,14 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 
 ### Version Windows prête à l'emploi (recommandé)
 
+**Installeur (le plus simple)** : téléchargez `DofusPriceHelper-Setup-vX.Y.Z.exe` dans les [Releases](https://github.com/Jul1111/Auto-Dofus-Price-Update/releases/latest) et lancez-le. Pas besoin des droits administrateur : l'outil s'installe dans votre dossier utilisateur, avec un raccourci dans le menu Démarrer (et sur le bureau si vous le cochez). Il se désinstalle depuis **Paramètres › Applications**, sans toucher à vos réglages.
+
+**Ou version zip, sans installation** :
+
 1. Téléchargez `DofusPriceHelper-vX.Y.Z.zip` dans les [Releases](https://github.com/Jul1111/Auto-Dofus-Price-Update/releases/latest).
 2. Décompressez-le où vous voulez, puis lancez `DofusPriceHelper.exe` (gardez le dossier `_internal` à côté).
+
+L'exe et l'installeur ne sont pas signés : Windows SmartScreen peut afficher « Windows a protégé votre PC » → « Informations complémentaires » → « Exécuter quand même ».
 
 Rien d'autre à installer : Tesseract est inclus. Si un Tesseract 5 ou plus récent est déjà installé, c'est lui qui est utilisé. Les réglages et la calibration sont enregistrés dans `%APPDATA%\Dofus Price Helper` et sont conservés d'une version à l'autre.
 
@@ -203,6 +209,7 @@ Auto-Dofus-Price-Update/
 ├── dofus_style.py              Thèmes, couleurs d'accent, effet verre, fondus
 ├── dofus_logo.py               Logo (dessiné par le code) et icônes
 ├── packaging/build.py          Construction de la version Windows (zip)
+├── packaging/installer.iss     Installeur Windows (Inno Setup)
 ├── .github/workflows/          Construction automatique et publication des versions
 ├── docs/                       Captures d'écran
 └── tests/                      Tests unitaires et tests OCR sur captures réelles
@@ -219,14 +226,14 @@ pytest
 
 ## Publier une version
 
-Chaque pull request vers `main` construit le zip et lance les tests sur GitHub : le zip est téléchargeable dans l'onglet **Actions** de l'exécution, pour l'essayer. Pour publier une version dans les Releases :
+Chaque pull request vers `main` construit le zip et l'installeur et lance les tests sur GitHub : ils sont téléchargeables dans l'onglet **Actions** de l'exécution, pour l'essayer. Pour publier une version dans les Releases :
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-Construction locale (Windows, Tesseract installé) : `pip install pyinstaller`, puis `python packaging/build.py --version v1.0.0`. Le zip est créé dans `dist/`.
+Construction locale (Windows, Tesseract installé) : `pip install pyinstaller`, puis `python packaging/build.py --version v1.0.0`. Le zip est créé dans `dist/`. Installeur : [Inno Setup 6](https://jrsoftware.org/isinfo.php), puis `iscc /DAppVersion=v1.0.0 /DNumVersion=1.0.0 packaging\installer.iss` (après `build.py`).
 
 ## Participer
 
