@@ -1265,3 +1265,81 @@ def test_file_log_and_tee(tmp_path, monkeypatch):
         for h in list(lg.handlers):
             h.close()
             lg.removeHandler(h)
+
+
+# --- Résumé de fin de Ctrl+F3
+def test_relist_all_summary(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step = True, [100, 100], 20
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(eng, "_page_rows", lambda shift, base: [(100, 0), (120, 1)])
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    monkeypatch.setattr(core, "_same_row", lambda a, b: False)
+    monkeypatch.setattr(core, "grab_name", lambda c: _name(4))
+    st["screens"] = [scr({1: 760}),                 # ligne 1 : concurrent à 760, toi à 774 -> 759
+                     scr({1: 759}),                 # ligne 1 relue après modification : c'est toi
+                     scr({1: 800})]                 # ligne 2 : déjà le moins cher
+    st["mine"] = [774, None, 759, 800]
+    res = eng.relist_all()
+    assert [(c.row, c.lot, c.old, c.new, c.modified) for c in res.changes] == [(1, 1, 774, 759, True)]
+    assert res.changes[0].img is not None              # image du nom gardée pour la fenêtre
+    assert res.changes[0].text() == "ligne 1 · lot 1 : 774 → 759 (-1.9%)"
+
+
+def test_row_change_text_not_modified():
+    c = core.RowChange(7, 100, 5200, 4999, False, "Suspect")
+    assert c.text() == "ligne 7 · lot 100 : NON modifiée (Suspect)"
+    big = core.RowChange(2, 1000, 1520000, 1499999, True)
+    assert big.text() == "ligne 2 · lot 1000 : 1 520 000 → 1 499 999 (-1.3%)"
+
+
+# --- Profils de calibration
+def test_profiles_switch_save_load(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "hdv_anchor.png")
+    core.ANCHOR_PATH.write_bytes(b"repere-principal")
+    path = tmp_path / "cfg.json"
+    cfg = core.Config(table_region=[10, 10, 100, 80], price_field=[50, 50], relist_step=24)
+    cfg.new_profile("Runes")                                   # copie du profil actuel, activée
+    assert cfg.profile == "Runes" and cfg.table_region == [10, 10, 100, 80]
+    assert core.anchor_path(cfg).read_bytes() == b"repere-principal"   # repère copié
+    cfg.table_region, cfg.relist_step = [300, 20, 100, 80], 30          # recalibré pour les runes
+    cfg.save(path)
+
+    again = core.Config.load(path)
+    assert again.profile == "Runes" and again.table_region == [300, 20, 100, 80]
+    assert again.profile_names() == ["Principal", "Runes"]
+    again.switch_profile("Principal")
+    assert again.table_region == [10, 10, 100, 80] and again.relist_step == 24
+    again.switch_profile("Runes")
+    assert again.table_region == [300, 20, 100, 80] and again.relist_step == 30
+
+
+def test_profiles_names_and_delete(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "hdv_anchor.png")
+    cfg = core.Config()
+    for bad in ("", "x" * 31, "principal"):                   # vide, trop long, déjà pris
+        with pytest.raises(ValueError):
+            cfg.new_profile(bad)
+    cfg.new_profile("Équipements !")
+    a = core.anchor_path(cfg)
+    a.write_bytes(b"x")
+    assert a.parent == tmp_path and a.name.startswith("hdv_anchor_quipements")
+    with pytest.raises(ValueError):
+        cfg.delete_profile("Équipements !")                   # actif : refusé
+    cfg.switch_profile("Principal")
+    cfg.delete_profile("Équipements !")
+    assert cfg.profile_names() == ["Principal"] and not a.exists()
+    with pytest.raises(KeyError):
+        cfg.switch_profile("Équipements !")
+
+
+def test_reanchor_uses_profile_anchor(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "hdv_anchor.png")
+    cfg = core.Config()
+    cfg.new_profile("Runes")
+    seen = []
+    monkeypatch.setattr(core, "load_anchor", lambda p=None: seen.append(p) or None)
+    cfg.anchor_region = [0, 0, 10, 10]
+    core.PriceEngine(cfg)._reanchor()
+    assert seen == [core.anchor_path(cfg)] and seen[0] != core.ANCHOR_PATH

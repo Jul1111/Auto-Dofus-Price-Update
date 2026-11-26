@@ -14,5 +14,5 @@ build/
 dist/
 *.spec
 digit_templates*.npz
-hdv_anchor.png
+hdv_anchor*.png
 dofus_my_prices.json

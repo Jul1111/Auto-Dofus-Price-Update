@@ -55,7 +55,8 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Zones qui suivent la fenêtre de l'HDV lorsqu'elle est déplacée.
 - Bandeau de résultat au-dessus de l'HDV et fenêtre toujours au premier plan.
 - Raccourcis modifiables dans l'onglet **Raccourcis** (bouton « Changer », puis la touche voulue).
-- Ctrl+F3 affiche chaque ligne traitée dans le journal, pendant le parcours.
+- Ctrl+F3 affiche chaque ligne traitée dans le journal, pendant le parcours, puis un résumé : prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et lignes à revoir.
+- Profils de calibration (onglet **Calibration**) : un par HDV ou par personnage, on passe de l'un à l'autre en un clic. « Nouveau » copie le profil actuel ; il ne reste qu'à recalibrer ce qui change.
 
 ## Installation
 
