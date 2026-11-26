@@ -1582,6 +1582,61 @@ def press_enter() -> None:
     keyboard.press_and_release("enter")
 
 
+# Fenêtre « Confirmer la mise en vente » : le jeu l'ouvre après « Modifier » quand le nouveau
+# prix est loin de SON prix moyen, souvent pas à jour. Elle bloque l'HDV tant qu'on ne la
+# valide pas (Entrée). Repérée par son titre (modèle à l'échelle de modele_hdv).
+CONFIRM_TPL = APP_DIR / "modele_hdv" / "confirmation_titre.png"
+CONFIRM_MIN = 0.88         # ressemblance minimale du bandeau de titre (HDV sans fenêtre : < 0.8)
+MODEL_ROW_STEP = 49.6      # hauteur de ligne du modèle : échelle de l'HDV = relist_step / ceci
+_confirm_cache: Dict[str, object] = {}
+
+
+def hdv_monitor(cfg: "Config") -> Region:
+    """Écran (moniteur) qui contient l'HDV ; tous les écrans si inconnu."""
+    import mss
+    r = cfg.table_region or cfg.anchor_region
+    with mss.mss() as sct:
+        if r:
+            cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
+            for m in sct.monitors[1:]:
+                if m["left"] <= cx < m["left"] + m["width"] and m["top"] <= cy < m["top"] + m["height"]:
+                    return m["left"], m["top"], m["width"], m["height"]
+        m = sct.monitors[0]
+        return m["left"], m["top"], m["width"], m["height"]
+
+
+def find_confirm_dialog(cfg: "Config", screen: Optional[np.ndarray] = None,
+                        origin: Tuple[int, int] = (0, 0)) -> Optional[Point]:
+    """Coin haut-gauche du bandeau « Confirmer la mise en vente » à l'écran, ou None.
+    Recherche en demi-résolution légèrement floutée (tolère ±3 % d'échelle), à l'échelle
+    de l'HDV puis ±5 et ±10 %, sur l'écran où se trouve l'HDV."""
+    import cv2
+    if "tpl" not in _confirm_cache:
+        img = cv2.imread(str(CONFIRM_TPL)) if CONFIRM_TPL.exists() else None
+        _confirm_cache["tpl"] = None if img is None else _gray(img)
+    base = _confirm_cache["tpl"]
+    if base is None:
+        return None
+    if screen is None:
+        sx, sy, sw, sh = hdv_monitor(cfg)
+        screen, origin = grab_screen((sx, sy, sw, sh)), (sx, sy)
+    small = cv2.GaussianBlur(cv2.resize(_gray(screen), None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA),
+                             (0, 0), 1.0)
+    hint = (cfg.relist_step / MODEL_ROW_STEP) if cfg.relist_step else 1.0
+    scales = [_confirm_cache["scale"]] if _confirm_cache.get("scale") else []
+    scales += [hint * f for f in (1.0, 0.95, 1.05, 0.9, 1.1)]
+    for sc in scales:
+        t = cv2.GaussianBlur(cv2.resize(base, None, fx=sc / 2, fy=sc / 2, interpolation=cv2.INTER_AREA),
+                             (0, 0), 1.0)
+        if min(t.shape) < 4 or t.shape[0] >= small.shape[0] or t.shape[1] >= small.shape[1]:
+            continue
+        _, score, _, (x, y) = cv2.minMaxLoc(cv2.matchTemplate(small, t, cv2.TM_CCOEFF_NORMED))
+        if score >= CONFIRM_MIN:
+            _confirm_cache["scale"] = sc
+            return origin[0] + 2 * x, origin[1] + 2 * y
+    return None
+
+
 def click_at(p: Point) -> None:
     import pyautogui
     pyautogui.click(*p)
@@ -2136,6 +2191,7 @@ class RowChange:
 
 
 AUTO_RECAL_RETRY = 30.0   # s entre deux recalibrations automatiques ratées
+CONFIRM_CLOSE_WAIT = 1.0   # s : après Entrée, la fenêtre de confirmation doit se fermer
 RELIST_CONFIRM_WAIT = 2.0  # s : après « Modifier », ancien prix encore lu -> on relit jusque-là
 CLICK_PAUSE = 0.02        # s après chaque clic / mouvement de souris (pyautogui : 0,1 par défaut)
 TIMING_STAGES = ("clic", "lecture", "saisie", "validation", "défilement")
@@ -2163,6 +2219,7 @@ class PriceEngine:
         self.paused = False
         self._lock = threading.Lock()
         self._pending: Optional[Tuple[int, int, float]] = None  # (lot, prix, t) à confirmer
+        self._dialog: Optional[str] = None   # fenêtre de confirmation : None / "ok" / "open"
         self._first_point: Dict[str, Tuple[Point, float]] = {}
         self.my_prices = MyPrices(MY_PRICES_PATH)   # tes ventes : pas d'undercut contre toi-même
         self.progress = None   # Ctrl+F3 : appelé avec le Result de chaque ligne (journal en direct)
@@ -2449,9 +2506,17 @@ class PriceEngine:
         wait_change(mine_box, before, cfg.relist_delay)
         # Après « Modifier », le jeu désélectionne la vente : panneau vide (« Veuillez
         # sélectionner un objet ») = modification acceptée. Ancien prix encore affiché = échec.
-        check = self._await_new_price(mine.value)
-        confirmed = ""
-        if check.value is not None and check.confidence >= cfg.min_confidence and cfg.relist_confirm_enter:
+        self._dialog = None
+        check = self._await_new_price(mine.value, new_p)
+        if self._dialog is None and check.value is not None:
+            self._confirm_dialog()            # panneau pas vidé : fenêtre apparue entre-temps ?
+        if self._dialog == "open":
+            log_history("relist", lot, lot, top, new_p, "unconfirmed", cfg)
+            return Result(lot, "warn", f"{prefix} | fenêtre « Confirmer la mise en vente » toujours "
+                          "ouverte après Entrée : valide-la à la main", sr, new_p, hint="Confirmation bloquée")
+        confirmed = " (confirmation validée)" if self._dialog == "ok" else ""
+        if (self._dialog is None and check.value is not None and check.confidence >= cfg.min_confidence
+                and cfg.relist_confirm_enter):
             # Panneau pas vidé : souvent la fenêtre de confirmation du changement de prix.
             # Entrée la valide (sans elle, la vente reste sélectionnée).
             before = grab_screen(mine_box)
@@ -2475,18 +2540,41 @@ class PriceEngine:
         return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}{confirmed}",
                       sr, new_p, hint=f"Modifié : {new_p}")
 
-    def _await_new_price(self, old: Optional[int]) -> "Reading":
+    def _await_new_price(self, old: Optional[int], new: Optional[int] = None) -> "Reading":
         """Champ « Prix du lot » après « Modifier ». Le jeu peut réafficher un instant
         l'ANCIEN prix avant de vider le panneau ou de montrer le nouveau (serveur lent) :
         tant que l'ancien prix est lu, on relit, jusqu'à RELIST_CONFIRM_WAIT s. Sans cela,
-        une modification réussie était prise pour un échec et Ctrl+F3 s'arrêtait."""
+        une modification réussie était prise pour un échec et Ctrl+F3 s'arrêtait.
+        Le champ montre le NOUVEAU prix quand le jeu demande confirmation (prix loin de son
+        prix moyen) : on cherche alors la fenêtre et on la valide (Entrée)."""
         check = read_mine(self.cfg)
         end = time.time() + RELIST_CONFIRM_WAIT
-        while (old is not None and check.value == old and check.confidence >= self.cfg.min_confidence
-               and time.time() < end):
-            time.sleep(0.15)
+        shown = {v for v in (old, new) if v is not None}
+        while (check.value in shown and check.confidence >= self.cfg.min_confidence
+               and time.time() < end and self._dialog != "open"):
+            if self._confirm_dialog():
+                end = time.time() + RELIST_CONFIRM_WAIT
+            else:
+                time.sleep(0.1)
             check = read_mine(self.cfg)
         return check
+
+    def _confirm_dialog(self) -> Optional[str]:
+        """Fenêtre « Confirmer la mise en vente » ouverte -> Entrée (deux essais).
+        Note self._dialog : "ok" (validée), "open" (toujours ouverte). None si pas de fenêtre."""
+        cfg = self.cfg
+        if not cfg.relist_confirm_enter or find_confirm_dialog(cfg) is None:
+            return None
+        for _ in range(2):
+            press_enter()
+            end = time.time() + CONFIRM_CLOSE_WAIT
+            while time.time() < end:
+                time.sleep(0.1)
+                if find_confirm_dialog(cfg) is None:
+                    self._dialog = "ok"
+                    return "ok"
+        self._dialog = "open"
+        return "open"
 
     def _page_rows(self, shift: int, base: int) -> List[Tuple[int, int]]:
         """Lignes à cliquer : détectées à l'écran (centres exacts) si possible, sinon
@@ -2630,7 +2718,8 @@ class PriceEngine:
                         wait_change(mine_box, before, cfg.relist_delay)
                         self._tick("clic", t0)
                         res = self._relist(auto=True)
-                        if res.level != "ok" and "NON confirmée" not in res.message:
+                        blocked = "NON confirmée" in res.message or res.hint == "Confirmation bloquée"
+                        if res.level != "ok" and not blocked:
                             time.sleep(0.15)          # lecture douteuse : on relit une fois
                             res = self._relist(auto=True)
                         done += 1
@@ -2640,7 +2729,7 @@ class PriceEngine:
                             except Exception:
                                 pass
                         if res.level != "ok":
-                            if "NON confirmée" in res.message:
+                            if "NON confirmée" in res.message or res.hint == "Confirmation bloquée":
                                 stop = f"ligne {g + 1} : {res.message}"  # sécurité : arrêt
                                 raise StopIteration
                             # ligne douteuse : on n'y touche pas et on passe à la suivante

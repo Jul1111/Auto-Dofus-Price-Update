@@ -563,6 +563,9 @@ def relist_engine(monkeypatch):
     monkeypatch.setattr(core, "read_screen", lambda c, d=None, with_mine=False: state["screens"].pop(0))
     monkeypatch.setattr(core, "grab_screen", lambda r: np.zeros((2, 2, 3), np.uint8))
     monkeypatch.setattr(core, "wait_change", lambda *a, **k: None)
+    state["dialog"] = []                           # fenêtre « Confirmer la mise en vente » vue ?
+    monkeypatch.setattr(core, "find_confirm_dialog",
+                        lambda c, *a, **k: state["dialog"].pop(0) if state["dialog"] else None)
     cfg = core.Config(table_region=[0, 0, 1, 1], qty_region=[0, 0, 1, 1], mine_region=[0, 0, 1, 1],
                       verify_before_enter=False)  # vérification testée à part
     return core.PriceEngine(cfg), calls, state
@@ -618,6 +621,47 @@ def test_relist_waits_while_old_price_still_shown(relist_engine):
     res = eng.relist()
     assert res.level == "ok" and "modifié" in res.message
     assert calls == [("paste", 759), "modify"]     # pas d'Entrée inutile
+
+
+def test_relist_validates_confirmation_window_with_enter(relist_engine):
+    # Prix loin du prix moyen (pas à jour) : le jeu demande confirmation -> Entrée, et on continue.
+    eng, calls, st = relist_engine
+    st["screens"] = [scr({1: 165})]
+    st["mine"] = [622, 164, 164, None]              # pendant la fenêtre : le champ montre le NOUVEAU prix
+    st["dialog"] = [None, (500, 300), None]         # la fenêtre arrive un peu après
+    res = eng.relist()
+    assert res.level == "ok" and "confirmation validée" in res.message
+    assert calls == [("paste", 164), "modify", "enter"]
+
+
+def test_relist_stops_when_confirmation_window_stays_open(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    monkeypatch.setattr(core, "CONFIRM_CLOSE_WAIT", 0.01)
+    monkeypatch.setattr(core, "find_confirm_dialog", lambda c, *a, **k: (500, 300))
+    st["screens"] = [scr({1: 165})]
+    st["mine"] = [622, 622, 622]
+    res = eng.relist()
+    assert res.level == "warn" and res.hint == "Confirmation bloquée"
+    assert calls == [("paste", 164), "modify", "enter", "enter"]
+
+
+FIX = Path(__file__).resolve().parent / "fixtures"
+
+
+def test_find_confirm_dialog_on_screen():
+    import cv2
+    ref = cv2.imread(str(FIX / "hdv_echelles" / "2560x1440_90.png"))
+    dlg = cv2.imread(str(FIX / "confirmation_prix.png"))
+    for f in (1.0, 0.8, 1.15):
+        core._confirm_cache.pop("scale", None)
+        screen = np.full((1440, 2560, 3), 30, np.uint8)
+        screen[:ref.shape[0], :ref.shape[1]] = ref
+        cfg = core.Config(relist_step=round(core.MODEL_ROW_STEP * f))
+        assert core.find_confirm_dialog(cfg, screen) is None          # HDV seul : pas de fenêtre
+        d = cv2.resize(dlg, None, fx=f, fy=f, interpolation=cv2.INTER_AREA)
+        screen[500:500 + d.shape[0], 900:900 + d.shape[1]] = d
+        x, y = core.find_confirm_dialog(cfg, screen)
+        assert abs(x - (900 + 60 * f)) <= 3 and abs(y - (500 + 6 * f)) <= 3
 
 
 def test_relist_avg_guard_then_force(relist_engine):
@@ -861,11 +905,13 @@ def test_same_row_sees_one_digit_change():
     assert not core._same_row(row, other)
 
 
-def test_relist_confirmation_popup_enter(relist_engine):
-    # après « Modifier » le panneau reste affiché (fenêtre de confirmation) : Entrée, puis vidé
+def test_relist_confirmation_popup_enter(relist_engine, monkeypatch):
+    # fenêtre de confirmation NON reconnue à l'écran : le panneau reste affiché jusqu'au bout
+    # de l'attente -> Entrée de secours, comme avant
     eng, calls, st = relist_engine
+    monkeypatch.setattr(core, "RELIST_CONFIRM_WAIT", 0)
     st["screens"] = [scr({1: 760})]
-    st["mine"] = [774, 759, None]
+    st["mine"] = [774, 759, 759]
     res = eng.relist()
     assert res.level == "ok" and "confirmation validée" in res.message
     assert calls == [("paste", 759), "modify", "enter"]
