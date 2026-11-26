@@ -1889,6 +1889,8 @@ class RowChange:
 
 
 AUTO_RECAL_RETRY = 30.0   # s entre deux recalibrations automatiques ratées
+RELIST_CONFIRM_WAIT = 2.0  # s : après « Modifier », ancien prix encore lu -> on relit jusque-là
+CLICK_PAUSE = 0.02        # s après chaque clic / mouvement de souris (pyautogui : 0,1 par défaut)
 TIMING_STAGES = ("clic", "lecture", "saisie", "validation", "défilement")
 
 
@@ -1920,6 +1922,13 @@ class PriceEngine:
         self.last_anchor_msg = ""  # dernier message du repère HDV (lu puis vidé par l'interface)
         self._autocal_failed = 0.0  # heure du dernier échec de recalibration automatique
         self.timing: Dict[str, float] = {}   # Ctrl+F3 : temps total par étape (s)
+        try:
+            # pyautogui attend 0,1 s après CHAQUE clic ou mouvement : ~0,5 s par prix modifié.
+            # Les attentes utiles sont déjà faites par l'outil (changement guetté à l'écran).
+            import pyautogui
+            pyautogui.PAUSE = CLICK_PAUSE
+        except Exception:
+            pass
 
     # ---- calibration ----
     def calibrate_rect(self, name: str, pos: Optional[Point] = None) -> Tuple[str, object]:
@@ -2193,7 +2202,7 @@ class PriceEngine:
         wait_change(mine_box, before, cfg.relist_delay)
         # Après « Modifier », le jeu désélectionne la vente : panneau vide (« Veuillez
         # sélectionner un objet ») = modification acceptée. Ancien prix encore affiché = échec.
-        check = read_mine(cfg)
+        check = self._await_new_price(mine.value)
         confirmed = ""
         if check.value is not None and check.confidence >= cfg.min_confidence and cfg.relist_confirm_enter:
             # Panneau pas vidé : souvent la fenêtre de confirmation du changement de prix.
@@ -2201,7 +2210,7 @@ class PriceEngine:
             before = grab_screen(mine_box)
             press_enter()
             wait_change(mine_box, before, cfg.relist_delay)
-            check = read_mine(cfg)
+            check = self._await_new_price(mine.value)
             confirmed = " (confirmation validée)"
         self._tick("validation", t0)
         if check.value is None or check.confidence < cfg.min_confidence:
@@ -2218,6 +2227,19 @@ class PriceEngine:
         log_history("relist", lot, lot, top, new_p, "forced" if forced else "modified", cfg)
         return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}{confirmed}",
                       sr, new_p, hint=f"Modifié : {new_p}")
+
+    def _await_new_price(self, old: Optional[int]) -> "Reading":
+        """Champ « Prix du lot » après « Modifier ». Le jeu peut réafficher un instant
+        l'ANCIEN prix avant de vider le panneau ou de montrer le nouveau (serveur lent) :
+        tant que l'ancien prix est lu, on relit, jusqu'à RELIST_CONFIRM_WAIT s. Sans cela,
+        une modification réussie était prise pour un échec et Ctrl+F3 s'arrêtait."""
+        check = read_mine(self.cfg)
+        end = time.time() + RELIST_CONFIRM_WAIT
+        while (old is not None and check.value == old and check.confidence >= self.cfg.min_confidence
+               and time.time() < end):
+            time.sleep(0.15)
+            check = read_mine(self.cfg)
+        return check
 
     def _page_rows(self, shift: int, base: int) -> List[Tuple[int, int]]:
         """Lignes à cliquer : détectées à l'écran (centres exacts) si possible, sinon
