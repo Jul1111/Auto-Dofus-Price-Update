@@ -1090,6 +1090,20 @@ def wait_change(region: Optional[Region], before: Optional[np.ndarray], timeout:
         time.sleep(0.03)
 
 
+def wait_still(region: Region, timeout: float, step: float = 0.05) -> None:
+    """Attend que la zone ne bouge plus (deux captures identiques à `step` s d'écart),
+    au plus `timeout` s. Remplace une pause fixe après un défilement : la liste s'arrête
+    souvent en ~0,1 s."""
+    end = time.time() + timeout
+    prev = grab_screen(region)
+    while time.time() < end:
+        time.sleep(step)
+        cur = grab_screen(region)
+        if np.array_equal(cur, prev):
+            return
+        prev = cur
+
+
 def _find_field(img_bgr: np.ndarray) -> Optional[np.ndarray]:
     """Dans une zone trop large, isole le champ « Prix du lot » : rectangle presque NOIR
     (bien plus sombre que le panneau), large et peu haut."""
@@ -1875,6 +1889,20 @@ class RowChange:
 
 
 AUTO_RECAL_RETRY = 30.0   # s entre deux recalibrations automatiques ratées
+TIMING_STAGES = ("clic", "lecture", "saisie", "validation", "défilement")
+
+
+def timing_text(total: float, rows: int, timing: Dict[str, float]) -> str:
+    """« durée 1 min 05 s, 0,9 s/ligne (clic 0,15 · lecture 0,30 · …) » : où part le temps."""
+    m, s = divmod(int(round(total)), 60)
+    out = f"durée {m} min {s:02d} s" if m else f"durée {total:.1f} s".replace(".", ",")
+    if rows <= 0:
+        return out
+    parts = [f"{k} {timing[k] / rows:.2f}".replace(".", ",") for k in TIMING_STAGES if timing.get(k)]
+    other = total - sum(timing.get(k, 0.0) for k in TIMING_STAGES)
+    if other > 0.05 * total:
+        parts.append(f"autre {other / rows:.2f}".replace(".", ","))
+    return out + f", {total / rows:.2f} s/ligne".replace(".", ",") + (f" ({' · '.join(parts)})" if parts else "")
 
 
 class PriceEngine:
@@ -1891,6 +1919,7 @@ class PriceEngine:
         self.progress = None   # Ctrl+F3 : appelé avec le Result de chaque ligne (journal en direct)
         self.last_anchor_msg = ""  # dernier message du repère HDV (lu puis vidé par l'interface)
         self._autocal_failed = 0.0  # heure du dernier échec de recalibration automatique
+        self.timing: Dict[str, float] = {}   # Ctrl+F3 : temps total par étape (s)
 
     # ---- calibration ----
     def calibrate_rect(self, name: str, pos: Optional[Point] = None) -> Tuple[str, object]:
@@ -2048,9 +2077,16 @@ class PriceEngine:
         res.item_img = self._row_ctx.get("img")
         return res
 
+    def _tick(self, stage: str, t0: float) -> float:
+        """Ajoute le temps écoulé depuis t0 à l'étape `stage` ; retourne l'heure actuelle."""
+        now = time.perf_counter()
+        self.timing[stage] = self.timing.get(stage, 0.0) + now - t0
+        return now
+
     def _relist_row(self, auto: bool) -> Result:
         cfg = self.cfg
         tag = "MAJ"
+        t0 = time.perf_counter()
         if not cfg.table_region or not cfg.qty_region:
             return Result(None, "error", f"[{tag}] Calibre d'abord le tableau et la quantité.",
                           hint="Calibration manquante")
@@ -2073,6 +2109,7 @@ class PriceEngine:
         if mine is None or mine.value is None or mine.confidence < MINE_SURE:
             mine = surer(mine, read_mine(cfg))  # 2e lecture seule, plus grande : la plus sûre
         lot = sr.selected
+        t0 = self._tick("lecture", t0)
         if lot is None:
             return Result(None, "error", f"[{tag}] Quantité illisible (lu : {sr.selected_raw!r}).", sr,
                           hint="Quantité illisible")
@@ -2137,10 +2174,13 @@ class PriceEngine:
                           + ("" if auto else f" Ré-appuie dans {cfg.confirm_window:.0f}s pour forcer."),
                           sr, new_p, hint="Suspect")
         self._pending = None
+        t0 = time.perf_counter()
         input_price(new_p, cfg, paste=True, validate=False)
         time.sleep(0.06)
         if can_verify(cfg):
             ok, got = field_check(cfg, new_p)
+        t0 = self._tick("saisie", t0)
+        if can_verify(cfg):
             if not ok:
                 log_history("relist", lot, lot, top, new_p, "not_validated", cfg)
                 return Result(lot, "warn", f"{prefix} | collé mais PAS modifié : le champ affiche "
@@ -2163,6 +2203,7 @@ class PriceEngine:
             wait_change(mine_box, before, cfg.relist_delay)
             check = read_mine(cfg)
             confirmed = " (confirmation validée)"
+        self._tick("validation", t0)
         if check.value is None or check.confidence < cfg.min_confidence:
             self.my_prices.add(key, lot, new_p, replaces=mine.value)
             log_history("relist", lot, lot, top, new_p, "forced" if forced else "modified", cfg)
@@ -2242,7 +2283,7 @@ class PriceEngine:
             per_notch = per_notch or d / n
             if total >= target:
                 break
-        time.sleep(cfg.relist_delay)       # fin d'une éventuelle animation
+        wait_still(box, cfg.relist_delay)  # fin d'une éventuelle animation (≤ RELIST_DELAY)
         img = grab_screen(box)
         d = measure_shift(prev, img, cfg.relist_step, None)
         if d is None:
@@ -2287,6 +2328,8 @@ class PriceEngine:
         mine_box = (mine_regions(cfg) or [None])[0]
         stats0 = dict(ENGINE_STATS)
         changes: List[RowChange] = []   # résumé : prix modifiés et lignes douteuses
+        self.timing = {}
+        t_start = time.perf_counter()
         stop = "fin de la liste"
         try:
             while True:
@@ -2311,10 +2354,12 @@ class PriceEngine:
                             skipped += 1
                             seen = max(seen, g)
                             continue
+                        t0 = time.perf_counter()
                         before = grab_screen(mine_box) if mine_box else None
                         click_at((x0, y))
                         last_click = (x0, y)
                         wait_change(mine_box, before, cfg.relist_delay)
+                        self._tick("clic", t0)
                         res = self._relist(auto=True)
                         if res.level != "ok" and "NON confirmée" not in res.message:
                             time.sleep(0.15)          # lecture douteuse : on relit une fois
@@ -2357,7 +2402,9 @@ class PriceEngine:
                 # ligne traitée : une erreur de mesure d'une ligne ne fait jamais sauter
                 # d'objet ; les lignes déjà vues ne sont pas recliquées (numéro global).
                 target = max(step, int(len(rows) * cfg.relist_scroll_page) * step)
+                t0 = time.perf_counter()
                 moved, err = self._scroll_page(box, target)
+                self._tick("défilement", t0)
                 if err:
                     stop = err
                     break
@@ -2383,6 +2430,7 @@ class PriceEngine:
         fast_n = ENGINE_STATS.get("chiffres", 0) - stats0.get("chiffres", 0)
         tess_n = ENGINE_STATS.get("tesseract", 0) - stats0.get("tesseract", 0)
         detail = f" | lecture rapide {fast_n}/{fast_n + tess_n}" if fast_n + tess_n else ""
+        detail += " | " + timing_text(time.perf_counter() - t_start, done, self.timing)
         if bad:
             detail += f" | {len(bad)} ligne(s) douteuse(s) NON modifiée(s), à faire avec F3 : " + " / ".join(bad[:5])
         return Result(None, level, f"[MAJ TOUT] {done + skipped} lignes vues ({pages + 1} pages, "
