@@ -779,6 +779,7 @@ def test_find_field_in_large_zone():
 def test_floor_price():
     assert core.floor_price(1, 1189, 0.7) == 833          # 832,3 -> arrondi au-dessus
     assert core.floor_price(10, 81, 0.7) == 567
+    assert core.floor_price(10, 3, 0.8) == 24             # 24,000000000000004 en flottant : pas 25
     assert core.floor_price(1, None, 0.7) is None and core.floor_price(1, 100, 0) is None
 
 

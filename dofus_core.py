@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import re
 import shutil
@@ -358,7 +359,8 @@ def floor_price(lot: int, avg: Optional[int], ratio: float) -> Optional[int]:
     """Prix plancher du lot = ratio × prix moyen (par objet) × lot, arrondi au-dessus."""
     if not avg or ratio <= 0:
         return None
-    return max(1, int(-(-avg * ratio * lot // 1)))
+    # round() avant l'arrondi au-dessus : 3 × 0.8 × 10 = 24.000000000000004 en flottant -> 25
+    return max(1, math.ceil(round(avg * ratio * lot, 6)))
 
 
 def smart_round(p: int, mode: str) -> int:
@@ -1308,11 +1310,13 @@ def _write_history(row: list, path: Path) -> None:
     with _hist_lock:
         try:
             if path.exists():
+                # en-tête seul : relire tout le fichier à chaque ligne ralentissait avec l'historique
                 with path.open("r", encoding="utf-8", newline="") as f:
-                    rows = list(csv.reader(f))
-                header = rows[0] if rows else None
+                    header = next(csv.reader(f), None)
                 if header == HISTORY_HEADER[:-1]:
                     # ancien format sans « item » : on ajoute la colonne, rien n'est perdu
+                    with path.open("r", encoding="utf-8", newline="") as f:
+                        rows = list(csv.reader(f))
                     tmp = path.with_suffix(".tmp")
                     with tmp.open("w", encoding="utf-8", newline="") as f:
                         w = csv.writer(f)
@@ -1634,8 +1638,6 @@ class PriceEngine:
                         item_img=name_img)
             return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}{confirmed}",
                           sr, new_p, hint=f"Modifié : {new_p}")
-            return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}", sr, new_p,
-                          hint=f"Modifié : {new_p}")
         if check.value != new_p:
             log_history("relist", lot, lot, top, new_p, "unconfirmed", cfg, item_img=name_img)
             return Result(lot, "warn", f"{prefix} | modification NON confirmée (lu ensuite : "
@@ -2075,9 +2077,11 @@ class PriceEngine:
         paste = cfg.auto_paste or forced or force_validate
         validate = (cfg.auto_validate or force_validate) and not forced and not problems
         done = input_price(new_p, cfg, paste=paste, validate=validate)
-        if paste:
+        refused = "PAS validé" in done   # champ relu différent : rien n'a été mis en vente
+        if paste and not refused:
             self._my_last[lot] = (new_p, time.time())
         log_history("sell" if paste else "copy", lot, sel, r, new_p,
                     "forced" if forced else done, cfg, item_img=name_img)
-        return Result(lot, "ok", f"{prefix} | {done}{' (forcé)' if forced else ''}",
-                      sr, new_p, hint=done.capitalize(), floored_top=r.value if floored else None)
+        return Result(lot, "warn" if refused else "ok", f"{prefix} | {done}{' (forcé)' if forced else ''}",
+                      sr, new_p, hint="Prix collé incorrect" if refused else done.capitalize(),
+                      floored_top=r.value if floored else None)

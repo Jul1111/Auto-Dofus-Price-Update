@@ -6,8 +6,8 @@ Tableau de bord — calculs
 Lit dofus_price_history.csv (et les anciens fichiers archivés *_old_*.csv) et calcule
 les chiffres affichés dans l'onglet « Tableau de bord » de l'interface : chiffres clés,
 lots et kamas mis en vente par jour, prix modifiés par jour, activité par heure,
-répartition par lot, baisse moyenne, dernières actions.
-L'historique ne contient pas le NOM des objets : pas de détail par objet.
+répartition par lot, baisse moyenne, dernières actions, et détail par objet
+(colonne « item », nom lu en arrière-plan par dofus_items).
 """
 from __future__ import annotations
 

@@ -38,13 +38,18 @@ Options de la ligne de commande (enregistrées dans la config, comme dans l'inte
 from __future__ import annotations
 
 import argparse
+import queue
 import sys
+import threading
+import time
 from typing import List, Optional
 
 import dofus_core as core
 
 FLOOR_MODES = {"plancher": "floor", "garder": "keep", "arret": "stop"}
 FLOOR_LABELS = {"floor": "au plancher", "keep": "garder mon prix", "stop": "arrêt (suspect)"}
+
+STALE_JOB_S = 1.5   # s : touche appuyée pendant une autre action (F2, Ctrl+F3) -> ignorée
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -123,6 +128,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"[{res.level.upper():5}] {res.message}")
         core.beep(res.level, cfg)
 
+    # Les actions tournent dans un thread à part : exécutées dans le thread du module
+    # keyboard, elles bloquaient les autres raccourcis (Ctrl+Alt+P n'arrêtait pas F2 / Ctrl+F3).
+    jobs: "queue.Queue[tuple]" = queue.Queue()
+
+    def worker():
+        while True:
+            action, pressed = jobs.get()
+            if engine.paused or time.time() - pressed > STALE_JOB_S:
+                print("[Hotkeys] Raccourci ignoré (pause, ou appuyé pendant une autre action).")
+                continue
+            try:
+                report(action())
+            except Exception as e:
+                print(f"[Erreur] {e}")
+
+    threading.Thread(target=worker, daemon=True).start()
+
     def game_action(optimize: bool, all_: bool = False):
         def cb():
             if engine.paused:
@@ -131,7 +153,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 info = core.foreground_info() or ("?", "?")
                 print(f"[Focus] Ignoré : fenêtre active « {info[0]} » ({info[1]})")
                 return
-            report(engine.sell_all() if all_ else engine.sell(optimize=True) if optimize else engine.smart())
+            jobs.put((engine.sell_all if all_ else (lambda: engine.sell(optimize=True)) if optimize
+                      else engine.smart, time.time()))
         return cb
 
     def calib_rect(name):
@@ -179,7 +202,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         def cb():
             if engine.paused or not core.game_has_focus(cfg):
                 return
-            report(engine.relist_all() if all_ else engine.relist())
+            jobs.put((engine.relist_all if all_ else engine.relist, time.time()))
         return cb
 
     def calib_rows():

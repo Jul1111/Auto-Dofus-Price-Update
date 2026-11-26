@@ -46,6 +46,7 @@ TAG_COLORS = {
     "TIME": "#7f8c8d", "INFO": "#bdc3c7", "ERROR": "#ff6b6b", "WARN": "#f1c40f",
     "OK": "#a6e22e", "OPT": "#ae81ff", "CAL": "#66d9ef",
 }
+STALE_JOB_S = 1.5   # s : un raccourci de jeu qui a attendu plus longtemps dans la file est ignoré
 LEVEL_COLORS = {"ok": "#2ecc71", "warn": "#f1c40f", "error": "#e74c3c"}
 ZONE_COLORS = {"table": "#66d9ef", "qty": "#ae81ff", "avg": "#a6e22e", "count": "#fd971f",
                "mine": "#f92672", "anchor": "#ffffff", "name": "#e6db74"}
@@ -842,7 +843,7 @@ class App(ctk.CTk):
                             "Ajuste WINDOW_PROCESS / WINDOW_TITLE dans la config si c'est bien le jeu.",
                             "WARN")))
                     return
-                self.jobs.put(job)
+                self.jobs.put(job + (time.time(),))   # heure d'appui : voir _worker
             return cb
 
         try:
@@ -873,7 +874,16 @@ class App(ctk.CTk):
     def _worker(self):
         """Toutes les actions lentes (OCR, saisie) passent ici, hors thread UI."""
         while True:
-            name, arg = self.jobs.get()
+            name, arg, *pressed = self.jobs.get()
+            if pressed:
+                # Touche de jeu appuyée PENDANT une action longue (F2, Ctrl+F3) : elle attendait
+                # dans la file. L'exécuter après coup (ou après une pause) agirait sur un écran
+                # qui a changé depuis -> ignorée.
+                waited = time.time() - pressed[0]
+                if self.engine.paused or waited > STALE_JOB_S:
+                    why = "pause active" if self.engine.paused else f"appuyé il y a {waited:.0f} s, pendant une autre action"
+                    self.ui_events.put(("log", (f"[Hotkeys] Raccourci ignoré ({why}).", "WARN")))
+                    continue
             try:
                 if name == "sell":
                     res = self.engine.sell(optimize=True) if arg else self.engine.smart()
