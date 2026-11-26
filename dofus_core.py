@@ -324,6 +324,9 @@ class Config:
     sound: bool = True
     toast: bool = True
     calib_countdown: int = 3          # secondes avant calibration via bouton UI
+    ui_scale: float = 1.0             # taille du texte / des éléments de l'interface (1.0 = 100 %)
+    window_geometry: str = ""         # taille et position de la fenêtre (mémorisées à la fermeture)
+    compact_geometry: str = ""        # position du mode compact
 
     hotkeys: Dict = field(default_factory=lambda: _copy(DEFAULT_HOTKEYS))
 

@@ -56,7 +56,12 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Zones qui suivent la fenêtre de l'HDV lorsqu'elle est déplacée.
 - Bandeau de résultat au-dessus de l'HDV et fenêtre toujours au premier plan.
 - Raccourcis modifiables dans l'onglet **Raccourcis** (bouton « Changer », puis la touche voulue).
-- Ctrl+F3 affiche chaque ligne traitée dans le journal, pendant le parcours, puis un résumé : prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et lignes à revoir.
+- Ctrl+F3 affiche chaque ligne traitée dans le journal, pendant le parcours, puis un résumé : prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et lignes à revoir. Les 10 derniers résumés restent consultables dans l'onglet **Mes ventes**.
+- Barre d'état en haut : pastilles pour la pause, le profil, la calibration (OK ou à faire) et l'HDV (vu ou introuvable). Un clic sur une pastille mène à l'endroit utile.
+- Journal filtrable (**Tout** / **Ventes** / **Problèmes**), bouton **Copier**, et chaque Ctrl+F3 regroupé dans un bloc qu'un clic déplie ou replie.
+- Aperçu en direct dans l'onglet **Prix** : « Moins cher 1 000 → ton prix 999 (plancher 700) », recalculé à chaque réglage.
+- **Mode compact** (bouton 🗗 Compact) : petite fenêtre toujours au premier plan pendant le jeu, avec la dernière action, l'état et la pause.
+- Aide au survol sur les options, taille du texte réglable (onglet **Options**), taille et position de la fenêtre mémorisées.
 - Profils de calibration (onglet **Calibration**) : un par HDV ou par personnage, on passe de l'un à l'autre en un clic. « Nouveau » copie le profil actuel ; il ne reste qu'à recalibrer ce qui change.
 
 ## Installation
@@ -117,7 +122,7 @@ python dofus_price_helperV2.py --help
 
 Le plus simple : ouvre l'HDV sur l'onglet **Vente**, sélectionne une de tes ventes (ou un objet de l'inventaire), puis clique **Calibration automatique** dans l'onglet **Calibration** (ou `Ctrl+Alt+F12` en jeu). L'outil trouve l'HDV, place toutes les zones et lance un test de lecture ; vérifie ensuite avec **Voir zones**. Cela fonctionne avec Dofus 3 **en français** et la même version du jeu que le modèle de l'outil : si l'HDV n'est pas reconnu (autre langue, interface modifiée par une mise à jour), utilise la calibration manuelle ci-dessous.
 
-Au premier lancement, l'assistant de calibration s'ouvre automatiquement (sinon : onglet **Calibration**, puis **Ouvrir l'assistant de calibration**). Il décrit chaque zone à sélectionner dans le jeu et termine par un test de lecture complet.
+Au premier lancement, l'outil propose directement la calibration automatique. Si elle échoue, l'assistant pas à pas est dans l'onglet **Calibration**, section **Avancé** (avec les zones manuelles) : il décrit chaque zone à sélectionner dans le jeu et termine par un test de lecture complet.
 
 | Zone | Statut |
 |---|---|

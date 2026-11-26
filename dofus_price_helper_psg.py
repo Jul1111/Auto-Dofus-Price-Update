@@ -113,16 +113,191 @@ def fmt(n: Optional[int]) -> str:
     return "-" if n is None else f"{n:,}".replace(",", " ")
 
 
+# ---------------------------------------------------------------- aperçu des prix (onglet Prix)
+PREVIEW_TOP = 1000     # prix d'exemple du moins cher (lot de 1)
+PREVIEW_AVG = 1000     # prix moyen d'exemple (par objet)
+PREVIEW_LOW = 500      # un vendeur qui brade
+
+
+def price_preview(mode: str, value, rounding: str, min_price: int, floor_ratio: float,
+                  floor_mode: str, min_avg_ratio: float = 0.5) -> list:
+    """Exemple chiffré des réglages de prix, comme le moteur les applique (lot de 1).
+    mode / rounding / floor_mode : clés de config ("fixed", "down_10", "keep"…)."""
+    new = core.compute_price(PREVIEW_TOP, mode, value, rounding, min_price)
+    fp = core.floor_price(1, PREVIEW_AVG, floor_ratio) if floor_mode != "stop" else None
+    line = f"Moins cher {fmt(PREVIEW_TOP)} → ton prix {fmt(new)}"
+    if fp:
+        line += f"   (plancher {fmt(fp)})"
+    out = [line]
+    low = core.compute_price(PREVIEW_LOW, mode, value, rounding, min_price)
+    head = f"Un vendeur brade à {fmt(PREVIEW_LOW)} (prix moyen {fmt(PREVIEW_AVG)}) → "
+    if fp and low < fp:
+        if floor_mode == "keep":
+            out.append(head + f"vente au plancher {fmt(fp)} ; une de tes ventes garde son prix")
+        else:
+            out.append(head + f"ton prix {fmt(fp)} (plancher)")
+    elif floor_mode == "stop" and min_avg_ratio > 0 and low < PREVIEW_AVG * min_avg_ratio:
+        out.append(head + f"{fmt(low)} jugé suspect : arrêt (même touche ×2 pour forcer)")
+    else:
+        out.append(head + f"ton prix {fmt(low)}")
+    return out
+
+
+# ---------------------------------------------------------------- journal : filtres
+SALE_PREFIXES = ("[VENTE]", "[OPT]", "[TOUT]", "[MAJ]", "[MAJ TOUT]")
+LOG_FILTERS = {"Tout": "all", "Ventes": "sale", "Problèmes": "problem"}
+
+
+def log_category(msg: str, tag: str) -> str:
+    """« problem » (avertissement / erreur), « sale » (vente, mise à jour) ou « info »."""
+    if tag in ("WARN", "ERROR"):
+        return "problem"
+    if msg.lstrip().startswith(SALE_PREFIXES):
+        return "sale"
+    return "info"
+
+
+def log_visible(category: str, flt: str, in_block: bool = False) -> bool:
+    """La ligne passe-t-elle le filtre ? Un problème est aussi une ligne de vente s'il en vient."""
+    if flt == "all":
+        return True
+    if flt == "problem":
+        return category == "problem"
+    return category == "sale" or in_block
+
+
+# ---------------------------------------------------------------- historique des Ctrl+F3
+RUNS_PATH = core.BASE_DIR / "dofus_relist_runs.json"
+MAX_RUNS = 10
+
+
+def runs_to_json(runs: list) -> list:
+    """Parcours -> JSON (sans les images des noms, gardées en mémoire seulement)."""
+    return [{"time": r["time"], "changes": [
+        {"row": c.row, "lot": c.lot, "old": c.old, "new": c.new, "modified": c.modified, "note": c.note}
+        for c in r["changes"]]} for r in runs]
+
+
+def runs_from_json(data) -> list:
+    runs = []
+    for r in data if isinstance(data, list) else []:
+        try:
+            runs.append({"time": float(r["time"]), "changes": [core.RowChange(
+                row=int(c["row"]), lot=c.get("lot"), old=c.get("old"), new=c.get("new"),
+                modified=bool(c.get("modified")), note=str(c.get("note", ""))) for c in r["changes"]]})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return runs[-MAX_RUNS:]
+
+
+def load_runs(path=None) -> list:
+    import json
+    path = path or RUNS_PATH
+    try:
+        return runs_from_json(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return []
+
+
+def save_runs(runs: list, path=None) -> None:
+    import json
+    path = path or RUNS_PATH
+    path.write_text(json.dumps(runs_to_json(runs[-MAX_RUNS:]), ensure_ascii=False), encoding="utf-8")
+
+
+def run_title(run: dict) -> str:
+    mod = sum(1 for c in run["changes"] if c.modified)
+    bad = len(run["changes"]) - mod
+    txt = time.strftime("%d/%m %H:%M", time.localtime(run["time"]))
+    txt += f"  —  {mod} prix modifié{'s' if mod > 1 else ''}"
+    if bad:
+        txt += f"  ·  {bad} à revoir"
+    return txt
+
+
+# ---------------------------------------------------------------- fenêtre / apparence
+UI_SCALES = {"90 %": 0.9, "100 %": 1.0, "110 %": 1.1, "125 %": 1.25, "150 %": 1.5}
+
+
+def scale_label(scale: float) -> str:
+    return min(UI_SCALES, key=lambda k: abs(UI_SCALES[k] - scale))
+
+
+def geometry_on_screen(geom: str, bounds) -> bool:
+    """« LxH+X+Y » enregistré : la fenêtre serait-elle (au moins en partie) visible ?
+    (écran débranché depuis -> fenêtre perdue hors de l'écran)."""
+    import re
+    m = re.fullmatch(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", geom or "")
+    if not m:
+        return False
+    w, h, x, y = map(int, m.groups())
+    sx, sy, sw, sh = bounds
+    return w >= 200 and h >= 120 and sx - w + 80 <= x <= sx + sw - 80 and sy <= y <= sy + sh - 40
+
+
+class Tooltip:
+    """Aide au survol : petite bulle après une demi-seconde sur le widget."""
+
+    def __init__(self, widget, text: str, delay: int = 450):
+        self.widget, self.text, self.delay = widget, text, delay
+        self._after = None
+        self._tip = None
+        for seq, fn in (("<Enter>", self._schedule), ("<Leave>", self._hide), ("<ButtonPress>", self._hide)):
+            try:
+                widget.bind(seq, fn, add="+")
+            except (NotImplementedError, ValueError, tk.TclError):
+                pass
+
+    def _schedule(self, _e=None):
+        self._cancel()
+        self._after = self.widget.after(self.delay, self._show)
+
+    def _cancel(self):
+        if self._after:
+            try:
+                self.widget.after_cancel(self._after)
+            except tk.TclError:
+                pass
+            self._after = None
+
+    def _show(self):
+        self._after = None
+        if self._tip is not None or not self.text:
+            return
+        try:
+            x, y = self.widget.winfo_pointerx() + 14, self.widget.winfo_pointery() + 18
+        except tk.TclError:
+            return
+        t = tk.Toplevel(self.widget)
+        t.overrideredirect(True)
+        t.attributes("-topmost", True)
+        tk.Label(t, text=self.text, bg="#2b2f36", fg="#EDEDED", justify="left", wraplength=360,
+                 font=("Segoe UI", 9), padx=8, pady=5, relief="solid", borderwidth=1).pack()
+        t.geometry(f"+{x}+{y}")
+        self._tip = t
+
+    def _hide(self, _e=None):
+        self._cancel()
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except tk.TclError:
+                pass
+            self._tip = None
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.title(f"Dofus Price Helper {core.app_version()}")
+        self.cfg = core.Config.load()
+        ctk.set_widget_scaling(self.cfg.ui_scale if 0.5 <= self.cfg.ui_scale <= 2 else 1.0)
         self.geometry("1120x800")
         self.minsize(980, 680)
+        self._restore_geometry()
 
-        self.cfg = core.Config.load()
         self.engine = core.PriceEngine(self.cfg)
         self.engine.progress = lambda r: self.ui_events.put(
             ("log", ("   " + r.message, {"warn": "WARN", "error": "ERROR"}.get(r.level, "OK"))))
@@ -132,6 +307,15 @@ class App(ctk.CTk):
         self.hk_labels: dict = {}      # raccourci -> [(libellé, suffixe)]
         self.hk_buttons: dict = {}     # raccourci -> bouton « Changer »
         self._capturing: Optional[str] = None
+        # journal : toutes les lignes (pour les filtres) et les blocs Ctrl+F3 repliables
+        self.log_entries: list = []    # dicts : t, msg, tag, cat, block, header
+        self.log_blocks: dict = {}     # id -> {"title", "collapsed", "problems"}
+        self._block: Optional[int] = None
+        self._block_seq = 0
+        self.runs = load_runs()        # derniers parcours Ctrl+F3 (onglet Mes ventes)
+        self.hdv_state: Optional[str] = None   # None (pas encore lu) | "ok" | "lost"
+        self.last_action = ("En attente d'une action…", "", MUTED)
+        self._compact = None
 
         self._build_vars()
         self._build_ui()
@@ -152,9 +336,57 @@ class App(ctk.CTk):
         self._register_hotkeys()
         self._refresh_status()
         self._apply_topmost()
-        if not (self.cfg.table_region and self.cfg.qty_region and self.cfg.price_field):
-            self.after(800, self._open_wizard)   # 1er lancement : calibration guidée
+        if not self._calibrated():
+            self.after(800, self._first_launch)   # 1er lancement : calibration automatique proposée
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _calibrated(self) -> bool:
+        c = self.cfg
+        return bool(c.table_region and c.qty_region and c.price_field)
+
+    def _restore_geometry(self):
+        g = self.cfg.window_geometry
+        if g == "zoomed":
+            self.after(50, lambda: self.state("zoomed"))
+        elif g:
+            try:
+                ok = geometry_on_screen(g, core.screen_bounds())
+            except Exception:
+                ok = False
+            if ok:
+                self.geometry(g)
+
+    def _first_launch(self):
+        """Pas encore calibré : propose la calibration automatique (l'assistant reste possible)."""
+        w = ctk.CTkToplevel(self)
+        w.title("Bienvenue")
+        w.geometry("520x260")
+        w.attributes("-topmost", True)
+        w.resizable(False, False)
+        ctk.CTkLabel(w, text="Première étape : la calibration", font=ctk.CTkFont(size=17, weight="bold")
+                     ).pack(anchor="w", padx=18, pady=(16, 6))
+        ctk.CTkLabel(w, text="Dans le jeu, ouvre l'Hôtel de vente sur l'onglet « Vente » et sélectionne "
+                             "une de tes ventes (ou un objet de l'inventaire), bien visible.\n\nClique ensuite "
+                             "« Calibration automatique » : tu as "
+                             f"{self.cfg.calib_countdown} s pour revenir sur le jeu, l'outil trouve l'HDV et "
+                             "place toutes les zones.",
+                     wraplength=480, justify="left", anchor="w").pack(fill="x", padx=18)
+
+        def auto():
+            w.destroy()
+            self.tabs.set("Calibration")
+            self._countdown("automatique", self._calib_auto_ui)
+
+        def wizard():
+            w.destroy()
+            self._open_wizard()
+
+        ctk.CTkButton(w, text="✨ Calibration automatique", height=40, font=ctk.CTkFont(size=14, weight="bold"),
+                      command=auto).pack(fill="x", padx=18, pady=(18, 6))
+        bar = ctk.CTkFrame(w, fg_color="transparent")
+        bar.pack(fill="x", padx=18)
+        ctk.CTkButton(bar, text="Assistant pas à pas", fg_color=BTN2, command=wizard).pack(side="left")
+        ctk.CTkButton(bar, text="Plus tard", fg_color=BTN2, width=90, command=w.destroy).pack(side="right")
 
     # ------------------------------------------------------------------ UI
     def _build_vars(self):
@@ -196,20 +428,69 @@ class App(ctk.CTk):
         self.engine_var = ctk.StringVar(value="—")
         self.digits_var = ctk.StringVar(value="")
         self.profile_var = ctk.StringVar(value=self.cfg.profile)
-        self.profile_info = ctk.StringVar(value=f"Profil : {self.cfg.profile}")
         self.stats_var = ctk.StringVar(value="")
+        self.preview_var = ctk.StringVar(value="")
+        self.log_filter = ctk.StringVar(value="Tout")
+        self.scale_var = ctk.StringVar(value=scale_label(self.cfg.ui_scale))
+        for name in ("undercut_mode", "undercut_value", "rounding", "min_price", "floor_mode", "floor_ratio"):
+            self.v[name].trace_add("write", lambda *_: self._update_preview())
         self.scroll_lbl = ctk.StringVar(value="")
         self.stats = {"ventes": 0, "modifs": 0, "suspects": 0}
 
-    def _section(self, parent, title: str, sub: str = ""):
+    def _tip(self, widget, text: str):
+        Tooltip(widget, text)
+        return widget
+
+    def _switch(self, parent, text: str, var: str, tip: str = "", **kw):
+        """Interrupteur d'option (avec son aide au survol)."""
+        s = ctk.CTkSwitch(parent, text=text, variable=self.v[var], **kw)
+        s.pack(anchor="w", pady=2)
+        if tip:
+            self._tip(s, tip)
+        return s
+
+    def _section(self, parent, title: str, sub: str = "", tip: str = ""):
         f = ctk.CTkFrame(parent, fg_color=CARD)
         f.pack(fill="x", padx=6, pady=(6, 2))
-        ctk.CTkLabel(f, text=title, font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(8, 0))
+        hr = ctk.CTkFrame(f, fg_color="transparent")
+        hr.pack(fill="x", padx=10, pady=(8, 0))
+        ctk.CTkLabel(hr, text=title, font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
+        if tip:
+            self._tip(ctk.CTkLabel(hr, text=" ⓘ", text_color=MUTED, cursor="question_arrow"), tip
+                      ).pack(side="left")
         if sub:
             ctk.CTkLabel(f, text=sub, text_color=MUTED, font=ctk.CTkFont(size=11), anchor="w",
                          wraplength=500, justify="left").pack(anchor="w", fill="x", padx=10)
         body = ctk.CTkFrame(f, fg_color="transparent")
         body.pack(fill="x", padx=8, pady=(4, 8))
+        return body
+
+    def _collapsible(self, parent, title: str, sub: str = "", opened: bool = False):
+        """Section repliable (« ▸ Avancé ») : retourne le cadre du contenu."""
+        outer = ctk.CTkFrame(parent, fg_color="transparent")
+        outer.pack(fill="x", padx=0, pady=(10, 2))
+        body = ctk.CTkFrame(outer, fg_color="transparent")
+        state = {"open": opened}
+
+        def label():
+            return ("▾ " if state["open"] else "▸ ") + title
+
+        def toggle():
+            state["open"] = not state["open"]
+            btn.configure(text=label())
+            if state["open"]:
+                body.pack(fill="x")
+            else:
+                body.pack_forget()
+
+        btn = ctk.CTkButton(outer, text=label(), anchor="w", fg_color=CARD, hover_color="#2b2f36",
+                            font=ctk.CTkFont(size=13, weight="bold"), height=32, command=toggle)
+        btn.pack(fill="x", padx=6)
+        if sub:
+            ctk.CTkLabel(outer, text=sub, text_color=MUTED, font=ctk.CTkFont(size=11), anchor="w"
+                         ).pack(fill="x", padx=16)
+        if opened:
+            body.pack(fill="x")
         return body
 
     def _row(self, parent):
@@ -231,23 +512,36 @@ class App(ctk.CTk):
         head.pack(fill="x")
         ctk.CTkLabel(head, text="Dofus Price Helper", font=ctk.CTkFont(size=18, weight="bold")
                      ).pack(side="left", padx=(14, 10), pady=10)
-        self.state_pill = ctk.CTkLabel(head, text="● Actif", corner_radius=10, fg_color="#1e5631",
-                                       font=ctk.CTkFont(weight="bold"), width=90)
-        self.state_pill.pack(side="left", padx=4)
         info = ctk.CTkFrame(wrap, fg_color="transparent")
-        info.pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkLabel(info, textvariable=self.digits_var, text_color=MUTED, font=ctk.CTkFont(size=12)
-                     ).pack(side="left")
-        ctk.CTkLabel(info, textvariable=self.stats_var, text_color=MUTED, font=ctk.CTkFont(size=12)
-                     ).pack(side="left", padx=16)
-        ctk.CTkLabel(info, textvariable=self.profile_info, text_color="#66d9ef", font=ctk.CTkFont(size=12)
-                     ).pack(side="left")
-        ctk.CTkButton(head, text="Voir zones", width=90, fg_color=BTN2,
-                      command=self._show_zones).pack(side="right", padx=(4, 12))
-        ctk.CTkButton(head, text="Lire (test)", width=90, fg_color=BTN2,
-                      command=lambda: self.jobs.put(("read", None))).pack(side="right", padx=4)
-        ctk.CTkCheckBox(head, text="📌", variable=self.v["always_on_top"], width=44
-                        ).pack(side="right", padx=(8, 2))
+        info.pack(fill="x", padx=10, pady=(0, 8))
+        # barre d'état : une pastille par chose à surveiller (cliquable)
+        chips = ctk.CTkFrame(info, fg_color="transparent")
+        chips.pack(side="left")
+        self.chips = {}
+        for key, tip, action in (
+                ("state", "Raccourcis actifs ou en pause. Clic = pause / reprise.", self._toggle_pause),
+                ("profile", "Profil de calibration actif (un par HDV ou personnage). Clic = onglet Calibration.",
+                 lambda: self.tabs.set("Calibration")),
+                ("calib", "Zones de base : tableau, quantité, champ « Prix du lot ». Clic = onglet Calibration.",
+                 lambda: self.tabs.set("Calibration")),
+                ("hdv", "L'HDV a-t-il été vu à la dernière action ? Avec le repère « Hôtel de vente », "
+                        "les zones suivent l'HDV si tu le déplaces.", lambda: self.jobs.put(("read", None)))):
+            lbl = ctk.CTkLabel(chips, text="", corner_radius=10, fg_color=BTN2, height=26,
+                               font=ctk.CTkFont(size=12, weight="bold"), cursor="hand2")
+            lbl.pack(side="left", padx=3, ipadx=8)
+            lbl.bind("<Button-1>", lambda _e, a=action: a(), add="+")
+            self._tip(lbl, tip)
+            self.chips[key] = lbl
+        self._tip(ctk.CTkButton(head, text="Voir zones", width=90, fg_color=BTN2, command=self._show_zones),
+                  "Affiche un instant les zones calibrées par-dessus le jeu.").pack(side="right", padx=(4, 12))
+        self._tip(ctk.CTkButton(head, text="Lire (test)", width=90, fg_color=BTN2,
+                                command=lambda: self.jobs.put(("read", None))),
+                  "Lit l'HDV une fois sans rien vendre : résultat dans le journal.").pack(side="right", padx=4)
+        self._tip(ctk.CTkButton(head, text="🗗 Compact", width=90, fg_color=BTN2, command=self._open_compact),
+                  "Petite fenêtre toujours au premier plan pendant que tu joues : dernière action, état, "
+                  "pause.").pack(side="right", padx=4)
+        self._tip(ctk.CTkCheckBox(head, text="📌", variable=self.v["always_on_top"], width=44),
+                  "Fenêtre de l'outil toujours au-dessus du jeu.").pack(side="right", padx=(8, 2))
         self.pause_btn = ctk.CTkButton(head, text="⏸ Pause", width=90, command=self._toggle_pause)
         self.pause_btn.pack(side="right", padx=4)
         self.update_btn = ctk.CTkButton(head, text="", width=150, fg_color="#1e5631",
@@ -293,7 +587,9 @@ class App(ctk.CTk):
             ctk.CTkLabel(r, text=label, text_color=MUTED, width=90, anchor="w").pack(side="left")
             ctk.CTkLabel(r, textvariable=var).pack(side="left")
         ctk.CTkLabel(side, textvariable=self.status_var, text_color=MUTED, wraplength=380,
-                     justify="left").pack(anchor="w", padx=12, pady=(8, 10))
+                     justify="left").pack(anchor="w", padx=12, pady=(8, 4))
+        ctk.CTkLabel(side, textvariable=self.stats_var, text_color=MUTED, font=ctk.CTkFont(size=12),
+                     wraplength=380, justify="left").pack(side="bottom", anchor="w", padx=12, pady=(0, 10))
 
         # ---------------- journal
         lf = ctk.CTkFrame(self, fg_color=CARD)
@@ -301,12 +597,19 @@ class App(ctk.CTk):
         top = ctk.CTkFrame(lf, fg_color="transparent")
         top.pack(fill="x", padx=8, pady=(6, 0))
         ctk.CTkLabel(top, text="Journal", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=4)
+        ctk.CTkSegmentedButton(top, values=list(LOG_FILTERS), variable=self.log_filter, height=24,
+                               command=lambda _v: self._render_log()).pack(side="left", padx=10)
         ctk.CTkButton(top, text="Effacer", width=70, height=24, fg_color=BTN2,
                       command=self._clear_log).pack(side="right")
+        self.copy_btn = self._tip(ctk.CTkButton(top, text="Copier", width=70, height=24, fg_color=BTN2,
+                                                command=self._copy_log),
+                                  "Copie les lignes affichées (selon le filtre) : à coller dans un message "
+                                  "quand tu signales un problème.")
+        self.copy_btn.pack(side="right", padx=6)
         body = ctk.CTkFrame(lf, fg_color="transparent")
         body.pack(fill="both", expand=True)
         self.log_text = tk.Text(body, wrap="word", bg="#111418", fg="#EDEDED", relief="flat",
-                                font=("Consolas", 10), padx=6, pady=4, height=6,
+                                font=("Consolas", self._log_font_size()), padx=6, pady=4, height=6,
                                 highlightthickness=0, borderwidth=0)
         self.log_text.configure(state="disabled")
         self.log_text.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=6)
@@ -333,12 +636,14 @@ class App(ctk.CTk):
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
         ctk.CTkButton(b, text="Rétablir les raccourcis par défaut", width=230, fg_color=BTN2,
                       command=self._reset_hotkeys).pack(anchor="w", pady=(8, 2))
-        b = self._section(page, "Vente rapide", "Ce que fait F1 après avoir calculé le prix.")
-        ctk.CTkSwitch(b, text="Coller le prix automatiquement", variable=self.v["auto_paste"]).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="Cliquer sur « Prix du lot » avant de coller", variable=self.v["click_field"]
-                      ).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="Mettre en vente automatiquement (Entrée) ⚠️", variable=self.v["auto_validate"],
-                      progress_color=ORANGE).pack(anchor="w", pady=2)
+        b = self._section(page, "Vente rapide", "Ce que fait la touche de vente après avoir calculé le prix.")
+        self._switch(b, "Coller le prix automatiquement", "auto_paste",
+                     tip="Sinon le prix est seulement copié : colle-le toi-même avec Ctrl+V.")
+        self._switch(b, "Cliquer sur « Prix du lot » avant de coller", "click_field",
+                     tip="Donne le focus au champ avant de coller. Demande le point « Prix du lot » calibré.")
+        self._switch(b, "Mettre en vente automatiquement (Entrée) ⚠️", "auto_validate", progress_color=ORANGE,
+                     tip="La vente part sans que tu vérifies le prix (sauf lecture suspecte). Avec « Relire "
+                         "Prix du lot » (onglet Options), le prix collé est relu avant de valider.")
 
     def _hk_label(self, parent, name: str, suffix: str = "", **kw):
         """Libellé d'un raccourci, mis à jour quand on le change (_refresh_hotkey_labels)."""
@@ -415,53 +720,118 @@ class App(ctk.CTk):
 
     def _tab_prices(self, page):
         page.pack(fill="both", expand=True)
+        pv = self._section(page, "Aperçu", tip="Exemple calculé avec tes réglages (lot de 1, prix moyen "
+                                               f"{fmt(PREVIEW_AVG)}). Change dès que tu modifies un réglage.")
+        self.preview_lbl = ctk.CTkLabel(pv, textvariable=self.preview_var, justify="left", anchor="w",
+                                        font=ctk.CTkFont(size=13), text_color="#a6e22e", wraplength=480)
+        self.preview_lbl.pack(anchor="w", fill="x", padx=2)
         b = self._section(page, "Undercut", "De combien passer sous le moins cher.")
         r = self._row(b)
         ctk.CTkSegmentedButton(r, values=list(UNDERCUT_LABELS.values()), variable=self.v["undercut_mode"]
                                ).pack(side="left")
-        ctk.CTkEntry(r, textvariable=self.v["undercut_value"], width=70).pack(side="left", padx=8)
+        self._tip(ctk.CTkEntry(r, textvariable=self.v["undercut_value"], width=70),
+                  "En kamas : 1 = 1 kama de moins. En % : 1 = 1 % de moins.").pack(side="left", padx=8)
         r = self._row(b)
-        ctk.CTkLabel(r, text="Arrondi", width=90, anchor="w").pack(side="left")
+        self._tip(ctk.CTkLabel(r, text="Arrondi", width=90, anchor="w"),
+                  "Toujours vers le bas : le prix ne remonte jamais au-dessus du moins cher.").pack(side="left")
         ctk.CTkOptionMenu(r, values=list(ROUNDING_LABELS.values()), variable=self.v["rounding"], width=170
                           ).pack(side="left")
         r = self._row(b)
-        ctk.CTkLabel(r, text="Prix min", width=90, anchor="w").pack(side="left")
+        self._tip(ctk.CTkLabel(r, text="Prix min", width=90, anchor="w"),
+                  "L'outil ne descend jamais sous ce prix.").pack(side="left")
         ctk.CTkEntry(r, textvariable=self.v["min_price"], width=90).pack(side="left")
-        b = self._section(page, "Prix plancher",
-                          "Plancher = ce % du « Prix moyen » (zone Prix moyen requise). Protège contre un "
-                          "vendeur qui brade. 0 = désactivé.")
+        b = self._section(page, "Prix plancher", "Protège contre un vendeur qui brade. 0 = désactivé.",
+                          tip="Plancher = ce % du « Prix moyen » affiché par l'HDV (zone Prix moyen "
+                              "requise, placée par la calibration automatique).")
         r = self._row(b)
         ctk.CTkEntry(r, textvariable=self.v["floor_ratio"], width=60).pack(side="left")
         ctk.CTkLabel(r, text="% du prix moyen").pack(side="left", padx=6)
         r = self._row(b)
-        ctk.CTkLabel(r, text="Concurrent en dessous", width=150, anchor="w").pack(side="left")
+        self._tip(ctk.CTkLabel(r, text="Concurrent en dessous", width=150, anchor="w"),
+                  "Au plancher : tu vends au plancher. Garder mon prix : tes ventes en cours ne bougent "
+                  "pas. Arrêt : la lecture est jugée suspecte et rien n'est fait.").pack(side="left")
         ctk.CTkOptionMenu(r, values=list(FLOOR_LABELS.values()), variable=self.v["floor_mode"], width=170
                           ).pack(side="left")
+        self._update_preview()
+
+    def _update_preview(self):
+        if not hasattr(self, "preview_lbl"):
+            return
+        v = self.v
+        try:
+            mode = {lbl: k for k, lbl in UNDERCUT_LABELS.items()}.get(v["undercut_mode"].get(), "fixed")
+            rounding = {lbl: k for k, lbl in ROUNDING_LABELS.items()}.get(v["rounding"].get(), "none")
+            floor_mode = {lbl: k for k, lbl in FLOOR_LABELS.items()}.get(v["floor_mode"].get(), "floor")
+            value = float(v["undercut_value"].get().replace(",", "."))
+            min_price = int(v["min_price"].get())
+            ratio = max(0.0, float(v["floor_ratio"].get().replace(",", ".") or 0) / 100)
+        except (ValueError, tk.TclError):
+            self.preview_var.set("Valeur invalide : corrige le champ pour voir l'aperçu.")
+            self.preview_lbl.configure(text_color="#f1c40f")
+            return
+        self.preview_var.set("\n".join(price_preview(mode, value, rounding, min_price, ratio, floor_mode,
+                                                     self.cfg.min_avg_ratio)))
+        self.preview_lbl.configure(text_color="#a6e22e")
 
     def _tab_relist(self, page, hk):
         page.pack(fill="both", expand=True)
         b = self._section(page, "Toute la liste",
-                          "Clique chaque ligne, met à jour, défile et continue. Départ à la ligne sous la "
-                          "souris. Le mode le plus risqué vis-à-vis des CGU d'Ankama.")
-        ctk.CTkSwitch(b, text="Activer le parcours de toute la liste ⚠️", variable=self.v["relist_auto"],
-                      progress_color=ORANGE).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="Valider la fenêtre de confirmation avec Entrée",
-                      variable=self.v["relist_confirm_enter"]).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="Résumé à la fin du parcours (prix modifiés, lignes à revoir)",
-                      variable=self.v["relist_summary"]).pack(anchor="w", pady=2)
+                          tip="Clique chaque ligne, met à jour, défile et continue. Départ à la ligne sous "
+                              "la souris. C'est le mode le plus risqué vis-à-vis des CGU d'Ankama.")
+        self._switch(b, "Activer le parcours de toute la liste ⚠️", "relist_auto", progress_color=ORANGE,
+                     tip="Sans cet interrupteur, le raccourci ne fait rien (sécurité).")
+        self._switch(b, "Valider la fenêtre de confirmation avec Entrée", "relist_confirm_enter",
+                     tip="Après « Modifier », si une fenêtre de confirmation reste ouverte, l'outil appuie "
+                         "sur Entrée.")
+        self._switch(b, "Fenêtre de résumé à la fin du parcours", "relist_summary",
+                     tip="Prix modifiés et lignes à revoir, avec l'image du nom de chaque objet. Le résumé "
+                         "reste aussi dans « Derniers parcours » ci-dessous.")
         r = self._row(b)
-        ctk.CTkLabel(r, text="Défilement", width=120, anchor="w").pack(side="left")
+        self._tip(ctk.CTkLabel(r, text="Défilement", width=120, anchor="w"),
+                  "De combien la liste défile entre deux lectures. Moins = plus sûr, plus = plus rapide."
+                  ).pack(side="left")
         ctk.CTkSlider(r, from_=0.2, to=1.0, number_of_steps=8, variable=self.v["relist_scroll_page"],
                       width=180, command=lambda _v: self._update_scroll_lbl()).pack(side="left")
         ctk.CTkLabel(r, textvariable=self.scroll_lbl, text_color=MUTED).pack(side="left", padx=8)
         self._update_scroll_lbl()
         r = self._row(b)
-        ctk.CTkLabel(r, text="Lignes visibles", width=120, anchor="w").pack(side="left")
+        self._tip(ctk.CTkLabel(r, text="Lignes visibles", width=120, anchor="w"),
+                  "Nombre de lignes entièrement visibles dans la liste de tes ventes.").pack(side="left")
         ctk.CTkEntry(r, textvariable=self.v["relist_rows"], width=60).pack(side="left")
         r = self._row(b)
-        ctk.CTkLabel(r, text="Lignes max / appui", width=120, anchor="w").pack(side="left")
+        self._tip(ctk.CTkLabel(r, text="Lignes max / appui", width=120, anchor="w"),
+                  "Garde-fou : le parcours s'arrête après ce nombre de lignes lues.").pack(side="left")
         ctk.CTkEntry(r, textvariable=self.v["relist_max"], width=60).pack(side="left")
-        ctk.CTkLabel(r, text="(garde-fou)", text_color=MUTED).pack(side="left", padx=6)
+        hb = self._section(page, "Derniers parcours",
+                           f"Les {MAX_RUNS} derniers résumés du parcours de toute la liste. Clic = détail.")
+        self.runs_box = ctk.CTkFrame(hb, fg_color="transparent")
+        self.runs_box.pack(fill="x")
+        self._refresh_runs()
+
+    def _refresh_runs(self):
+        box = getattr(self, "runs_box", None)
+        if box is None:
+            return
+        for w in box.winfo_children():
+            w.destroy()
+        if not self.runs:
+            ctk.CTkLabel(box, text="Aucun parcours pour l'instant.", text_color=MUTED).pack(anchor="w", pady=2)
+            return
+        for run in reversed(self.runs):
+            bad = any(not c.modified for c in run["changes"])
+            ctk.CTkButton(box, text=run_title(run), anchor="w", height=26, fg_color=BTN2,
+                          text_color="#f1c40f" if bad else "#EDEDED",
+                          command=lambda r=run: self._summary_window(r)).pack(fill="x", pady=1)
+        ctk.CTkButton(box, text="Effacer l'historique", width=150, height=24, fg_color="transparent",
+                      border_width=1, border_color=BTN2, command=self._clear_runs).pack(anchor="e", pady=(6, 0))
+
+    def _clear_runs(self):
+        self.runs = []
+        try:
+            save_runs(self.runs)
+        except OSError:
+            pass
+        self._refresh_runs()
 
     def _update_scroll_lbl(self):
         try:
@@ -471,9 +841,25 @@ class App(ctk.CTk):
 
     def _tab_calibration(self, page):
         page.pack(fill="both", expand=True)
-        pb = self._section(page, "Profil de calibration",
-                           "Un profil par HDV ou par personnage : zones, points et repère. « Nouveau » "
-                           "copie le profil actuel : recalibre seulement ce qui change.")
+        ab = self._section(page, "Calibration automatique",
+                           "HDV ouvert sur l'onglet « Vente », une de tes ventes (ou un objet) sélectionnée, "
+                           "puis clique.",
+                           tip="L'outil trouve l'HDV et place toutes les zones, quelles que soient la "
+                               "résolution et l'échelle de l'interface. Fonctionne avec Dofus 3 en français, "
+                               "sur la même version du jeu que le modèle de l'outil : sinon, calibration "
+                               "manuelle dans « Avancé ».")
+        r = self._row(ab)
+        ctk.CTkButton(r, text="✨ Calibration automatique", width=300, height=46,
+                      font=ctk.CTkFont(size=15, weight="bold"),
+                      command=lambda: self._countdown("automatique", self._calib_auto_ui)
+                      ).pack(side="left", pady=4)
+        self._hk_label(r, "calibrate_auto", text_color=MUTED,
+                       font=ctk.CTkFont(family="Consolas")).pack(side="left", padx=12)
+        self._tip(ctk.CTkButton(r, text="Voir zones", width=90, fg_color=BTN2, command=self._show_zones),
+                  "Vérifie où les zones ont été placées.").pack(side="right", padx=4)
+        pb = self._section(page, "Profil de calibration", "Un profil par HDV ou par personnage.",
+                           tip="Un profil garde ses zones, ses points et son repère. « Nouveau » copie le "
+                               "profil actuel : recalibre seulement ce qui change.")
         r = self._row(pb)
         self.profile_menu = ctk.CTkOptionMenu(r, values=self.cfg.profile_names(), variable=self.profile_var,
                                               width=220, dynamic_resizing=False, command=self._switch_profile)
@@ -482,25 +868,16 @@ class App(ctk.CTk):
                       ).pack(side="left", padx=(8, 4))
         ctk.CTkButton(r, text="Supprimer", width=90, fg_color=BTN2, command=self._delete_profile
                       ).pack(side="left", padx=4)
-        ab = self._section(page, "Calibration automatique",
-                           "Ouvre l'HDV sur l'onglet « Vente » avec une de tes ventes (ou un objet) "
-                           "sélectionnée, bien visible, puis clique : l'outil trouve l'HDV et place toutes "
-                           "les zones, quelles que soient la résolution et l'échelle de l'interface. "
-                           "Fonctionne avec Dofus 3 en français, sur la même version du jeu que le "
-                           "modèle de l'outil : sinon, calibration manuelle ci-dessous.")
-        r = self._row(ab)
-        ctk.CTkButton(r, text="✨ Calibration automatique", width=220,
-                      command=lambda: self._countdown("automatique", self._calib_auto_ui)
-                      ).pack(side="left")
-        self._hk_label(r, "calibrate_auto", text_color=MUTED,
-                       font=ctk.CTkFont(family="Consolas")).pack(side="left", padx=10)
-        top = self._section(page, "Assistant", "Pas à pas, avec une vérification à la fin. Conseillé la "
-                                               "première fois ou après un changement d'interface.")
+        adv = self._collapsible(page, "Avancé : assistant et zones manuelles",
+                                "Seulement si la calibration automatique échoue ou place mal une zone.")
+        top = self._section(adv, "Assistant", "Pas à pas, avec une vérification à la fin.")
         ctk.CTkButton(top, text="🧭 Ouvrir l'assistant de calibration", width=260,
                       command=self._open_wizard).pack(anchor="w", pady=2)
-        b = self._section(page, "Zones et points",
-                          f"Bouton = compte à rebours de {self.cfg.calib_countdown}s pour placer la souris "
-                          "(zones : coin haut-gauche puis bas-droit). Ou utilise le raccourci en jeu.")
+        b = self._section(adv, "Zones et points",
+                          f"« Calibrer » = compte à rebours de {self.cfg.calib_countdown} s pour placer la "
+                          "souris, ou raccourci en jeu.",
+                          tip="Zones : coin haut-gauche, puis coin bas-droit. Points : une position. "
+                              "✕ efface une zone optionnelle.")
         self.calib_labels = {}
         items = [
             ("anchor", "Repère : titre « Hôtel de vente » (suivi)",
@@ -542,35 +919,61 @@ class App(ctk.CTk):
     def _tab_options(self, page):
         page.pack(fill="both", expand=True)
         b = self._section(page, "Général")
-        ctk.CTkSwitch(b, text="Raccourcis actifs seulement quand Dofus a le focus",
-                      variable=self.v["require_focus"]).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="Sons", variable=self.v["sound"]).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="Afficher le résultat de chaque action", variable=self.v["toast"]).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="… dans un bandeau fixe au-dessus de l'HDV (sinon popup près de la souris)",
-                      variable=self.v["banner"]).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="Fenêtre de l'outil toujours au-dessus du jeu (📌 en haut)",
-                      variable=self.v["always_on_top"]).pack(anchor="w", pady=2)
+        self._switch(b, "Raccourcis actifs seulement quand Dofus a le focus", "require_focus",
+                     tip="Évite de déclencher une vente en tapant ailleurs. Désactive seulement si l'outil "
+                         "ne reconnaît pas la fenêtre du jeu (message [Focus] dans le journal).")
+        self._switch(b, "Sons", "sound", tip="Un bip différent pour un succès, un avertissement, une erreur.")
+        self._switch(b, "Afficher le résultat de chaque action", "toast",
+                     tip="Petit message à l'écran : lot et prix choisis, ou la raison d'un arrêt.")
+        self._switch(b, "… dans un bandeau fixe au-dessus de l'HDV", "banner",
+                     tip="Toujours au même endroit. Désactivé : une popup près de la souris.")
+        self._switch(b, "Fenêtre de l'outil toujours au-dessus du jeu", "always_on_top",
+                     tip="Même chose que 📌 en haut. Le jeu doit être en fenêtré ou plein écran fenêtré.")
+        b = self._section(page, "Apparence")
+        r = self._row(b)
+        self._tip(ctk.CTkLabel(r, text="Taille du texte", width=120, anchor="w"),
+                  "Agrandit ou réduit tout le texte et les boutons de l'outil.").pack(side="left")
+        ctk.CTkSegmentedButton(r, values=list(UI_SCALES), variable=self.scale_var,
+                               command=self._set_ui_scale).pack(side="left")
+        ctk.CTkLabel(b, text="La taille et la position de la fenêtre sont gardées d'un lancement à l'autre.",
+                     text_color=MUTED, font=ctk.CTkFont(size=11)).pack(anchor="w", pady=(4, 0))
         b = self._section(page, "Sécurité et rapidité")
-        ctk.CTkSwitch(b, text="Relire « Prix du lot » avant de valider (jamais un mauvais prix)",
-                      variable=self.v["verify_before_enter"]).pack(anchor="w", pady=2)
-        ctk.CTkSwitch(b, text="F1 intelligent : vend un objet de l'inventaire OU met à jour une de tes ventes",
-                      variable=self.v["smart_f1"]).pack(anchor="w", pady=2)
+        self._switch(b, "Relire « Prix du lot » avant de valider", "verify_before_enter",
+                     tip="Le prix collé est relu dans le champ avant Entrée : jamais un mauvais prix validé.")
+        self._switch(b, "Touche de vente intelligente", "smart_f1",
+                     tip="Vend un objet de l'inventaire OU met à jour une de tes ventes, selon ce qui est "
+                         "sélectionné dans l'HDV.")
         b = self._section(page, "Lecture rapide des chiffres",
-                          "Apprise toute seule à partir de Tesseract. À réapprendre si tu changes de "
-                          "résolution ou de taille d'interface.")
-        ctk.CTkSwitch(b, text="Utiliser la lecture rapide", variable=self.v["fast_digits"]).pack(anchor="w", pady=2)
+                          tip="Apprise toute seule à partir de Tesseract. À réapprendre si tu changes de "
+                              "résolution ou de taille d'interface du jeu.")
+        self._switch(b, "Utiliser la lecture rapide", "fast_digits",
+                     tip="Beaucoup plus rapide que Tesseract, qui reste utilisé en secours.")
         ctk.CTkButton(b, text="Réapprendre les chiffres", width=180, fg_color=BTN2,
                       command=self._reset_digits).pack(anchor="w", pady=4)
-        b = self._section(page, "Mises à jour et journal",
-                          f"Version {core.app_version()}. Le journal (fichier) garde l'historique des "
-                          "messages et des erreurs : à joindre quand tu signales un problème.")
-        ctk.CTkSwitch(b, text="Vérifier au démarrage si une nouvelle version est publiée (GitHub)",
-                      variable=self.v["check_updates"]).pack(anchor="w", pady=2)
+        b = self._section(page, "Mises à jour et journal", f"Version {core.app_version()}.",
+                          tip="Le journal (fichier) garde l'historique des messages et des erreurs : à "
+                              "joindre quand tu signales un problème.")
+        self._switch(b, "Vérifier au démarrage si une nouvelle version est publiée (GitHub)", "check_updates")
         r = self._row(b)
         ctk.CTkButton(r, text="Ouvrir le dossier du journal", width=200, fg_color=BTN2,
                       command=self._open_log_dir).pack(side="left")
         ctk.CTkButton(r, text="Page des versions", width=150, fg_color=BTN2,
                       command=lambda: self._open_url(core.RELEASES_URL)).pack(side="left", padx=8)
+
+    def _set_ui_scale(self, label: str):
+        s = UI_SCALES.get(label, 1.0)
+        if s == self.cfg.ui_scale:
+            return
+        self.cfg.ui_scale = s
+        ctk.set_widget_scaling(s)
+        size = self._log_font_size()
+        self.log_text.configure(font=("Consolas", size))
+        self.log_text.tag_configure("HDR", font=("Consolas", size, "bold"))
+        try:
+            self.cfg.save()
+        except OSError as e:
+            self._log(f"[Param] Sauvegarde impossible : {e}", "ERROR")
+
     CLEAR_FIELDS = {"anchor": ("anchor_region",), "avg": ("avg_region",), "count": ("count_region",),
                     "modify_button": ("modify_button",), "rows": ("relist_row",), "sell_button": ("sell_button",),
                     "mine": ("mine_region",), "name": ("name_region",)}
@@ -599,7 +1002,7 @@ class App(ctk.CTk):
             self._log(f"[Profil] Sauvegarde impossible : {e}", "ERROR")
         self.profile_menu.configure(values=self.cfg.profile_names())
         self.profile_var.set(self.cfg.profile)
-        self.profile_info.set(f"Profil : {self.cfg.profile}")
+        self.hdv_state = None          # autre HDV : pas encore vu
         self._log(msg, "CAL")
         self._refresh_status()
 
@@ -699,24 +1102,114 @@ class App(ctk.CTk):
         except tk.TclError:
             pass
 
+    # ---- journal : filtres, blocs Ctrl+F3 repliables, copie
+    MAX_LOG = 1500
+
+    def _log_font_size(self) -> int:
+        return max(8, round(10 * (self.cfg.ui_scale or 1.0)))
+
     def _clear_log(self):
-        self.log_text.configure(state="normal")
-        self.log_text.delete("1.0", "end")
-        self.log_text.configure(state="disabled")
+        self.log_entries.clear()
+        self.log_blocks = {k: b for k, b in self.log_blocks.items() if k == self._block}
+        if self._block is not None:       # parcours en cours : son en-tête reste
+            self.log_entries.append({"t": time.strftime("%H:%M:%S"), "msg": "", "tag": "INFO",
+                                     "cat": "sale", "block": self._block, "header": True})
+        self._render_log()
+
+    def _copy_log(self):
+        self.clipboard_clear()
+        self.clipboard_append(self.log_text.get("1.0", "end-1c"))
+        self.copy_btn.configure(text="Copié ✓")
+        self.after(1500, lambda: self.copy_btn.configure(text="Copier"))
 
     def _setup_log_tags(self):
         for tag, color in TAG_COLORS.items():
             self.log_text.tag_configure(tag, foreground=color)
+        self.log_text.tag_configure("HDR", foreground="#66d9ef", font=("Consolas", self._log_font_size(), "bold"))
 
     def _log(self, msg: str, tag: str = "INFO"):
         core.log_line(msg, tag)
-        self.log_text.configure(state="normal")
-        self.log_text.insert("end", time.strftime("%H:%M:%S") + "  ", ("TIME",))
-        self.log_text.insert("end", msg + "\n", (tag,))
-        if int(self.log_text.index("end-1c").split(".")[0]) > 500:
-            self.log_text.delete("1.0", "100.0")
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
+        e = {"t": time.strftime("%H:%M:%S"), "msg": msg, "tag": tag, "cat": log_category(msg, tag),
+             "block": self._block, "header": False}
+        self.log_entries.append(e)
+        if self._block is not None and e["cat"] == "problem":
+            self.log_blocks[self._block]["problems"] += 1
+        if len(self.log_entries) > self.MAX_LOG:
+            del self.log_entries[:300]
+            self._render_log()
+        elif self._entry_visible(e):
+            self._insert_entries([e])
+
+    def _entry_visible(self, e: dict) -> bool:
+        flt = LOG_FILTERS.get(self.log_filter.get(), "all")
+        b = self.log_blocks.get(e["block"]) if e["block"] is not None else None
+        if e["header"]:
+            return flt != "problem" or bool(b and b["problems"])
+        if b is not None and b["collapsed"]:
+            return False
+        return log_visible(e["cat"], flt, in_block=b is not None)
+
+    def _insert_entries(self, entries: list):
+        t = self.log_text
+        t.configure(state="normal")
+        for e in entries:
+            if e["header"]:
+                b = self.log_blocks.get(e["block"])
+                if b is None:
+                    continue
+                htag = f"hdr{e['block']}"
+                t.insert("end", ("▶ " if b["collapsed"] else "▼ ") + b["title"] + "\n", ("HDR", htag))
+                t.tag_bind(htag, "<Button-1>", lambda _e, k=e["block"]: self._toggle_block(k))
+                t.tag_bind(htag, "<Enter>", lambda _e: t.configure(cursor="hand2"))
+                t.tag_bind(htag, "<Leave>", lambda _e: t.configure(cursor=""))
+                continue
+            t.insert("end", e["t"] + "  ", ("TIME",))
+            t.insert("end", ("   " if e["block"] is not None else "") + e["msg"] + "\n", (e["tag"],))
+        t.see("end")
+        t.configure(state="disabled")
+
+    def _render_log(self):
+        t = self.log_text
+        t.configure(state="normal")
+        t.delete("1.0", "end")
+        t.configure(state="disabled")
+        self._insert_entries([e for e in self.log_entries if self._entry_visible(e)])
+
+    def _toggle_block(self, key: int):
+        b = self.log_blocks.get(key)
+        if b:
+            b["collapsed"] = not b["collapsed"]
+            y = self.log_text.yview()[0]
+            self._render_log()
+            self.log_text.yview_moveto(y)
+
+    def _block_start(self):
+        """Début d'un Ctrl+F3 : ses lignes vont dans un bloc repliable du journal."""
+        self._block_seq += 1
+        self._block = self._block_seq
+        self.log_blocks[self._block] = {"title": f"Ctrl+F3 · {time.strftime('%H:%M:%S')} · en cours…",
+                                        "collapsed": False, "problems": 0}
+        e = {"t": "", "msg": "", "tag": "INFO", "cat": "sale", "block": self._block, "header": True}
+        self.log_entries.append(e)
+        self._insert_entries([e])
+
+    def _block_end(self, res: Optional[core.Result]):
+        key, self._block = self._block, None
+        b = self.log_blocks.get(key)
+        if b is None:
+            return
+        title = b["title"].replace(" · en cours…", "")
+        if res is not None and res.changes:
+            mod = sum(1 for c in res.changes if c.modified)
+            bad = len(res.changes) - mod
+            title += f" · {mod} prix modifié{'s' if mod > 1 else ''}" + (f" · {bad} à revoir" if bad else "")
+        elif res is not None:
+            title += f" · {res.hint or res.level}"
+        else:
+            title += " · interrompu (erreur)"
+        b["title"] = title + "   (clic = déplier / replier)"
+        b["collapsed"] = True
+        self._render_log()
 
     # ------------------------------------------------------------ settings
     def _schedule_save(self):
@@ -849,9 +1342,15 @@ class App(ctk.CTk):
                 elif name == "relist":
                     self.ui_events.put(("result", self.engine.relist()))
                 elif name == "relist_all":
+                    self.ui_events.put(("block_start", None))
                     self.ui_events.put(("log", ("[MAJ TOUT] Parcours de la liste… "
-                                                f"{self.cfg.hotkeys['pause']} pour arrêter.", "WARN")))
-                    self.ui_events.put(("result", self.engine.relist_all()))
+                                                f"{self.cfg.hotkeys['pause'].upper()} pour arrêter.", "CAL")))
+                    res = None
+                    try:
+                        res = self.engine.relist_all()
+                        self.ui_events.put(("result", res))
+                    finally:
+                        self.ui_events.put(("block_end", res))
                 elif name == "calib_rows":
                     self.ui_events.put(("calib_rows", self.engine.calibrate_rows()))
                 elif name == "read":
@@ -869,8 +1368,7 @@ class App(ctk.CTk):
                 self.ui_events.put(("log", (f"[Erreur] {e}", "ERROR")))
             msg, self.engine.last_anchor_msg = self.engine.last_anchor_msg, ""
             if msg:
-                self.ui_events.put(("log", (f"[Repère] {msg}", "CAL" if "recalées" in msg else "WARN")))
-                self.ui_events.put(("refresh", None))
+                self.ui_events.put(("anchor", msg))
 
     def _unstick_keys(self):
         """Toutes les secondes : touches que `keyboard` croit enfoncées à tort -> libérées
@@ -891,6 +1389,17 @@ class App(ctk.CTk):
                 name, arg = self.ui_events.get_nowait()
                 if name == "result":
                     self._on_result(arg)
+                elif name == "block_start":
+                    self._block_start()
+                elif name == "block_end":
+                    self._block_end(arg)
+                elif name == "anchor":
+                    self._log(f"[Repère] {arg}", "CAL" if "recalées" in arg else "WARN")
+                    if "introuvable" in arg:
+                        self._set_hdv("lost")
+                    elif "recalées" in arg:
+                        self._set_hdv("ok")
+                    self._refresh_status()
                 elif name == "screen":
                     self._show_screen(arg)
                     txt = " | ".join(f"lot {l}: {fmt(r.value)} ({r.confidence:.0f}%)"
@@ -942,10 +1451,13 @@ class App(ctk.CTk):
         if res.message.startswith("[MAJ TOUT]"):
             self._relist_summary(res)
         core.beep(res.level, self.cfg)
+        head = (f"Lot {res.lot} → {fmt(res.new_price)}" if res.new_price is not None
+                else "Liste mise à jour" if res.message.startswith("[MAJ TOUT]") else "Pas de prix")
+        if res.message.startswith("[TOUT]"):
+            head += f"  {res.hint}"
+        self.last_action = (head, res.hint or res.level, LEVEL_COLORS[res.level])
+        self._refresh_compact()
         if self.cfg.toast:
-            head = f"Lot {res.lot} → {fmt(res.new_price)}" if res.new_price is not None else "Pas de prix"
-            if res.message.startswith("[TOUT]"):
-                head += f"  {res.hint}"
             if self.cfg.banner:
                 self._banner(head, res.hint or res.level, LEVEL_COLORS[res.level])
             else:
@@ -953,20 +1465,33 @@ class App(ctk.CTk):
 
     # ---- résumé de fin de Ctrl+F3
     def _relist_summary(self, res: core.Result):
-        """Journal : une ligne par prix modifié / ligne à revoir. Fenêtre : la même chose avec
-        l'image du nom de chaque objet (le nom n'est pas lu en texte)."""
-        mod = [c for c in res.changes if c.modified]
-        bad = [c for c in res.changes if not c.modified]
+        """Journal : une ligne par prix modifié / ligne à revoir. Historique (onglet Mes ventes) et
+        fenêtre : la même chose avec l'image du nom de chaque objet (le nom n'est pas lu en texte)."""
         for c in res.changes:
             self._log("   " + c.text(), "OK" if c.modified else "WARN")
-        if not self.cfg.relist_summary or not res.changes:
+        if not res.changes:
             return
+        run = {"time": time.time(), "changes": list(res.changes)}
+        self.runs = (self.runs + [run])[-MAX_RUNS:]
+        try:
+            save_runs(self.runs)
+        except OSError as e:
+            self._log(f"[Résumé] Historique non enregistré : {e}", "WARN")
+        self._refresh_runs()
+        if self.cfg.relist_summary:
+            self._summary_window(run)
+
+    def _summary_window(self, run: dict):
+        changes = run["changes"]
+        mod = [c for c in changes if c.modified]
+        bad = [c for c in changes if not c.modified]
         w = getattr(self, "_summary_win", None)
         if w is not None and w.winfo_exists():
             w.destroy()
         w = ctk.CTkToplevel(self)
         self._summary_win = w
-        w.title("Résumé de la mise à jour (Ctrl+F3)")
+        w.title("Résumé de la mise à jour (Ctrl+F3) · "
+                + time.strftime("%d/%m %H:%M", time.localtime(run["time"])))
         w.geometry("560x520")
         w.attributes("-topmost", True)
         ctk.CTkLabel(w, text=f"{len(mod)} prix modifié{'s' if len(mod) > 1 else ''}"
@@ -1034,6 +1559,8 @@ class App(ctk.CTk):
     def _show_screen(self, sr: core.ScreenRead):
         if not sr.prices and sr.selected is None:
             return
+        if any(r and r.value is not None for r in sr.prices.values()):
+            self._set_hdv("ok")
         self.qty_var.set(str(sr.selected) if sr.selected else "?")
         for lot, var in self.read_vars.items():
             r = sr.prices.get(lot)
@@ -1391,13 +1918,17 @@ class App(ctk.CTk):
 
     def _on_calib_auto(self, res, checks: list):
         self._log(f"[Calib auto] {res.message}", "CAL" if res.ok else "ERROR")
+        self._set_hdv("ok" if res.ok else "lost")
         if not res.ok:
+            if not self._calibrated():
+                self._log("[Calib auto] Essaie l'assistant pas à pas : onglet Calibration › Avancé.", "WARN")
+            self._refresh_status()
             return
         for line in checks:
             self._log("   " + line, "OK" if line.startswith("✓") else
                       "WARN" if line[:1] in "⚠–•" else "ERROR")
         self._log("[Calib auto] Vérifie avec « Voir zones » ; une zone mal placée se recalibre "
-                  "individuellement ci-dessous.", "CAL")
+                  "individuellement (onglet Calibration › Avancé).", "CAL")
         self._sync_vars_from_cfg()
         self._refresh_status()
         self._show_zones(4000)
@@ -1417,11 +1948,40 @@ class App(ctk.CTk):
         self._log("[Hotkeys] " + ("En pause." if self.engine.paused else "Actifs."), "WARN")
         self._refresh_status()
 
+    CHIP_GREEN, CHIP_ORANGE, CHIP_RED, CHIP_GREY = "#1e5631", "#7a4b12", "#7b2222", BTN2
+
+    def _set_hdv(self, state: Optional[str]):
+        if state != self.hdv_state:
+            self.hdv_state = state
+            self._refresh_status()
+
+    def _chip_values(self) -> dict:
+        """Texte et couleur de chaque pastille de la barre d'état."""
+        c = self.cfg
+        paused = self.engine.paused
+        calib = self._calibrated()
+        if self.hdv_state == "ok":
+            hdv = ("HDV vu ✓", self.CHIP_GREEN)
+        elif self.hdv_state == "lost":
+            hdv = ("HDV introuvable", self.CHIP_RED)
+        else:
+            hdv = ("HDV : pas encore lu", self.CHIP_GREY)
+        if hdv[0] != "HDV introuvable" and not c.anchor_region:
+            hdv = (hdv[0] + " · sans repère", hdv[1])
+        return {
+            "state": ("⏸ Pause" if paused else "● Actif", self.CHIP_ORANGE if paused else self.CHIP_GREEN),
+            "profile": (f"Profil : {c.profile}", self.CHIP_GREY),
+            "calib": ("Calibration OK" if calib else "Calibration à faire",
+                      self.CHIP_GREEN if calib else self.CHIP_RED),
+            "hdv": hdv,
+        }
+
     def _refresh_status(self):
         c = self.cfg
         paused = self.engine.paused
-        self.state_pill.configure(text="⏸ Pause" if paused else "● Actif",
-                                  fg_color="#7a4b12" if paused else "#1e5631")
+        for key, (text, color) in self._chip_values().items():
+            self.chips[key].configure(text=text, fg_color=color)
+        self._refresh_compact()
         self.pause_btn.configure(text="▶ Reprendre" if paused else "⏸ Pause")
         try:
             n = len(core.digit_reader().known())
@@ -1432,7 +1992,8 @@ class App(ctk.CTk):
         tot = st.get("chiffres", 0) + st.get("tesseract", 0)
         fast = f"  |  lecture rapide {st.get('chiffres', 0) * 100 // tot}%" if tot else ""
         self.stats_var.set(f"Session : {self.stats['ventes']} ventes  |  {self.stats['modifs']} modifs"
-                           f"  |  {self.stats['suspects']} suspects{fast}")
+                           f"  |  {self.stats['suspects']} suspects{fast}\n"
+                           f"{self.digits_var.get()}")
         values = {"table": c.table_region, "qty": c.qty_region, "price_field": c.price_field,
                   "avg": c.avg_region, "count": c.count_region, "modify_button": c.modify_button,
                   "rows": c.relist_row, "sell_button": c.sell_button, "mine": c.mine_region,
@@ -1447,6 +2008,82 @@ class App(ctk.CTk):
                 missing.append(names[key])
         self.status_var.set(("À calibrer : " + ", ".join(missing) + " (onglet Calibration)")
                             if missing else "Calibration de base OK.")
+
+    # ---- mode compact : petite fenêtre au premier plan pendant le jeu
+    def _open_compact(self):
+        w = self._compact
+        if w is not None and w.winfo_exists():
+            w.lift()
+            return
+        w = ctk.CTkToplevel(self)
+        self._compact = w
+        w.title("Dofus Price Helper")
+        w.attributes("-topmost", True)
+        w.resizable(False, False)
+        g = self.cfg.compact_geometry
+        try:
+            ok = bool(g) and geometry_on_screen(g, core.screen_bounds())
+        except Exception:
+            ok = False
+        w.geometry(g if ok else "340x150")
+        top = ctk.CTkFrame(w, fg_color="transparent")
+        top.pack(fill="x", padx=10, pady=(10, 4))
+        self._cmp_chips = {}
+        for key in ("state", "calib", "hdv"):
+            lbl = ctk.CTkLabel(top, text="", corner_radius=10, height=22, fg_color=BTN2,
+                               font=ctk.CTkFont(size=11, weight="bold"))
+            lbl.pack(side="left", padx=2, ipadx=6)
+            self._cmp_chips[key] = lbl
+        self._cmp_head = ctk.CTkLabel(w, text="", anchor="w", font=ctk.CTkFont(size=15, weight="bold"))
+        self._cmp_head.pack(fill="x", padx=12)
+        self._cmp_sub = ctk.CTkLabel(w, text="", anchor="w", wraplength=300, justify="left")
+        self._cmp_sub.pack(fill="x", padx=12)
+        bar = ctk.CTkFrame(w, fg_color="transparent")
+        bar.pack(fill="x", padx=10, pady=(6, 10), side="bottom")
+        self._cmp_pause = ctk.CTkButton(bar, text="", width=120, command=self._toggle_pause)
+        self._cmp_pause.pack(side="left")
+        ctk.CTkButton(bar, text="Agrandir ⤢", width=100, fg_color=BTN2, command=self._close_compact
+                      ).pack(side="right")
+        w.protocol("WM_DELETE_WINDOW", self._close_compact)
+        self.withdraw()
+        self._refresh_compact()
+
+    def _compact_geometry(self) -> str:
+        w = self._compact
+        try:
+            return w.geometry() if w is not None and w.winfo_exists() else ""
+        except tk.TclError:
+            return ""
+
+    def _close_compact(self):
+        w = self._compact
+        if w is not None and w.winfo_exists():
+            self.cfg.compact_geometry = self._compact_geometry()
+            w.destroy()
+        self._compact = None
+        self.deiconify()
+        self._apply_topmost()
+        try:
+            self.cfg.save()
+        except OSError:
+            pass
+
+    def _refresh_compact(self):
+        w = self._compact
+        if w is None or not w.winfo_exists():
+            return
+        chips = self._chip_values()
+        short = {"Calibration OK": "Calib. OK", "Calibration à faire": "Calib. à faire",
+                 "HDV introuvable": "HDV ✗"}
+        for key, lbl in self._cmp_chips.items():
+            text, color = chips[key]
+            if key == "hdv" and text not in short:
+                text = "HDV ✓" if self.hdv_state == "ok" else "HDV ?"
+            lbl.configure(text=short.get(text, text), fg_color=color)
+        head, sub, color = self.last_action
+        self._cmp_head.configure(text=head)
+        self._cmp_sub.configure(text=sub, text_color=color)
+        self._cmp_pause.configure(text="▶ Reprendre" if self.engine.paused else "⏸ Pause")
 
     # ---- mises à jour / journal
     def _on_update(self, found):
@@ -1476,7 +2113,17 @@ class App(ctk.CTk):
         self._log(f"[Erreur] {val}", "ERROR")
 
     def _on_close(self):
+        if self._compact is not None and self._compact.winfo_exists():
+            self.cfg.compact_geometry = self._compact_geometry()
+        try:
+            self.cfg.window_geometry = "zoomed" if self.state() == "zoomed" else self.geometry()
+        except tk.TclError:
+            pass
         self._apply_settings()
+        try:
+            self.cfg.save()       # taille de la fenêtre, même si un réglage était invalide
+        except OSError:
+            pass
         if KEYBOARD_AVAILABLE:
             try:
                 keyboard.unhook_all()

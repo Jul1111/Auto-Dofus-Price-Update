@@ -66,6 +66,7 @@ Tout est fait.
 - Tes propres ventes reconnues (image du nom + lot, gardées 2 jours) : Ctrl+F3 ne baisse plus tes ventes à chaque passage.
 - Raccourcis modifiables dans l'interface ; Ctrl+F3 détaille chaque ligne dans le journal.
 - Interface à onglets (Raccourcis, Prix, Mes ventes, Calibration, Options).
+- Barre d'état (pause, profil, calibration, HDV), journal filtrable avec blocs Ctrl+F3 repliables, historique des résumés, aperçu des prix, mode compact, aide au survol, taille du texte.
 - Prix relu dans « Prix du lot » avant chaque validation (F1, F2, F3) : jamais un mauvais collage validé.
 - F2 sans pause fixe : attend le changement à l'écran (compteur, quantité, tableau).
 - F1 intelligent : vend ou met à jour selon le panneau (« Mettre en vente » ou « Retirer | Modifier »).
