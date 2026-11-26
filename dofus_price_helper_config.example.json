@@ -64,6 +64,8 @@
   "TOAST": true,
   "CALIB_COUNTDOWN": 3,
   "UI_SCALE": 1.0,
+  "UI_STYLE": "classic",
+  "GLASS_OPACITY": 0.6,
   "WINDOW_GEOMETRY": "",
   "COMPACT_GEOMETRY": "",
   "HOTKEYS": {

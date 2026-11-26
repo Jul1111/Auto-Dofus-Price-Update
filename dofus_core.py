@@ -325,6 +325,8 @@ class Config:
     toast: bool = True
     calib_countdown: int = 3          # secondes avant calibration via bouton UI
     ui_scale: float = 1.0             # taille du texte / des éléments de l'interface (1.0 = 100 %)
+    ui_style: str = "classic"         # "classic" (opaque) | "glass" (flou du jeu derrière, Windows)
+    glass_opacity: float = 0.6        # teinte du verre : 0.3 (très transparent) .. 0.95 (presque opaque)
     window_geometry: str = ""         # taille et position de la fenêtre (mémorisées à la fermeture)
     compact_geometry: str = ""        # position du mode compact
 

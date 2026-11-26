@@ -62,6 +62,7 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Aperçu en direct dans l'onglet **Prix** : « Moins cher 1 000 → ton prix 999 (plancher 700) », recalculé à chaque réglage.
 - **Mode compact** (bouton 🗗 Compact) : petite fenêtre toujours au premier plan pendant le jeu, avec la dernière action, l'état et la pause.
 - Aide au survol sur les options, taille du texte réglable (onglet **Options**), taille et position de la fenêtre mémorisées.
+- Style **Verre** (onglet **Options** › Apparence) : le jeu derrière l'outil apparaît flouté, comme une vitre teintée, même pendant que vous jouez ; teinte réglable. Windows 10 (1803+) ou 11. Le style **Classique** reste opaque.
 - Profils de calibration (onglet **Calibration**) : un par HDV ou par personnage, on passe de l'un à l'autre en un clic. « Nouveau » copie le profil actuel ; il ne reste qu'à recalibrer ce qui change.
 
 ## Installation
