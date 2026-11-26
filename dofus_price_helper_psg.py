@@ -1107,7 +1107,7 @@ class App(ctk.CTk):
         if note is not None:
             if self.cfg.relist_auto:
                 note.pack_forget()
-            elif not note.winfo_ismapped():
+            elif not note.winfo_manager():
                 note.pack(fill="x", padx=6, pady=(0, 2))
 
     # ---- panneau Activité
@@ -1590,7 +1590,7 @@ class App(ctk.CTk):
             sw.configure(border_color=P["text"] if key == self._look["accent"] else P["card"])
         self._render_look_preview()
         pending = (self._look["theme"], self._look["accent"]) != (self.cfg.theme, self.cfg.accent)
-        if pending and not self.look_apply.winfo_ismapped():
+        if pending and not self.look_apply.winfo_manager():
             self.look_apply.pack(fill="x", pady=(4, 2), after=self.look_preview)
         elif not pending:
             self.look_apply.pack_forget()
@@ -2142,80 +2142,93 @@ class App(ctk.CTk):
         self.after(1000, self._unstick_keys)
 
     def _poll_ui(self):
+        """Traite les événements du fil de travail. Une erreur sur un événement est notée et
+        les suivants sont traités : avant, une seule erreur arrêtait cette boucle pour de bon
+        (interface figée : fin de « Tout vendre » jamais affichée, « Arrêt… » bloqué)."""
         try:
             while True:
-                name, arg = self.ui_events.get_nowait()
-                if name == "result":
-                    self._on_result(arg)
-                elif name == "block_start":
-                    self._block_start(arg or "relist_all")
-                elif name == "block_end":
-                    self._block_end(arg)
-                elif name == "loop_start":
-                    self._loop_start(arg)
-                elif name == "loop_progress":
-                    self._loop_progress(arg)
-                elif name == "loop_end":
-                    self._loop_end(arg)
-                elif name == "cheatsheet":
-                    self._toggle_cheatsheet()
-                elif name == "anchor":
-                    self._log(f"[Repère] {arg}", "CAL" if "recalées" in arg else "WARN")
-                    if "introuvable" in arg:
-                        self._set_hdv("lost")
-                    elif "recalées" in arg:
-                        self._set_hdv("ok")
-                    self._refresh_status()
-                elif name == "screen":
-                    self._show_screen(arg)
-                    txt = " | ".join(f"lot {l}: {fmt(r.value)} ({r.confidence:.0f}%)"
-                                     for l, r in arg.prices.items())
-                    extra = ""
-                    if self.cfg.avg_region:
-                        extra += f" | prix moyen: {fmt(arg.avg) if arg.avg else '?'}"
-                    if core.mine_regions(self.cfg):
-                        extra += f" | ton prix: {fmt(arg.mine) if arg.mine else '?'}"
-                    if self.cfg.count_region:
-                        extra += f" | lots en vente: {'%d/%d' % arg.listed if arg.listed else '?'}"
-                    dr = core.digit_reader()
-                    extra += (f" | lecture : {arg.engine or '?'} (chiffres appris "
-                              f"{len(dr.known())}/10)")
-                    self._log(f"[Test] quantité: {arg.selected or '?'} | {txt or 'rien lu'}{extra}", "INFO")
-                elif name == "calib_rect":
-                    self._on_calib_rect(*arg)
-                elif name == "calib_point":
-                    self._on_calib_point(*arg)
-                elif name == "calib_rows":
-                    self._on_calib_rows(arg)
-                elif name == "calib_auto":
-                    self._on_calib_auto(*arg)
-                elif name == "log":
-                    self._log(*arg)
-                elif name == "zones":
-                    self._show_zones()
-                elif name == "pause":
-                    self._toggle_pause()
-                elif name == "refresh":
-                    self._refresh_status()
-                elif name == "wizard_test":
-                    self._wiz_report_show(arg)
-                elif name == "wiz_zone":
-                    self._wiz_zone_show(arg)
-                elif name == "tray":
-                    self._on_tray(arg)
-                elif name == "update":
-                    self._on_update(arg)
-                elif name == "update_progress":
-                    self.update_btn.configure(text=arg)
-                elif name == "update_ready":
-                    self._on_update_ready(*arg)
-                elif name == "report":
-                    self._on_report(arg)
-                elif name == "hotkey":
-                    self._on_hotkey_captured(*arg)
-        except queue.Empty:
-            pass
-        self.after(30, self._poll_ui)
+                try:
+                    name, arg = self.ui_events.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    self._handle_ui_event(name, arg)
+                except Exception as e:
+                    import traceback
+                    core.log_line("Erreur interface :\n" + traceback.format_exc(), "ERROR")
+                    self._log(f"[Erreur] {e}", "ERROR")
+        finally:
+            self.after(30, self._poll_ui)
+
+    def _handle_ui_event(self, name, arg):
+        if name == "result":
+            self._on_result(arg)
+        elif name == "block_start":
+            self._block_start(arg or "relist_all")
+        elif name == "block_end":
+            self._block_end(arg)
+        elif name == "loop_start":
+            self._loop_start(arg)
+        elif name == "loop_progress":
+            self._loop_progress(arg)
+        elif name == "loop_end":
+            self._loop_end(arg)
+        elif name == "cheatsheet":
+            self._toggle_cheatsheet()
+        elif name == "anchor":
+            self._log(f"[Repère] {arg}", "CAL" if "recalées" in arg else "WARN")
+            if "introuvable" in arg:
+                self._set_hdv("lost")
+            elif "recalées" in arg:
+                self._set_hdv("ok")
+            self._refresh_status()
+        elif name == "screen":
+            self._show_screen(arg)
+            txt = " | ".join(f"lot {l}: {fmt(r.value)} ({r.confidence:.0f}%)"
+                             for l, r in arg.prices.items())
+            extra = ""
+            if self.cfg.avg_region:
+                extra += f" | prix moyen: {fmt(arg.avg) if arg.avg else '?'}"
+            if core.mine_regions(self.cfg):
+                extra += f" | ton prix: {fmt(arg.mine) if arg.mine else '?'}"
+            if self.cfg.count_region:
+                extra += f" | lots en vente: {'%d/%d' % arg.listed if arg.listed else '?'}"
+            dr = core.digit_reader()
+            extra += (f" | lecture : {arg.engine or '?'} (chiffres appris "
+                      f"{len(dr.known())}/10)")
+            self._log(f"[Test] quantité: {arg.selected or '?'} | {txt or 'rien lu'}{extra}", "INFO")
+        elif name == "calib_rect":
+            self._on_calib_rect(*arg)
+        elif name == "calib_point":
+            self._on_calib_point(*arg)
+        elif name == "calib_rows":
+            self._on_calib_rows(arg)
+        elif name == "calib_auto":
+            self._on_calib_auto(*arg)
+        elif name == "log":
+            self._log(*arg)
+        elif name == "zones":
+            self._show_zones()
+        elif name == "pause":
+            self._toggle_pause()
+        elif name == "refresh":
+            self._refresh_status()
+        elif name == "wizard_test":
+            self._wiz_report_show(arg)
+        elif name == "wiz_zone":
+            self._wiz_zone_show(arg)
+        elif name == "tray":
+            self._on_tray(arg)
+        elif name == "update":
+            self._on_update(arg)
+        elif name == "update_progress":
+            self.update_btn.configure(text=arg)
+        elif name == "update_ready":
+            self._on_update_ready(*arg)
+        elif name == "report":
+            self._on_report(arg)
+        elif name == "hotkey":
+            self._on_hotkey_captured(*arg)
 
     # ------------------------------------------------------------- results
     def _on_result(self, res: core.Result):
@@ -2343,9 +2356,15 @@ class App(ctk.CTk):
         if any(r and r.value is not None for r in sr.prices.values()):
             self._set_hdv("ok")
             self._mark_step("read")
-            if not self.read_grid.winfo_ismapped():
-                self.read_grid.pack(fill="x", padx=12, pady=6, before=self.read_empty)
-                self.read_empty.pack_forget()
+            # winfo_manager (placé ?) et non winfo_ismapped (visible ?) : fenêtre réduite pendant
+            # Tout vendre, le tableau déjà placé était « non visible » -> pack(before=…) sur un
+            # widget retiré -> TclError, et toute l'interface se figeait (« Arrêt… » bloqué).
+            if not self.read_grid.winfo_manager():
+                if self.read_empty.winfo_manager():
+                    self.read_grid.pack(fill="x", padx=12, pady=6, before=self.read_empty)
+                    self.read_empty.pack_forget()
+                else:
+                    self.read_grid.pack(fill="x", padx=12, pady=6)
         self.qty_var.set(str(sr.selected) if sr.selected else "?")
         for lot, var in self.read_vars.items():
             r = sr.prices.get(lot)
@@ -3078,7 +3097,7 @@ class App(ctk.CTk):
                 self.loop_pb.configure(mode="determinate")
                 self.loop_pb.set(0)
             self._pb_set(self.loop_pb, lp["frac"])
-        if not self.loop_bar.winfo_ismapped():
+        if not self.loop_bar.winfo_manager():
             self.loop_bar.pack(side="right", padx=(8, 0))
         self._refresh_compact()
 
@@ -3337,7 +3356,7 @@ class App(ctk.CTk):
                     self._cmp_pb.configure(mode="determinate")
                     self._cmp_pb.set(0)
                 self._pb_set(self._cmp_pb, lp["frac"])
-            if not self._cmp_pb.winfo_ismapped():
+            if not self._cmp_pb.winfo_manager():
                 self._cmp_pb.pack(fill="x", padx=12, pady=(4, 0))
             stopping = self.engine.stop_requested
             self._cmp_pause.configure(text="Arrêt…" if stopping else "■ Arrêter", command=self._stop_loop,
@@ -3488,12 +3507,12 @@ class App(ctk.CTk):
 
     def _show_drift(self, text: str):
         self.drift_lbl.configure(text="⚠  " + text)
-        if not self.drift_bar.winfo_ismapped():
+        if not self.drift_bar.winfo_manager():
             self.drift_bar.pack(fill="x", padx=12, pady=(0, 6))
             self._log(f"[Calib] {text}", "WARN")
 
     def _hide_drift(self):
-        if self.drift_bar.winfo_ismapped():
+        if self.drift_bar.winfo_manager():
             self.drift_bar.pack_forget()
 
     def _ignore_drift(self):
