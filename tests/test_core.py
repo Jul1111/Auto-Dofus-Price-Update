@@ -600,12 +600,24 @@ def test_relist_aligns_on_own_other_listing(relist_engine):
     assert calls == [("paste", 759), "modify", ("paste", 759), "modify"] and "aligné" in res.message
 
 
-def test_relist_unconfirmed(relist_engine):
+def test_relist_unconfirmed(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    monkeypatch.setattr(core, "RELIST_CONFIRM_WAIT", 0.05)
+    st["screens"] = [scr({1: 760})]
+    st["mine"] = [774] * 100000                    # « Modifier » sans effet, même après Entrée
+    res = eng.relist()
+    assert res.level == "warn" and "NON confirmée" in res.message and "enter" in calls
+
+
+def test_relist_waits_while_old_price_still_shown(relist_engine):
+    # Bout de Blop Coco : après « Modifier », le jeu réaffiche un instant l'ancien prix (798)
+    # puis vide le panneau : c'est une réussite, pas un arrêt de Ctrl+F3.
     eng, calls, st = relist_engine
     st["screens"] = [scr({1: 760})]
-    st["mine"] = [774, 774, 774]                   # « Modifier » sans effet, même après Entrée
+    st["mine"] = [798, 798, 798, None]
     res = eng.relist()
-    assert res.level == "warn" and "NON confirmée" in res.message
+    assert res.level == "ok" and "modifié" in res.message
+    assert calls == [("paste", 759), "modify"]     # pas d'Entrée inutile
 
 
 def test_relist_avg_guard_then_force(relist_engine):
