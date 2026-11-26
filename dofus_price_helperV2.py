@@ -146,6 +146,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     threading.Thread(target=worker, daemon=True).start()
 
+    def unstick():
+        # touches que `keyboard` croit enfoncées à tort : sans ça, plus aucun raccourci ne répond
+        while True:
+            time.sleep(1.0)
+            try:
+                freed = core.release_stuck_keys()
+            except Exception:
+                freed = []
+            if freed:
+                print(f"[Hotkeys] Touche restée « enfoncée » libérée : {', '.join(freed)}")
+
+    threading.Thread(target=unstick, daemon=True).start()
+
     def game_action(optimize: bool, all_: bool = False):
         def cb():
             if engine.paused:

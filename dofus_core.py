@@ -1370,6 +1370,52 @@ def measure_shift(before: np.ndarray, after: np.ndarray, step: int,
     return min(ds)
 
 
+def _key_down_windows(scan_code: int) -> Optional[bool]:
+    """La touche (code de balayage) est-elle physiquement enfoncée ? None = inconnu."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    vk = user32.MapVirtualKeyW(scan_code, 1)   # MAPVK_VSC_TO_VK : Ctrl/Maj/Alt sans gauche/droite
+    if not vk:
+        return None
+    return bool(user32.GetAsyncKeyState(vk) & 0x8000)
+
+
+def release_stuck_keys(kb=None, is_down=None) -> List[str]:
+    """Le module `keyboard` reconnaît un raccourci en comparant l'ensemble EXACT des touches
+    qu'il croit enfoncées. S'il rate un relâchement (Windows abandonne un événement quand
+    l'écouteur répond trop tard, pendant un calcul lourd), la touche reste « enfoncée » pour
+    lui : Ctrl+F3 devient Ctrl+F3+V et plus AUCUN raccourci ne marche, jusqu'au redémarrage.
+    On demande à Windows l'état réel et on libère les touches qui ne sont plus enfoncées.
+    Retourne les noms des touches libérées."""
+    if kb is None:
+        if not IS_WINDOWS:
+            return []
+        try:
+            import keyboard as kb
+        except Exception:
+            return []
+    is_down = is_down or _key_down_windows
+    pressed = getattr(kb, "_pressed_events", None)
+    lock = getattr(kb, "_pressed_events_lock", None)
+    if pressed is None or lock is None:
+        return []
+    freed = []
+    with lock:
+        for sc, ev in list(pressed.items()):
+            try:
+                down = is_down(sc)
+            except Exception:
+                down = None
+            if down is False:
+                del pressed[sc]
+                getattr(kb, "_logically_pressed_keys", {}).pop(sc, None)
+                listener = getattr(kb, "_listener", None)
+                if listener is not None and hasattr(listener, "active_modifiers"):
+                    listener.active_modifiers.discard(sc)
+                freed.append(str(getattr(ev, "name", None) or sc))
+    return freed
+
+
 def beep(kind: str, cfg: Config) -> None:
     if not cfg.sound or not IS_WINDOWS:
         return

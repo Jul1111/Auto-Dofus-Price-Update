@@ -138,6 +138,7 @@ class App(ctk.CTk):
 
         threading.Thread(target=self._worker, daemon=True).start()
         self._poll_ui()
+        self._unstick_keys()
 
         err = core.setup_tesseract(self.cfg)
         if err:
@@ -759,6 +760,19 @@ class App(ctk.CTk):
             if msg:
                 self.ui_events.put(("log", (f"[Repère] {msg}", "CAL" if "recalées" in msg else "WARN")))
                 self.ui_events.put(("refresh", None))
+
+    def _unstick_keys(self):
+        """Toutes les secondes : touches que `keyboard` croit enfoncées à tort -> libérées
+        (sinon plus aucun raccourci ne répond, jusqu'au redémarrage)."""
+        if KEYBOARD_AVAILABLE and not self._capturing:
+            try:
+                freed = core.release_stuck_keys()
+            except Exception:
+                freed = []
+            if freed:
+                self._log(f"[Hotkeys] Touche restée « enfoncée » libérée : {', '.join(freed)} "
+                          "(les raccourcis remarchent).", "WARN")
+        self.after(1000, self._unstick_keys)
 
     def _poll_ui(self):
         try:
