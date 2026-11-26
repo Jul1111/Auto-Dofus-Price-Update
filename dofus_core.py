@@ -1496,6 +1496,11 @@ def field_check(cfg: Config, expected: int, tries: int = FIELD_TRIES) -> Tuple[b
         second = read_mine(cfg, tesseract_only=True)
         if second.value == expected and second.confidence >= 80:
             print(f"[Champ] Lecture rapide {got} corrigée par Tesseract : {expected}.")
+            img = mine_field_image(cfg)
+            if img is not None:
+                n = digit_reader().correct(img, str(expected))
+                if n:
+                    print(f"[Chiffres] {n} modèle(s) faux retiré(s) (ils faisaient lire {got}).")
             return True, expected
     save_field_debug(cfg, f"attendu{expected}_lu{got}")
     return False, got
