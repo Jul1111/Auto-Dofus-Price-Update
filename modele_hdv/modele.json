@@ -1,0 +1,173 @@
+{
+  "info": "Dofus 3, interface en français. Capture 2560x1440, interface 90 %.",
+  "header": {
+    "file": "entete.png",
+    "at": [
+      -33,
+      -10
+    ]
+  },
+  "row_step": 49.6,
+  "landmarks": {
+    "prix_du_lot": {
+      "file": "prix_du_lot.png",
+      "at": [
+        -280,
+        144
+      ],
+      "search": [
+        10,
+        10
+      ]
+    },
+    "quantite": {
+      "file": "quantite.png",
+      "at": [
+        -280,
+        200
+      ],
+      "search": [
+        10,
+        10
+      ]
+    },
+    "prix_moyen": {
+      "file": "prix_moyen.png",
+      "at": [
+        -280,
+        305
+      ],
+      "search": [
+        10,
+        10
+      ]
+    },
+    "actuellement": {
+      "file": "actuellement.png",
+      "at": [
+        -280,
+        403
+      ],
+      "search": [
+        10,
+        10
+      ]
+    },
+    "nom": {
+      "file": "nom.png",
+      "at": [
+        -7,
+        124
+      ],
+      "search": [
+        10,
+        10
+      ]
+    },
+    "lots_en_vente": {
+      "file": "lots_en_vente.png",
+      "at": [
+        -3,
+        670
+      ],
+      "search": [
+        80,
+        10
+      ]
+    }
+  },
+  "zones": {
+    "anchor_region": {
+      "value": [
+        0,
+        0,
+        149,
+        16
+      ],
+      "x": null,
+      "y": null
+    },
+    "name_region": {
+      "value": [
+        -218,
+        82,
+        131,
+        32
+      ],
+      "x": "prix_du_lot",
+      "y": "prix_du_lot"
+    },
+    "price_field": {
+      "value": [
+        -224,
+        177
+      ],
+      "x": "prix_du_lot",
+      "y": "prix_du_lot"
+    },
+    "qty_region": {
+      "value": [
+        -273,
+        225,
+        81,
+        17
+      ],
+      "x": "quantite",
+      "y": "quantite"
+    },
+    "avg_region": {
+      "value": [
+        -278,
+        328,
+        80,
+        18
+      ],
+      "x": "prix_moyen",
+      "y": "prix_moyen"
+    },
+    "sell_button": {
+      "value": [
+        -238,
+        365
+      ],
+      "x": "prix_moyen",
+      "y": "prix_moyen"
+    },
+    "modify_button": {
+      "value": [
+        -125,
+        369
+      ],
+      "x": "prix_moyen",
+      "y": "prix_moyen"
+    },
+    "table_region": {
+      "value": [
+        -241,
+        462,
+        155,
+        125
+      ],
+      "x": "actuellement",
+      "y": "actuellement"
+    },
+    "relist_row": {
+      "value": [
+        196,
+        172
+      ],
+      "x": "nom",
+      "y": "nom"
+    },
+    "count_region": {
+      "value": [
+        -56,
+        669,
+        144,
+        18
+      ],
+      "x": "nom",
+      "y": "lots_en_vente"
+    }
+  }
+}

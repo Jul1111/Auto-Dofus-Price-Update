@@ -80,6 +80,7 @@
     "calibrate_rows": "ctrl+alt+f9",
     "calibrate_anchor": "ctrl+alt+f10",
     "calibrate_name": "ctrl+alt+f11",
+    "calibrate_auto": "ctrl+alt+f12",
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
     "quit": "ctrl+alt+q"

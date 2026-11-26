@@ -234,6 +234,7 @@ DEFAULT_HOTKEYS = {
     "calibrate_rows": "ctrl+alt+f9",   # 2 appuis : 1re ligne puis 2e ligne de la liste de tes ventes
     "calibrate_anchor": "ctrl+alt+f10",  # 2 appuis : titre « Hôtel de vente » (les zones suivent l'HDV)
     "calibrate_name": "ctrl+alt+f11",    # 2 appuis : nom de l'objet (optionnel, sinon déduit)
+    "calibrate_auto": "ctrl+alt+f12",    # calibration automatique (HDV ouvert, onglet Vente)
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
     "quit": "ctrl+alt+q",
@@ -1503,7 +1504,9 @@ def detect_panel(cfg: Config) -> Optional[str]:
             runs.append((start, i))
             start = None
     for a, b in runs:
-        if 2 <= b - a <= 15 and a > 0 and b < len(line) and line[a - 1] >= 55 and line[b] >= 55:
+        # bords du creux : 2 px de tolérance (image adoucie quand le jeu est mis à l'échelle)
+        if (2 <= b - a <= 15 and a > 0 and b < len(line)
+                and line[max(0, a - 2):a].max() >= 55 and line[b:b + 2].max() >= 55):
             return "relist"
     return "sell"
 
@@ -1879,6 +1882,19 @@ class PriceEngine:
         cfg.save()
         self.last_anchor_msg = f"HDV déplacé de ({dx:+d}, {dy:+d}) px : zones recalées."
         return dx, dy
+
+    def calibrate_auto(self):
+        """Trouve l'HDV à l'écran et place TOUTES les zones du profil actif (dofus_autocal).
+        Ne change rien si l'HDV n'est pas reconnu. Retourne le résultat (AutoCal)."""
+        import dofus_autocal
+        with self._lock:
+            sx, sy, sw, sh = screen_bounds()
+            screen = grab_screen((sx, sy, sw, sh))
+            res = dofus_autocal.locate(screen, (sx, sy))
+            if res.ok:
+                dofus_autocal.apply(self.cfg, res, screen, (sx, sy))
+                self.cfg.save()
+            return res
 
     def calibrate_point(self, name: str, pos: Optional[Point] = None) -> Point:
         """name = "price_field" | "sell_button" | "modify_button"."""

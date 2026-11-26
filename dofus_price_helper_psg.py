@@ -68,6 +68,7 @@ HOTKEY_LABELS = {
     "relist_all": "Toute la liste (interrupteur dans « Mes ventes »)",
     "pause": "Pause / reprise (arrête aussi les boucles)",
     "show_zones": "Afficher les zones calibrées",
+    "calibrate_auto": "Calibration automatique (HDV ouvert, onglet Vente)",
     "calibrate_anchor": "Repère : titre « Hôtel de vente » (×2)",
     "calibrate_table": "Tableau « Actuellement en vente » (×2)",
     "calibrate_qty": "Menu « Quantité » (×2)",
@@ -481,6 +482,18 @@ class App(ctk.CTk):
                       ).pack(side="left", padx=(8, 4))
         ctk.CTkButton(r, text="Supprimer", width=90, fg_color=BTN2, command=self._delete_profile
                       ).pack(side="left", padx=4)
+        ab = self._section(page, "Calibration automatique",
+                           "Ouvre l'HDV sur l'onglet « Vente » avec une de tes ventes (ou un objet) "
+                           "sélectionnée, bien visible, puis clique : l'outil trouve l'HDV et place toutes "
+                           "les zones, quelles que soient la résolution et l'échelle de l'interface. "
+                           "Fonctionne avec Dofus 3 en français, sur la même version du jeu que le "
+                           "modèle de l'outil : sinon, calibration manuelle ci-dessous.")
+        r = self._row(ab)
+        ctk.CTkButton(r, text="✨ Calibration automatique", width=220,
+                      command=lambda: self._countdown("automatique", self._calib_auto_ui)
+                      ).pack(side="left")
+        self._hk_label(r, "calibrate_auto", text_color=MUTED,
+                       font=ctk.CTkFont(family="Consolas")).pack(side="left", padx=10)
         top = self._section(page, "Assistant", "Pas à pas, avec une vérification à la fin. Conseillé la "
                                                "première fois ou après un changement d'interface.")
         ctk.CTkButton(top, text="🧭 Ouvrir l'assistant de calibration", width=260,
@@ -799,6 +812,7 @@ class App(ctk.CTk):
             keyboard.add_hotkey(hk["calibrate_rows"], lambda: self.jobs.put(("calib_rows", None)))
             keyboard.add_hotkey(hk["calibrate_anchor"], lambda: self.jobs.put(("calib_rect", "anchor")))
             keyboard.add_hotkey(hk["calibrate_name"], lambda: self.jobs.put(("calib_rect", "name")))
+            keyboard.add_hotkey(hk["calibrate_auto"], lambda: self.jobs.put(("calib_auto", None)))
             keyboard.add_hotkey(hk["calibrate_table"], lambda: self.jobs.put(("calib_rect", "table")))
             keyboard.add_hotkey(hk["calibrate_qty"], lambda: self.jobs.put(("calib_rect", "qty")))
             keyboard.add_hotkey(hk["calibrate_avg"], lambda: self.jobs.put(("calib_rect", "avg")))
@@ -848,6 +862,9 @@ class App(ctk.CTk):
                     self.ui_events.put(("calib_rect", (arg, self.engine.calibrate_rect(arg))))
                 elif name == "calib_point":
                     self.ui_events.put(("calib_point", (arg, self.engine.calibrate_point(arg))))
+                elif name == "calib_auto":
+                    res = self.engine.calibrate_auto()
+                    self.ui_events.put(("calib_auto", (res, self._wizard_checks() if res.ok else [])))
             except Exception as e:
                 self.ui_events.put(("log", (f"[Erreur] {e}", "ERROR")))
             msg, self.engine.last_anchor_msg = self.engine.last_anchor_msg, ""
@@ -895,6 +912,8 @@ class App(ctk.CTk):
                     self._on_calib_point(*arg)
                 elif name == "calib_rows":
                     self._on_calib_rows(arg)
+                elif name == "calib_auto":
+                    self._on_calib_auto(*arg)
                 elif name == "log":
                     self._log(*arg)
                 elif name == "zones":
@@ -1315,7 +1334,8 @@ class App(ctk.CTk):
             self._refresh_status()
             action()
             return
-        self.status_var.set(f"Calibration {label} dans {n}s… place la souris !")
+        todo = "affiche l'HDV !" if label == "automatique" else "place la souris !"
+        self.status_var.set(f"Calibration {label} dans {n}s… {todo}")
         self.after(1000, lambda: self._countdown(label, action, n - 1))
 
     def _calib_rect_ui(self, name: str, label: str):
@@ -1362,6 +1382,25 @@ class App(ctk.CTk):
             self._log(f"[Calib] Lignes : 1re ligne {val[0]}, hauteur {val[1]} px "
                       f"({self.cfg.relist_rows} lignes visibles, RELIST_ROWS)", "CAL")
         self._refresh_status()
+
+    def _calib_auto_ui(self):
+        if self._busy():
+            return
+        self._log("[Calib auto] Recherche de l'HDV à l'écran…", "CAL")
+        self.jobs.put(("calib_auto", None))
+
+    def _on_calib_auto(self, res, checks: list):
+        self._log(f"[Calib auto] {res.message}", "CAL" if res.ok else "ERROR")
+        if not res.ok:
+            return
+        for line in checks:
+            self._log("   " + line, "OK" if line.startswith("✓") else
+                      "WARN" if line[:1] in "⚠–•" else "ERROR")
+        self._log("[Calib auto] Vérifie avec « Voir zones » ; une zone mal placée se recalibre "
+                  "individuellement ci-dessous.", "CAL")
+        self._sync_vars_from_cfg()
+        self._refresh_status()
+        self._show_zones(4000)
 
     def _calib_point(self, name: str):
         self._on_calib_point(name, self.engine.calibrate_point(name))

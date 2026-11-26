@@ -20,6 +20,11 @@ Tout est fait.
 - Avant chaque action, l'outil vérifie que le titre est toujours à sa place (~1 ms). S'il a bougé, il le retrouve sur tout l'écran (~20 ms) et décale toutes les zones et tous les points d'autant.
 - Limite : suit un déplacement, pas un changement de taille d'interface (dans ce cas, recalibrer).
 
+### 3. Calibration automatique — ✅ FAIT
+- Un clic (ou Ctrl+Alt+F12), HDV ouvert sur l'onglet Vente : l'outil trouve l'HDV à l'écran à n'importe quelle taille (résolution, échelle de l'interface) et place toutes les zones.
+- Modèle de l'HDV (`modele_hdv/`, généré par `packaging/build_hdv_model.py`) : position de chaque zone par rapport au titre, mesurée sur une capture 2560 x 1440 à 90 %. Vérifié sur 1920 x 1080, 1920 x 1200 et 2560 x 1440 à 80 / 90 / 100 % : l'HDV grandit d'un bloc, à 5 px près ; les textes fixes (« Prix du lot », « PRIX MOYEN »…) rattrapent ces écarts.
+- Limite : Dofus 3 en **français**, même version du jeu que le modèle. Si une mise à jour change l'HDV, refaire une capture de référence et relancer le script.
+
 ---
 
 ## 💰 Stratégie de prix
