@@ -63,6 +63,9 @@
   "SOUND": true,
   "TOAST": true,
   "CALIB_COUNTDOWN": 3,
+  "UI_SCALE": 1.0,
+  "WINDOW_GEOMETRY": "",
+  "COMPACT_GEOMETRY": "",
   "HOTKEYS": {
     "sell": "f1",
     "sell_all": "f2",

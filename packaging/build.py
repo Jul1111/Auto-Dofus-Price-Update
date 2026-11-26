@@ -38,7 +38,7 @@ ou plus récent est déjà installé sur le PC, c'est lui qui est utilisé.
 
 Calibration : ouvre l'HDV sur l'onglet Vente, puis onglet Calibration -> « Calibration
 automatique » (ou Ctrl+Alt+F12 en jeu). Fonctionne avec Dofus 3 en français, sur la même
-version du jeu que le modèle de l'outil ; sinon, calibration manuelle (assistant).
+version du jeu que le modèle de l'outil ; sinon, calibration manuelle (section « Avancé » : assistant).
 
 Réglages, calibration et historique : %APPDATA%\\Dofus Price Helper
 Ils sont gardés quand tu passes à une nouvelle version (nouveau zip, nouveau dossier).
