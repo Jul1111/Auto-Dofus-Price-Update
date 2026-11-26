@@ -242,6 +242,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     keyboard.add_hotkey(hk["calibrate_name"], lambda: calib_rect("name"))
     keyboard.add_hotkey(hk["calibrate_modify"], lambda: calib_point("modify_button"))
     keyboard.add_hotkey(hk["calibrate_rows"], calib_rows)
+
+    def calib_auto():
+        res = engine.calibrate_auto()
+        print(f"[Calib auto] {res.message}")
+
+    keyboard.add_hotkey(hk["calibrate_auto"], lambda: threading.Thread(target=calib_auto, daemon=True).start())
     keyboard.add_hotkey(hk["pause"], toggle_pause)
     keyboard.add_hotkey("ctrl+shift+p", print_all)
 

@@ -36,6 +36,10 @@ Lancement : double-clic sur DofusPriceHelper.exe (garder le dossier _internal à
 Rien d'autre à installer : Tesseract (lecture des chiffres) est inclus. Si un Tesseract 5
 ou plus récent est déjà installé sur le PC, c'est lui qui est utilisé.
 
+Calibration : ouvre l'HDV sur l'onglet Vente, puis onglet Calibration -> « Calibration
+automatique » (ou Ctrl+Alt+F12 en jeu). Fonctionne avec Dofus 3 en français, sur la même
+version du jeu que le modèle de l'outil ; sinon, calibration manuelle (assistant).
+
 Réglages, calibration et historique : %APPDATA%\\Dofus Price Helper
 Ils sont gardés quand tu passes à une nouvelle version (nouveau zip, nouveau dossier).
 Nouvelle version : l'outil le signale au démarrage (bouton vert en haut).
@@ -169,6 +173,7 @@ def main() -> int:
     # analysées et dupliquées à la racine (~35 Mo de plus).
     shutil.copytree(tess, internal / "tesseract")
     shutil.copy2(BUILD / "version.txt", internal / "version.txt")
+    shutil.copytree(ROOT / "modele_hdv", internal / "modele_hdv")   # calibration automatique
     # Module vidéo d'OpenCV (~40 Mo) : inutile, l'outil ne lit que des captures d'écran.
     for f in internal.glob("cv2/opencv_videoio_ffmpeg*.dll"):
         f.unlink()

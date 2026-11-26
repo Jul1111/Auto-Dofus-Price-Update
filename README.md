@@ -51,6 +51,7 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Attente des changements à l'écran plutôt que des pauses fixes.
 
 **Ergonomie**
+- **Calibration automatique** : HDV ouvert, un clic (ou `Ctrl+Alt+F12`) et toutes les zones sont placées, quelles que soient la résolution et l'échelle de l'interface. Fonctionne avec **Dofus 3 en français**, sur la même version du jeu que le modèle de l'outil ; sinon, la calibration manuelle reste disponible.
 - Assistant de calibration pas à pas, avec vérification finale.
 - Zones qui suivent la fenêtre de l'HDV lorsqu'elle est déplacée.
 - Bandeau de résultat au-dessus de l'HDV et fenêtre toujours au premier plan.
@@ -114,6 +115,8 @@ python dofus_price_helperV2.py --help
 
 ### Première calibration
 
+Le plus simple : ouvre l'HDV sur l'onglet **Vente**, sélectionne une de tes ventes (ou un objet de l'inventaire), puis clique **Calibration automatique** dans l'onglet **Calibration** (ou `Ctrl+Alt+F12` en jeu). L'outil trouve l'HDV, place toutes les zones et lance un test de lecture ; vérifie ensuite avec **Voir zones**. Cela fonctionne avec Dofus 3 **en français** et la même version du jeu que le modèle de l'outil : si l'HDV n'est pas reconnu (autre langue, interface modifiée par une mise à jour), utilise la calibration manuelle ci-dessous.
+
 Au premier lancement, l'assistant de calibration s'ouvre automatiquement (sinon : onglet **Calibration**, puis **Ouvrir l'assistant de calibration**). Il décrit chaque zone à sélectionner dans le jeu et termine par un test de lecture complet.
 
 | Zone | Statut |
@@ -139,7 +142,7 @@ Au premier lancement, l'assistant de calibration s'ouvre automatiquement (sinon 
 | `Ctrl+Alt+P` | Pause et reprise, arrêt des boucles |
 | `Ctrl+Alt+V` | Afficher les zones calibrées |
 
-Les raccourcis de calibration (`Ctrl+Alt+F1` à `Ctrl+Alt+F11`) sont listés dans l'onglet **Calibration**. Tous les raccourcis se changent dans l'onglet **Raccourcis**.
+Les raccourcis de calibration (`Ctrl+Alt+F1` à `Ctrl+Alt+F12`) sont listés dans l'onglet **Calibration**. Tous les raccourcis se changent dans l'onglet **Raccourcis**.
 
 ## Sécurité des prix
 
