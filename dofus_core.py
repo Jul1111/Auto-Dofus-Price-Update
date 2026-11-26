@@ -237,6 +237,7 @@ DEFAULT_HOTKEYS = {
     "calibrate_auto": "ctrl+alt+f12",    # calibration automatique (HDV ouvert, onglet Vente)
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
+    "cheatsheet": "ctrl+alt+h",      # aide-mémoire des touches par-dessus le jeu
     "quit": "ctrl+alt+q",
 }
 
@@ -330,6 +331,8 @@ class Config:
     glass_opacity: float = 0.6        # teinte du verre : 0.3 (très transparent) .. 0.95 (presque opaque)
     window_geometry: str = ""         # taille et position de la fenêtre (mémorisées à la fermeture)
     compact_geometry: str = ""        # position du mode compact
+    notify: bool = True               # notification Windows à la fin d'un long F2 / Ctrl+F3 (outil en arrière-plan)
+    first_steps: List[str] = field(default_factory=list)   # premiers pas faits : "read", "sell"
 
     hotkeys: Dict = field(default_factory=lambda: _copy(DEFAULT_HOTKEYS))
 
@@ -2223,6 +2226,8 @@ class PriceEngine:
         self._first_point: Dict[str, Tuple[Point, float]] = {}
         self.my_prices = MyPrices(MY_PRICES_PATH)   # tes ventes : pas d'undercut contre toi-même
         self.progress = None   # Ctrl+F3 : appelé avec le Result de chaque ligne (journal en direct)
+        self.on_loop_progress = None   # Ctrl+F3 : appelé avec un dict (ligne, faites, modifiées, à revoir, total)
+        self.stop_requested = False    # bouton « Arrêter » : finit la boucle en cours sans mettre en pause
         self.last_anchor_msg = ""  # dernier message du repère HDV (lu puis vidé par l'interface)
         self._autocal_failed = 0.0  # heure du dernier échec de recalibration automatique
         self.timing: Dict[str, float] = {}   # Ctrl+F3 : temps total par étape (s)
@@ -2688,6 +2693,22 @@ class PriceEngine:
         self.timing = {}
         t_start = time.perf_counter()
         stop = "fin de la liste"
+        self.stop_requested = False
+        total = None                  # nombre de tes ventes (« 21/100 lots en vente »), si calibré
+        if cfg.count_region and self.on_loop_progress:
+            try:
+                c = read_counter(cfg)
+                total = c[0] if c else None
+            except Exception:
+                total = None
+
+        def report(row=None, finished=False):
+            if self.on_loop_progress:
+                try:
+                    self.on_loop_progress({"row": row, "done": done + skipped, "changed": changed,
+                                           "bad": len(bad), "total": total, "finished": finished})
+                except Exception:
+                    pass
         try:
             while True:
                 restart = True
@@ -2697,9 +2718,10 @@ class PriceEngine:
                     for y, g in rows:
                         if g <= seen:
                             continue
-                        if self.paused:
-                            stop = "pause"
+                        if self.paused or self.stop_requested:
+                            stop = "pause" if self.paused else "arrêt demandé"
                             raise StopIteration
+                        report(g + 1)
                         if done >= cfg.relist_max:
                             stop = f"limite {cfg.relist_max} lignes"
                             raise StopIteration
@@ -2777,6 +2799,7 @@ class PriceEngine:
         except StopIteration:
             pass
         finally:
+            report(finished=True)
             try:
                 import pyautogui
                 # Arrêt en cours de route : souris laissée sur la dernière ligne traitée,
@@ -2833,6 +2856,7 @@ class PriceEngine:
         if base and base[0] >= base[1]:
             return Result(None, "error", f"[TOUT] Plus de place : {base[0]}/{base[1]} lots en vente.",
                           hint="HDV plein")
+        self.stop_requested = False
         watch = [tuple(r) for r in (cfg.count_region, cfg.qty_region, cfg.table_region) if r]
         snap = lambda: [grab_screen(r) for r in watch]
         before = snap()
@@ -2861,8 +2885,8 @@ class PriceEngine:
                 unverified = True
             if n >= cfg.sell_all_max:
                 break
-            if self.paused:
-                stop = "pause"
+            if self.paused or self.stop_requested:
+                stop = "pause" if self.paused else "arrêt demandé"
                 break
             sr = read_screen(cfg, self.debug_dir)
             if sr.selected is None:

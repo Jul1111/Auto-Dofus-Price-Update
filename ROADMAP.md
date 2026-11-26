@@ -70,6 +70,7 @@ Tout est fait.
 - Interface à onglets (Raccourcis, Prix, Mes ventes, Calibration, Options).
 - Barre d'état (pause, profil, calibration, HDV), journal filtrable avec blocs Ctrl+F3 repliables, historique des résumés, aperçu des prix, mode compact, aide au survol, taille du texte.
 - Nouveau thème (palette, police Segoe UI, cartes) et style « Verre » : flou du jeu derrière l'outil, teinte réglable.
+- Onglet Accueil, panneau Activité, progression avec bouton Arrêter, aide-mémoire en jeu, notification Windows, popups au style de l'outil.
 - Prix relu dans « Prix du lot » avant chaque validation (F1, F2, F3) : jamais un mauvais collage validé.
 - F2 sans pause fixe : attend le changement à l'écran (compteur, quantité, tableau).
 - F1 intelligent : vend ou met à jour selon le panneau (« Mettre en vente » ou « Retirer | Modifier »).

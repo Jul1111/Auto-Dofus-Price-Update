@@ -73,6 +73,7 @@ HOTKEY_LABELS = {
     "relist_all": "Toute la liste (interrupteur dans « Mes ventes »)",
     "pause": "Pause / reprise (arrête aussi les boucles)",
     "show_zones": "Afficher les zones calibrées",
+    "cheatsheet": "Aide-mémoire des touches par-dessus le jeu",
     "calibrate_auto": "Calibration automatique (HDV ouvert, onglet Vente)",
     "calibrate_anchor": "Repère : titre « Hôtel de vente » (×2)",
     "calibrate_table": "Tableau « Actuellement en vente » (×2)",
@@ -244,6 +245,102 @@ def geometry_on_screen(geom: str, bounds) -> bool:
     return w >= 200 and h >= 120 and sx - w + 80 <= x <= sx + sw - 80 and sy <= y <= sy + sh - 40
 
 
+# ---------------------------------------------------------------- fenêtres flottantes au style de l'outil
+POPUP_KEY = "#010203"   # couleur rendue transparente : coins arrondis des fenêtres flottantes
+
+
+def rounded_popup(master, radius: int = 12, alpha: float = 0.97, border: str = None):
+    """Fenêtre flottante sans bord (popup, bandeau, bulle d'aide) : une carte arrondie avec une
+    bordure fine, aux couleurs de l'outil. Retourne (fenêtre, carte) ; mettre le contenu dans la carte."""
+    t = tk.Toplevel(master)
+    t.overrideredirect(True)
+    t.attributes("-topmost", True)
+    t.configure(bg=POPUP_KEY)
+    try:
+        t.attributes("-transparentcolor", POPUP_KEY)   # Windows : coins vraiment arrondis
+    except tk.TclError:
+        t.configure(bg=P["card"])
+    try:
+        t.attributes("-alpha", alpha)
+    except tk.TclError:
+        pass
+    card = ctk.CTkFrame(t, fg_color=P["card"], corner_radius=radius, border_width=1,
+                        border_color=border or P["border"])
+    card.pack()
+    return t, card
+
+
+# ---------------------------------------------------------------- panneau « Activité »
+ACTION_KINDS = (("[MAJ TOUT]", "Toute la liste"), ("[TOUT]", "Tout vendre"), ("[VENTE]", "Vente"),
+                ("[OPT]", "Meilleur lot"), ("[MAJ]", "Mise à jour"))
+
+
+def action_entry(res, when: float = None) -> dict:
+    """Une ligne du panneau Activité à partir du résultat d'une action."""
+    msg = res.message.lstrip()
+    kind = next((label for prefix, label in ACTION_KINDS if msg.startswith(prefix)), "Action")
+    if msg.startswith("[MAJ TOUT]"):
+        text = kind
+    elif res.old_price and res.new_price is not None and res.old_price != res.new_price:
+        text = f"{kind} · lot {res.lot or '?'} : {fmt(res.old_price)} → {fmt(res.new_price)}"
+    elif res.new_price is not None:
+        text = f"{kind} · lot {res.lot or '?'} → {fmt(res.new_price)}"
+    else:
+        text = kind + (f" · lot {res.lot}" if res.lot else "")
+    return {"time": time.strftime("%H:%M", time.localtime(when or time.time())), "text": text,
+            "hint": res.hint or {"ok": "ok", "warn": "à vérifier", "error": "erreur"}.get(res.level, ""),
+            "level": res.level}
+
+
+# ---------------------------------------------------------------- progression des boucles (F2, Ctrl+F3)
+def progress_text(d: dict) -> tuple:
+    """(texte, fraction 0..1 ou None si le total est inconnu) pour la barre de progression."""
+    row, total = d.get("row"), d.get("total")
+    parts = [f"Ligne {row}" + (f" / {total}" if total else "") if row else "Démarrage…"]
+    if d.get("changed"):
+        parts.append(f"{d['changed']} modifiée{'s' if d['changed'] > 1 else ''}")
+    if d.get("bad"):
+        parts.append(f"{d['bad']} à revoir")
+    frac = min(1.0, max(0.0, row / total)) if row and total else None
+    return " · ".join(parts), frac
+
+
+LONG_LOOP_S = 20   # s : au-delà, une notification Windows signale la fin (outil en arrière-plan)
+
+
+def windows_notify(title: str, body: str) -> bool:
+    """Notification Windows (centre de notifications), sans dépendance : passe par PowerShell.
+    Le texte passe par des variables d'environnement (jamais interprété comme du code)."""
+    import os
+    import subprocess
+    import sys
+    if sys.platform != "win32":
+        return False
+    script = (
+        "$ErrorActionPreference='Stop';"
+        "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]>$null;"
+        "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime]>$null;"
+        "$t=[Security.SecurityElement]::Escape($env:DPH_TITLE);$b=[Security.SecurityElement]::Escape($env:DPH_BODY);"
+        "$x=New-Object Windows.Data.Xml.Dom.XmlDocument;"
+        "$x.LoadXml(\"<toast><visual><binding template='ToastGeneric'><text>$t</text><text>$b</text>"
+        "</binding></visual></toast>\");"
+        r"$app='{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe';"
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show("
+        "[Windows.UI.Notifications.ToastNotification]::new($x))")
+    env = dict(os.environ, DPH_TITLE=title, DPH_BODY=body)
+    try:
+        subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                          "-Command", script], env=env, creationflags=0x08000000,   # CREATE_NO_WINDOW
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------- accueil : premiers pas
+FIRST_STEPS = (("calib", "Calibrer l'HDV"), ("read", "Tester une lecture"), ("sell", "Première vente"))
+
+
 class Tooltip:
     """Aide au survol : petite bulle après une demi-seconde sur le widget."""
 
@@ -277,11 +374,9 @@ class Tooltip:
             x, y = self.widget.winfo_pointerx() + 14, self.widget.winfo_pointery() + 18
         except tk.TclError:
             return
-        t = tk.Toplevel(self.widget)
-        t.overrideredirect(True)
-        t.attributes("-topmost", True)
-        tk.Label(t, text=self.text, bg=P["card2"], fg=P["text"], justify="left", wraplength=360,
-                 font=(style.FONT, 9), padx=8, pady=5, relief="solid", borderwidth=1).pack()
+        t, card = rounded_popup(self.widget, radius=8)
+        ctk.CTkLabel(card, text=self.text, justify="left", wraplength=340, text_color=P["text"],
+                     font=ctk.CTkFont(size=12)).pack(padx=10, pady=6)
         t.geometry(f"+{x}+{y}")
         self._tip = t
 
@@ -310,6 +405,7 @@ class App(ctk.CTk):
         self.engine = core.PriceEngine(self.cfg)
         self.engine.progress = lambda r: self.ui_events.put(
             ("log", ("   " + r.message, {"warn": "WARN", "error": "ERROR"}.get(r.level, "OK"))))
+        self.engine.on_loop_progress = lambda d: self.ui_events.put(("loop_progress", d))
         self.jobs: "queue.Queue[tuple]" = queue.Queue()
         self.ui_events: "queue.Queue[tuple]" = queue.Queue()
         self._save_after: Optional[str] = None
@@ -325,6 +421,9 @@ class App(ctk.CTk):
         self.hdv_state: Optional[str] = None   # None (pas encore lu) | "ok" | "lost"
         self.last_action = ("En attente d'une action…", "", MUTED)
         self._compact = None
+        self._loop: Optional[dict] = None   # boucle en cours (F2 / Ctrl+F3) : type, début
+        self.activity: list = []             # panneau Activité : dernières actions (récentes d'abord)
+        self._cheat = None                   # aide-mémoire affiché par-dessus le jeu
 
         self._build_vars()
         self._build_ui()
@@ -427,6 +526,7 @@ class App(ctk.CTk):
             "smart_f1": ctk.BooleanVar(value=c.smart_f1),
             "always_on_top": ctk.BooleanVar(value=c.always_on_top),
             "check_updates": ctk.BooleanVar(value=c.check_updates),
+            "notify": ctk.BooleanVar(value=c.notify),
         }
         for var in self.v.values():
             var.trace_add("write", lambda *_: self._schedule_save())
@@ -547,14 +647,20 @@ class App(ctk.CTk):
             lbl.bind("<Button-1>", lambda _e, a=action: a(), add="+")
             self._tip(lbl, tip)
             self.chips[key] = lbl
-        self._tip(ctk.CTkButton(head, text="Voir zones", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._show_zones),
-                  "Affiche un instant les zones calibrées par-dessus le jeu.").pack(side="right", padx=(4, 12))
-        self._tip(ctk.CTkButton(head, text="Lire (test)", width=90, fg_color=BTN2, hover_color=BTN2_HOVER,
-                                command=lambda: self.jobs.put(("read", None))),
-                  "Lit l'HDV une fois sans rien vendre : résultat dans le journal.").pack(side="right", padx=4)
+        # progression d'une boucle (F2 / Ctrl+F3), affichée seulement pendant la boucle
+        self.loop_bar = ctk.CTkFrame(info, fg_color=CARD, corner_radius=13, border_width=1,
+                                     border_color=P["border"])
+        self.loop_lbl = ctk.CTkLabel(self.loop_bar, text="", font=ctk.CTkFont(size=12, weight="bold"))
+        self.loop_lbl.pack(side="left", padx=(12, 8))
+        self.loop_pb = ctk.CTkProgressBar(self.loop_bar, width=140, height=8, progress_color=P["accent"])
+        self.loop_pb.pack(side="left", padx=4)
+        self.loop_stop = ctk.CTkButton(self.loop_bar, text="■ Arrêter", width=84, height=24,
+                                       fg_color=style.CHIP["red"][0], hover_color="#5a2730",
+                                       text_color=P["red"], command=self._stop_loop)
+        self.loop_stop.pack(side="left", padx=(8, 4), pady=3)
         self._tip(ctk.CTkButton(head, text="🗗 Compact", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._open_compact),
                   "Petite fenêtre toujours au premier plan pendant que tu joues : dernière action, état, "
-                  "pause.").pack(side="right", padx=4)
+                  "pause.").pack(side="right", padx=(4, 12))
         self._tip(ctk.CTkCheckBox(head, text="📌", variable=self.v["always_on_top"], width=44),
                   "Fenêtre de l'outil toujours au-dessus du jeu.").pack(side="right", padx=(8, 2))
         self.pause_btn = ctk.CTkButton(head, text="⏸ Pause", width=90, command=self._toggle_pause)
@@ -566,45 +672,62 @@ class App(ctk.CTk):
         tabs = ctk.CTkTabview(self, anchor="nw", fg_color="transparent", corner_radius=12)
         tabs.grid(row=1, column=0, sticky="nsew", padx=(8, 4), pady=(0, 4))
         self.tabs = tabs
-        for name in ("Raccourcis", "Prix", "Mes ventes", "Calibration", "Options"):
+        for name in ("Accueil", "Prix", "Mes ventes", "Calibration", "Raccourcis", "Options"):
             tabs.add(name)
+        tabs.set("Accueil")
+        self._tab_home(ctk.CTkScrollableFrame(tabs.tab("Accueil"), fg_color="transparent"), hk)
         self._tab_shortcuts(ctk.CTkScrollableFrame(tabs.tab("Raccourcis"), fg_color="transparent"), hk)
         self._tab_prices(ctk.CTkScrollableFrame(tabs.tab("Prix"), fg_color="transparent"))
         self._tab_relist(ctk.CTkScrollableFrame(tabs.tab("Mes ventes"), fg_color="transparent"), hk)
         self._tab_calibration(ctk.CTkScrollableFrame(tabs.tab("Calibration"), fg_color="transparent"))
         self._tab_options(ctk.CTkScrollableFrame(tabs.tab("Options"), fg_color="transparent"))
 
-        # ---------------- dernière lecture
+        # ---------------- activité : dernières actions + dernière lecture
         side = ctk.CTkFrame(self, fg_color=CARD, border_width=1, border_color=P["border"], corner_radius=12)
         side.grid(row=1, column=1, sticky="nsew", padx=(4, 12), pady=(14, 4))
-        ctk.CTkLabel(side, text="Dernière lecture", font=ctk.CTkFont(size=15, weight="bold")
-                     ).pack(anchor="w", padx=14, pady=(12, 4))
-        q = ctk.CTkFrame(side, fg_color="transparent")
-        q.pack(fill="x", padx=12)
-        ctk.CTkLabel(q, text="Quantité", text_color=MUTED).pack(side="left")
-        ctk.CTkLabel(q, textvariable=self.qty_var, font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=P["accent"]).pack(side="left", padx=10)
-        grid = ctk.CTkFrame(side, fg_color=P["card2"], corner_radius=8)
-        grid.pack(fill="x", padx=12, pady=6)
+        ctk.CTkLabel(side, text="Activité", font=ctk.CTkFont(size=15, weight="bold")
+                     ).pack(anchor="w", padx=14, pady=(12, 2))
+        self.act_box = ctk.CTkFrame(side, fg_color="transparent")
+        self.act_box.pack(fill="x", padx=10)
+        self.act_empty = ctk.CTkLabel(
+            self.act_box, text="Aucune action pour l'instant.\nOuvre l'HDV, sélectionne un objet de ton "
+                               f"inventaire et appuie sur {self.cfg.hotkeys['sell'].upper()}.",
+            text_color=MUTED, justify="left", anchor="w", wraplength=360)
+        self.act_rows = []
+        for _ in range(self.ACTIVITY_ROWS):
+            r = ctk.CTkFrame(self.act_box, fg_color="transparent")
+            t = ctk.CTkLabel(r, text="", text_color=MUTED, width=40, anchor="w", font=ctk.CTkFont(size=12))
+            t.pack(side="left")
+            hint = ctk.CTkLabel(r, text="", anchor="e", font=ctk.CTkFont(size=12))
+            hint.pack(side="right", padx=(6, 2))
+            txt = ctk.CTkLabel(r, text="", anchor="w", font=ctk.CTkFont(size=12, weight="bold"))
+            txt.pack(side="left", fill="x", expand=True)
+            self.act_rows.append((r, t, txt, hint))
+        ctk.CTkFrame(side, fg_color=P["border"], height=1).pack(fill="x", padx=14, pady=(8, 6))
+        hr = ctk.CTkFrame(side, fg_color="transparent")
+        hr.pack(fill="x", padx=14)
+        ctk.CTkLabel(hr, text="Dernière lecture", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
+        self.read_info = ctk.CTkLabel(hr, text="", text_color=MUTED, font=ctk.CTkFont(size=12))
+        self.read_info.pack(side="right")
+        self.read_empty = ctk.CTkLabel(side, text="Pas encore de lecture. Elle s'affiche ici à chaque "
+                                                  "vente, ou avec « Lire (test) » (onglet Calibration).",
+                                       text_color=MUTED, justify="left", anchor="w", wraplength=360)
+        self.read_grid = grid = ctk.CTkFrame(side, fg_color=P["card2"], corner_radius=8)
         for c, t in enumerate(("Lot", "Prix", "Par objet")):
-            ctk.CTkLabel(grid, text=t, text_color=MUTED).grid(row=0, column=c, sticky="w" if c == 0 else "e",
-                                                              padx=10, pady=(6, 2))
+            ctk.CTkLabel(grid, text=t, text_color=MUTED, height=22).grid(
+                row=0, column=c, sticky="w" if c == 0 else "e", padx=10, pady=(4, 0))
         for i, lot in enumerate(self.cfg.lots, start=1):
-            ctk.CTkLabel(grid, text=str(lot)).grid(row=i, column=0, sticky="w", padx=10, pady=2)
-            ctk.CTkLabel(grid, textvariable=self.read_vars[lot], text_color=P["gold"],
-                         font=ctk.CTkFont(size=14, weight="bold")).grid(row=i, column=1, sticky="e", padx=10)
-            ctk.CTkLabel(grid, textvariable=self.unit_vars[lot], text_color=MUTED
+            ctk.CTkLabel(grid, text=str(lot), height=22).grid(row=i, column=0, sticky="w", padx=10)
+            ctk.CTkLabel(grid, textvariable=self.read_vars[lot], text_color=P["gold"], height=22,
+                         font=ctk.CTkFont(size=13, weight="bold")).grid(row=i, column=1, sticky="e", padx=10)
+            ctk.CTkLabel(grid, textvariable=self.unit_vars[lot], text_color=MUTED, height=22
                          ).grid(row=i, column=2, sticky="e", padx=10)
+        ctk.CTkFrame(grid, fg_color="transparent", height=4).grid(row=len(self.cfg.lots) + 1, column=0)
         grid.grid_columnconfigure(1, weight=1)
-        for label, var in (("Prix moyen", self.avg_var), ("Ton prix", self.mine_var), ("Moteur", self.engine_var)):
-            r = ctk.CTkFrame(side, fg_color="transparent")
-            r.pack(fill="x", padx=12, pady=1)
-            ctk.CTkLabel(r, text=label, text_color=MUTED, width=90, anchor="w").pack(side="left")
-            ctk.CTkLabel(r, textvariable=var).pack(side="left")
+        self.read_empty.pack(anchor="w", fill="x", padx=14, pady=4)
         ctk.CTkLabel(side, textvariable=self.status_var, text_color=MUTED, wraplength=380,
-                     justify="left").pack(anchor="w", padx=12, pady=(8, 4))
-        ctk.CTkLabel(side, textvariable=self.stats_var, text_color=MUTED, font=ctk.CTkFont(size=12),
-                     wraplength=380, justify="left").pack(side="bottom", anchor="w", padx=12, pady=(0, 10))
+                     justify="left").pack(side="bottom", anchor="w", padx=14, pady=(0, 10))
+        self._refresh_activity()
 
         # ---------------- journal
         lf = ctk.CTkFrame(self, fg_color=CARD, border_width=1, border_color=P["border"], corner_radius=12)
@@ -632,6 +755,144 @@ class App(ctk.CTk):
         sb.pack(side="right", fill="y", padx=(0, 8), pady=(6, 10))
         self.log_text.configure(yscrollcommand=sb.set)
 
+    ACTIVITY_ROWS = 7
+
+    # ---- onglet Accueil
+    HOME_KEYS = (("sell", "Vendre", "Objet de l'inventaire : prix juste sous le moins cher. Sur une de tes "
+                                    "ventes : la met à jour."),
+                 ("sell_all", "Tout vendre", "Remet en vente au même prix tant que c'est sûr."),
+                 ("relist", "Remettre sous le moins cher", "La vente sélectionnée dans « mes ventes »."),
+                 ("relist_all", "Toute la liste", "Met à jour toutes tes ventes, une par une."))
+
+    def _tab_home(self, page, hk):
+        page.pack(fill="both", expand=True)
+        # premiers pas : se cochent tout seuls, disparaissent quand tout est fait
+        self.steps_card = self._section(page, "Premiers pas", "Trois étapes, cochées automatiquement.")
+        self.steps_outer = self.steps_card.master
+        self.step_rows = {}
+        actions = {"calib": ("Calibrer", lambda: (self.tabs.set("Calibration"),
+                                                  self._countdown("automatique", self._calib_auto_ui))),
+                   "read": ("Tester", lambda: self.jobs.put(("read", None))),
+                   "sell": (None, None)}
+        hints = {"calib": "HDV ouvert sur l'onglet « Vente », puis « Calibrer » : tout est placé tout seul.",
+                 "read": "Sélectionne un objet de ton inventaire dans l'HDV, puis « Tester ».",
+                 "sell": f"Sélectionne un objet de ton inventaire et appuie sur {hk['sell'].upper()}."}
+        for key, title in FIRST_STEPS:
+            r = self._row(self.steps_card)
+            mark = ctk.CTkLabel(r, text="", width=28, font=ctk.CTkFont(size=16, weight="bold"))
+            mark.pack(side="left")
+            label, cmd = actions[key]
+            btn = None
+            if label:
+                btn = ctk.CTkButton(r, text=label, width=90, height=28, command=cmd)
+                btn.pack(side="right", padx=4)
+            col = ctk.CTkFrame(r, fg_color="transparent")
+            col.pack(side="left", fill="x", expand=True)
+            ctk.CTkLabel(col, text=title, anchor="w", font=ctk.CTkFont(size=13, weight="bold")).pack(fill="x")
+            ctk.CTkLabel(col, text=hints[key], anchor="w", text_color=MUTED, wraplength=360, justify="left",
+                         font=ctk.CTkFont(size=12)).pack(fill="x")
+            self.step_rows[key] = (mark, btn)
+        # touches principales en grosses cartes
+        kb = self._section(page, "Touches principales", "Dans le jeu, HDV ouvert.")
+        grid = ctk.CTkFrame(kb, fg_color="transparent")
+        grid.pack(fill="x")
+        grid.grid_columnconfigure((0, 1), weight=1, uniform="k")
+        self.relist_all_note = None
+        for i, (name, title, desc) in enumerate(self.HOME_KEYS):
+            card = ctk.CTkFrame(grid, fg_color=P["card2"], corner_radius=10)
+            card.grid(row=i // 2, column=i % 2, sticky="nsew", padx=4, pady=4)
+            self._hk_label(card, name, text_color=P["gold"], anchor="w",
+                           font=ctk.CTkFont(family=style.MONO, size=18, weight="bold")
+                           ).pack(fill="x", padx=12, pady=(10, 0))
+            ctk.CTkLabel(card, text=title, anchor="w", font=ctk.CTkFont(size=13, weight="bold")
+                         ).pack(fill="x", padx=12)
+            ctk.CTkLabel(card, text=desc, anchor="w", justify="left", wraplength=220, text_color=MUTED,
+                         font=ctk.CTkFont(size=12)).pack(fill="x", padx=12, pady=(0, 4))
+            if name == "relist_all":
+                self.relist_all_note = ctk.CTkButton(
+                    card, text="Désactivé : activer dans « Mes ventes »", height=22, anchor="w",
+                    fg_color="transparent", hover_color=P["btn2"], text_color=P["orange"],
+                    font=ctk.CTkFont(size=12), command=lambda: self.tabs.set("Mes ventes"))
+            ctk.CTkFrame(card, fg_color="transparent", height=6).pack(side="bottom")
+        r = self._row(kb)
+        ctk.CTkButton(r, text="Tous les raccourcis", width=150, fg_color=BTN2, hover_color=BTN2_HOVER,
+                      command=lambda: self.tabs.set("Raccourcis")).pack(side="left", pady=(4, 0))
+        self._tip(ctk.CTkButton(r, text="Aide-mémoire en jeu", width=170, fg_color=BTN2,
+                                hover_color=BTN2_HOVER, command=self._toggle_cheatsheet),
+                  "Affiche les touches par-dessus le jeu, au-dessus de l'HDV. En jeu : "
+                  f"{hk['cheatsheet'].upper()}.").pack(side="left", padx=8, pady=(4, 0))
+        # session
+        sb = self._section(page, "Cette session")
+        tiles = ctk.CTkFrame(sb, fg_color="transparent")
+        tiles.pack(fill="x")
+        tiles.grid_columnconfigure((0, 1, 2), weight=1, uniform="t")
+        self.tiles = {}
+        for i, (key, label, color) in enumerate((("ventes", "mises en vente", P["green"]),
+                                                  ("modifs", "prix mis à jour", P["accent"]),
+                                                  ("suspects", "lectures suspectes", P["orange"]))):
+            t = ctk.CTkFrame(tiles, fg_color=P["card2"], corner_radius=10)
+            t.grid(row=0, column=i, sticky="nsew", padx=4)
+            n = ctk.CTkLabel(t, text="0", text_color=color, font=ctk.CTkFont(size=24, weight="bold"))
+            n.pack(pady=(8, 0))
+            ctk.CTkLabel(t, text=label, text_color=MUTED, font=ctk.CTkFont(size=12)).pack(pady=(0, 8))
+            self.tiles[key] = n
+        ctk.CTkLabel(sb, textvariable=self.stats_var, text_color=MUTED, font=ctk.CTkFont(size=12),
+                     anchor="w", justify="left").pack(fill="x", pady=(6, 0))
+        self._refresh_home()
+
+    def _step_done(self, key: str) -> bool:
+        return self._calibrated() if key == "calib" else key in (self.cfg.first_steps or [])
+
+    def _mark_step(self, key: str):
+        if key not in (self.cfg.first_steps or []):
+            self.cfg.first_steps = list(self.cfg.first_steps or []) + [key]
+            self._save_cfg()
+            self._refresh_home()
+
+    def _refresh_home(self):
+        if not hasattr(self, "tiles"):
+            return
+        all_done = True
+        for key, (mark, btn) in self.step_rows.items():
+            done = self._step_done(key)
+            all_done = all_done and done
+            mark.configure(text="✓" if done else "○", text_color=P["green"] if done else MUTED)
+            if btn is not None:
+                btn.configure(fg_color=BTN2 if done else P["accent"],
+                              hover_color=BTN2_HOVER if done else P["accent_hover"])
+        if all_done:
+            self.steps_outer.pack_forget()
+        for key, lbl in self.tiles.items():
+            lbl.configure(text=str(self.stats[key]))
+        note = self.relist_all_note
+        if note is not None:
+            if self.cfg.relist_auto:
+                note.pack_forget()
+            elif not note.winfo_ismapped():
+                note.pack(fill="x", padx=6, pady=(0, 2))
+
+    # ---- panneau Activité
+    def _add_activity(self, res: core.Result):
+        self.activity.insert(0, action_entry(res))
+        del self.activity[self.ACTIVITY_ROWS:]
+        self._refresh_activity()
+
+    def _refresh_activity(self):
+        if not self.activity:
+            self.act_empty.pack(anchor="w", fill="x", padx=4, pady=4)
+        else:
+            self.act_empty.pack_forget()
+        colors = {"ok": P["green"], "warn": P["orange"], "error": P["red"]}
+        for i, (r, t, txt, hint) in enumerate(self.act_rows):
+            if i < len(self.activity):
+                e = self.activity[i]
+                t.configure(text=e["time"])
+                txt.configure(text=e["text"])
+                hint.configure(text=e["hint"], text_color=colors.get(e["level"], MUTED))
+                r.pack(fill="x", padx=4, pady=1)
+            else:
+                r.pack_forget()
+
     # ---- onglets
     def _tab_shortcuts(self, page, hk):
         page.pack(fill="both", expand=True)
@@ -644,13 +905,16 @@ class App(ctk.CTk):
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
         b = self._section(page, "Divers")
         self._hotkey_line(b, None, "Forcer une lecture jugée suspecte", literal="même touche ×2")
-        for name in ("pause", "show_zones"):
+        for name in ("pause", "show_zones", "cheatsheet"):
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
-        b = self._section(page, "Raccourcis de calibration", "Utilisés dans le jeu, souris sur la zone.")
+        adv = self._collapsible(page, "Avancé : raccourcis de calibration",
+                                "Rarement utiles : la calibration automatique place tout.")
+        b = self._section(adv, "Raccourcis de calibration", "Utilisés dans le jeu, souris sur la zone.")
         for name in CALIB_HOTKEYS:
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
+        b = self._section(page, "Tous les raccourcis")
         ctk.CTkButton(b, text="Rétablir les raccourcis par défaut", width=230, fg_color=BTN2, hover_color=BTN2_HOVER,
-                      command=self._reset_hotkeys).pack(anchor="w", pady=(8, 2))
+                      command=self._reset_hotkeys).pack(anchor="w", pady=(2, 2))
         b = self._section(page, "Vente rapide", "Ce que fait la touche de vente après avoir calculé le prix.")
         self._switch(b, "Coller le prix automatiquement", "auto_paste",
                      tip="Sinon le prix est seulement copié : colle-le toi-même avec Ctrl+V.")
@@ -683,7 +947,8 @@ class App(ctk.CTk):
             self.hk_buttons[name] = btn
         else:
             ctk.CTkLabel(r, text=literal.upper(), **kstyle).pack(side="left", padx=(2, 10))
-        ctk.CTkLabel(r, text=text, anchor="w").pack(side="left")
+        ctk.CTkLabel(r, text=text, anchor="w", justify="left", wraplength=300
+                     ).pack(side="left", fill="x", expand=True)
 
     # ---- changement de raccourci
     def _capture_hotkey(self, name: str):
@@ -872,6 +1137,10 @@ class App(ctk.CTk):
                        font=ctk.CTkFont(family="Consolas")).pack(side="left", padx=12)
         self._tip(ctk.CTkButton(r, text="Voir zones", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._show_zones),
                   "Vérifie où les zones ont été placées.").pack(side="right", padx=4)
+        self._tip(ctk.CTkButton(r, text="Lire (test)", width=90, fg_color=BTN2, hover_color=BTN2_HOVER,
+                                command=lambda: self.jobs.put(("read", None))),
+                  "Lit l'HDV une fois sans rien vendre : résultat dans le journal et le panneau "
+                  "Activité.").pack(side="right", padx=4)
         self._switch(ab, "Recalibrer tout seul si la taille de l'HDV change", "auto_recalibrate",
                      tip="Échelle de l'interface ou résolution changée : l'HDV n'est plus retrouvé à sa "
                          "taille calibrée. L'outil refait alors la calibration automatique (~1 s) avant "
@@ -946,6 +1215,9 @@ class App(ctk.CTk):
                      tip="Petit message à l'écran : lot et prix choisis, ou la raison d'un arrêt.")
         self._switch(b, "… dans un bandeau fixe au-dessus de l'HDV", "banner",
                      tip="Toujours au même endroit. Désactivé : une popup près de la souris.")
+        self._switch(b, "Notification Windows à la fin d'un long parcours", "notify",
+                     tip="Tout vendre ou toute la liste de plus de 20 s : une notification Windows "
+                         "quand c'est fini, si tu es dans une autre fenêtre que le jeu et l'outil.")
         self._switch(b, "Fenêtre de l'outil toujours au-dessus du jeu", "always_on_top",
                      tip="Même chose que 📌 en haut. Le jeu doit être en fenêtré ou plein écran fenêtré.")
         b = self._section(page, "Apparence")
@@ -1080,7 +1352,6 @@ class App(ctk.CTk):
                                    "ce qui change dans cet HDV.")
 
     def _delete_profile(self):
-        from tkinter import messagebox
         names = self.cfg.profile_names()
         if len(names) <= 1:
             self._log("[Profil] C'est le seul profil : rien à supprimer.", "WARN")
@@ -1088,8 +1359,8 @@ class App(ctk.CTk):
         if self._busy():
             return
         name = self.cfg.profile
-        if not messagebox.askyesno("Supprimer le profil",
-                                   f"Supprimer le profil « {name} » et sa calibration ?", parent=self):
+        if not self._confirm("Supprimer le profil", f"Supprimer le profil « {name} » et sa calibration ?",
+                             ok="Supprimer", danger=True):
             return
         other = next(n for n in names if n != name)
         self.cfg.switch_profile(other)
@@ -1289,9 +1560,10 @@ class App(ctk.CTk):
         was_auto = c.relist_auto
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
                      "relist_auto", "relist_confirm_enter", "relist_summary", "fast_digits", "auto_recalibrate",
-                     "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates"):
+                     "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates", "notify"):
             setattr(c, name, bool(v[name].get()))
         self._apply_topmost()
+        self._refresh_home()
         if c.relist_auto and not was_auto:
             self._log(f"[Param] {c.hotkeys['relist_all']} actif : l'outil parcourt toute la liste seul "
                       "(clics + molette). C'est le mode le plus risqué vis-à-vis des CGU d'Ankama. "
@@ -1367,6 +1639,7 @@ class App(ctk.CTk):
             core.HOTKEYS.add(hk["calibrate_button"], lambda: self.jobs.put(("calib_point", "sell_button")))
             core.HOTKEYS.add(hk["show_zones"], lambda: self.ui_events.put(("zones", None)))
             core.HOTKEYS.add(hk["pause"], lambda: self.ui_events.put(("pause", None)))
+            core.HOTKEYS.add(hk["cheatsheet"], lambda: self.ui_events.put(("cheatsheet", None)))
         except Exception as e:
             self._log(f"[Hotkeys] Erreur d'enregistrement: {e}", "ERROR")
             return
@@ -1391,12 +1664,19 @@ class App(ctk.CTk):
                     res = self.engine.sell(optimize=True) if arg else self.engine.smart()
                     self.ui_events.put(("result", res))
                 elif name == "sell_all":
-                    self.ui_events.put(("result", self.engine.sell_all()))
+                    self.ui_events.put(("loop_start", "sell_all"))
+                    res = None
+                    try:
+                        res = self.engine.sell_all()
+                        self.ui_events.put(("result", res))
+                    finally:
+                        self.ui_events.put(("loop_end", res))
                 elif name == "relist":
                     self.ui_events.put(("result", self.engine.relist()))
                 elif name == "relist_all":
                     self.ui_events.put(("block_start", None))
-                    self.ui_events.put(("log", ("[MAJ TOUT] Parcours de la liste… "
+                    self.ui_events.put(("loop_start", "relist_all"))
+                    self.ui_events.put(("log", ("[MAJ TOUT] Parcours de la liste… « Arrêter » ou "
                                                 f"{self.cfg.hotkeys['pause'].upper()} pour arrêter.", "CAL")))
                     res = None
                     try:
@@ -1404,6 +1684,7 @@ class App(ctk.CTk):
                         self.ui_events.put(("result", res))
                     finally:
                         self.ui_events.put(("block_end", res))
+                        self.ui_events.put(("loop_end", res))
                 elif name == "calib_rows":
                     self.ui_events.put(("calib_rows", self.engine.calibrate_rows()))
                 elif name == "read":
@@ -1451,6 +1732,14 @@ class App(ctk.CTk):
                     self._block_start()
                 elif name == "block_end":
                     self._block_end(arg)
+                elif name == "loop_start":
+                    self._loop_start(arg)
+                elif name == "loop_progress":
+                    self._loop_progress(arg)
+                elif name == "loop_end":
+                    self._loop_end(arg)
+                elif name == "cheatsheet":
+                    self._toggle_cheatsheet()
                 elif name == "anchor":
                     self._log(f"[Repère] {arg}", "CAL" if "recalées" in arg else "WARN")
                     if "introuvable" in arg:
@@ -1517,9 +1806,11 @@ class App(ctk.CTk):
         core.beep(res.level, self.cfg)
         head = (f"Lot {res.lot} → {fmt(res.new_price)}" if res.new_price is not None
                 else "Liste mise à jour" if res.message.startswith("[MAJ TOUT]") else "Pas de prix")
-        if res.message.startswith("[TOUT]"):
-            head += f"  {res.hint}"
         self.last_action = (head, res.hint or res.level, LEVEL_COLORS[res.level])
+        self._add_activity(res)
+        if res.level == "ok" and res.message.startswith(("[VENTE]", "[OPT]", "[TOUT]", "[MAJ]")) \
+                and ("mis en vente" in res.message or "modifié" in res.message or res.message.startswith("[TOUT]")):
+            self._mark_step("sell")
         self._refresh_compact()
         if self.cfg.toast:
             if self.cfg.banner:
@@ -1625,6 +1916,10 @@ class App(ctk.CTk):
             return
         if any(r and r.value is not None for r in sr.prices.values()):
             self._set_hdv("ok")
+            self._mark_step("read")
+            if not self.read_grid.winfo_ismapped():
+                self.read_grid.pack(fill="x", padx=12, pady=6, before=self.read_empty)
+                self.read_empty.pack_forget()
         self.qty_var.set(str(sr.selected) if sr.selected else "?")
         for lot, var in self.read_vars.items():
             r = sr.prices.get(lot)
@@ -1638,27 +1933,36 @@ class App(ctk.CTk):
         mine = sr.mine if sr.mine is not None else (sr.mine_r.value if sr.mine_r else None)
         self.mine_var.set(fmt(mine) if mine else "—")
         self.engine_var.set({"chiffres": "lecture rapide", "tesseract": "Tesseract"}.get(sr.engine, "—"))
+        info = [f"quantité {sr.selected}" if sr.selected else "quantité ?"]
+        if sr.avg:
+            info.append(f"moyen {fmt(sr.avg)}/u")
+        if mine:
+            info.append(f"ton prix {fmt(mine)}")
+        self.read_info.configure(text=" · ".join(info))
 
     # ------------------------------------------------------------- overlays
+    def _popup_content(self, card, head: str, sub: str, color: str) -> dict:
+        """Contenu commun du popup et du bandeau : pastille de couleur, titre, détail."""
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(padx=(12, 16), pady=9)
+        dot = ctk.CTkFrame(row, width=10, height=10, corner_radius=5, fg_color=color)
+        dot.pack(side="left", padx=(0, 10))
+        head_l = ctk.CTkLabel(row, text=head, text_color="#ffffff", font=ctk.CTkFont(size=15, weight="bold"))
+        head_l.pack(side="left")
+        sub_l = ctk.CTkLabel(row, text=sub, text_color=color, font=ctk.CTkFont(size=13))
+        sub_l.pack(side="left", padx=(10, 0))
+        return {"dot": dot, "head": head_l, "sub": sub_l}
+
     def _toast(self, head: str, sub: str, color: str, ms: int = 1800):
+        """Popup près de la souris : carte arrondie aux couleurs de l'outil."""
         try:
             x, y = core.mouse_position()
         except Exception:
             x, y = self.winfo_pointerx(), self.winfo_pointery()
-        t = tk.Toplevel(self)
-        t.overrideredirect(True)
-        t.attributes("-topmost", True)
-        try:
-            t.attributes("-alpha", 0.92)
-        except tk.TclError:
-            pass
-        frame = tk.Frame(t, bg=P["card"], highlightbackground=color, highlightthickness=2)
-        frame.pack()
-        tk.Label(frame, text=head, bg=P["card"], fg="#ffffff",
-                 font=(style.FONT, 13, "bold")).pack(padx=10, pady=(6, 0))
-        tk.Label(frame, text=sub, bg=P["card"], fg=color, font=(style.FONT, 9)).pack(padx=10, pady=(0, 6))
+        t, card = rounded_popup(self, alpha=0.96)
+        self._popup_content(card, head, sub, color)
         t.geometry(f"+{x + 18}+{y + 18}")
-        t.after(ms, t.destroy)
+        t.after(ms, lambda: t.winfo_exists() and t.destroy())
 
     def _overlay(self, x, y, w, h, color, alpha, ms, label=""):
         t = tk.Toplevel(self)
@@ -1695,41 +1999,19 @@ class App(ctk.CTk):
     def _banner(self, head: str, sub: str, color: str, ms: int = 6000):
         """Bandeau fixe au-dessus de l'HDV (toujours au même endroit), à la place de la popup."""
         c = self.cfg
-        if c.anchor_region:
-            x, y = c.anchor_region[0] - 40, c.anchor_region[1] - 50
-        elif c.price_field:
-            x, y = c.price_field[0] - 80, c.price_field[1] - 200
-        elif c.table_region:
-            x, y = c.table_region[0], c.table_region[1] - 60
-        else:
+        if not (c.anchor_region or c.price_field or c.table_region):
             return self._toast(head, sub, color)
+        x, y = self._overlay_anchor()
         b = getattr(self, "_banner_win", None)
-        if b is None or not b.winfo_exists():
-            b = tk.Toplevel(self)
-            b.overrideredirect(True)
-            b.attributes("-topmost", True)
-            frame = tk.Frame(b, bg=P["card"], highlightbackground=P["border"], highlightthickness=1)
-            frame.pack()
-            self._banner_bar = tk.Frame(frame, bg=color, width=6)
-            self._banner_bar.pack(side="left", fill="y")
-            self._banner_head = tk.Label(frame, bg=P["card"], fg="#ffffff", font=(style.FONT, 12, "bold"))
-            self._banner_head.pack(side="left", padx=(10, 6), pady=6)
-            self._banner_sub = tk.Label(frame, bg=P["card"], font=(style.FONT, 10))
-            self._banner_sub.pack(side="left", padx=(0, 12))
-            self._banner_win = b
-        try:
-            b.attributes("-alpha", 0.95)
-        except tk.TclError:
-            pass
-        self._banner_bar.configure(bg=color)
-        self._banner_head.configure(text=head)
-        self._banner_sub.configure(text=sub, fg=color)
+        if b is not None and b.winfo_exists():
+            b.destroy()                  # recréé : la taille suit le texte
+        b, card = rounded_popup(self, alpha=0.96)
+        self._banner_win = b
+        self._popup_content(card, head, sub, color)
         b.geometry(f"+{max(0, int(x))}+{max(0, int(y))}")
-        b.deiconify()
-        b.lift()
         if getattr(self, "_banner_after", None):
             self.after_cancel(self._banner_after)
-        self._banner_after = self.after(ms, lambda: b.winfo_exists() and b.withdraw())
+        self._banner_after = self.after(ms, lambda: b.winfo_exists() and b.destroy())
 
     # ------------------------------------------------------------------ assistant
     # (clé, type, titre, optionnel, raccourci, préparation dans le jeu, comment faire)
@@ -2059,9 +2341,7 @@ class App(ctk.CTk):
         st = core.ENGINE_STATS
         tot = st.get("chiffres", 0) + st.get("tesseract", 0)
         fast = f"  |  lecture rapide {st.get('chiffres', 0) * 100 // tot}%" if tot else ""
-        self.stats_var.set(f"Session : {self.stats['ventes']} ventes  |  {self.stats['modifs']} modifs"
-                           f"  |  {self.stats['suspects']} suspects{fast}\n"
-                           f"{self.digits_var.get()}")
+        self.stats_var.set(f"{self.digits_var.get()}{fast}")
         values = {"table": c.table_region, "qty": c.qty_region, "price_field": c.price_field,
                   "avg": c.avg_region, "count": c.count_region, "modify_button": c.modify_button,
                   "rows": c.relist_row, "sell_button": c.sell_button, "mine": c.mine_region,
@@ -2075,7 +2355,8 @@ class App(ctk.CTk):
             if required and not ok:
                 missing.append(names[key])
         self.status_var.set(("À calibrer : " + ", ".join(missing) + " (onglet Calibration)")
-                            if missing else "Calibration de base OK.")
+                            if missing else "")
+        self._refresh_home()
 
     # ---- style : classique ou verre
     def _glass_on(self) -> bool:
@@ -2145,6 +2426,150 @@ class App(ctk.CTk):
         except OSError as e:
             self._log(f"[Param] Sauvegarde impossible : {e}", "ERROR")
 
+    # ---- boucles (F2 / Ctrl+F3) : progression, Arrêter, notification
+    LOOP_NAMES = {"relist_all": "Toute la liste", "sell_all": "Tout vendre"}
+
+    def _loop_start(self, kind: str):
+        self._loop = {"kind": kind, "t0": time.time(), "frac": None,
+                      "text": "Démarrage…" if kind == "relist_all" else "en cours…"}
+        self.loop_stop.configure(text="■ Arrêter", state="normal")
+        self._loop_show()
+
+    def _loop_progress(self, d: dict):
+        if self._loop is None or d.get("finished"):
+            return
+        text, frac = progress_text(d)
+        self._loop.update(text=text, frac=frac)
+        self._loop_show()
+
+    def _loop_show(self):
+        lp = self._loop
+        if lp is None:
+            return
+        self.loop_lbl.configure(text=f"{self.LOOP_NAMES.get(lp['kind'], '')} · {lp['text']}")
+        if lp["frac"] is None:
+            if self.loop_pb.cget("mode") != "indeterminate":
+                self.loop_pb.configure(mode="indeterminate")
+                self.loop_pb.start()
+        else:
+            if self.loop_pb.cget("mode") != "determinate":
+                self.loop_pb.stop()
+                self.loop_pb.configure(mode="determinate")
+            self.loop_pb.set(lp["frac"])
+        if not self.loop_bar.winfo_ismapped():
+            self.loop_bar.pack(side="right", padx=(8, 0))
+        self._refresh_compact()
+
+    def _stop_loop(self):
+        if self._loop is not None:
+            self.engine.stop_requested = True
+            self.loop_stop.configure(text="Arrêt…", state="disabled")
+            self._log("[Boucle] Arrêt demandé : fin après la ligne en cours.", "WARN")
+            self._refresh_compact()
+
+    def _loop_end(self, res: Optional[core.Result]):
+        lp, self._loop = self._loop, None
+        self.loop_pb.stop()
+        self.loop_bar.pack_forget()
+        self._refresh_compact()
+        if lp is None or not self.cfg.notify or time.time() - lp["t0"] < LONG_LOOP_S:
+            return
+        try:
+            game = core.game_has_focus(self.cfg)
+            mine = self.focus_displayof() is not None
+        except Exception:
+            game, mine = True, True
+        if game or mine:
+            return                       # le résultat est déjà visible (bandeau / fenêtre)
+        name = self.LOOP_NAMES.get(lp["kind"], "Parcours")
+        if res is None:
+            body = "Interrompu par une erreur : voir le journal."
+        elif res.changes:
+            mod = sum(1 for c in res.changes if c.modified)
+            bad = len(res.changes) - mod
+            body = f"{mod} prix modifié{'s' if mod > 1 else ''}" + (f" · {bad} à revoir" if bad else "")
+        else:
+            body = res.hint or "Terminé."
+        windows_notify(f"Dofus Price Helper · {name} terminé", body)
+
+    # ---- aide-mémoire des touches, par-dessus le jeu
+    CHEAT_KEYS = ("sell", "sell_all", "optimize", "relist", "relist_all", "pause", "cheatsheet")
+    CHEAT_TEXT = {"sell": "Vendre / mettre à jour", "sell_all": "Tout vendre", "optimize": "Meilleur lot",
+                  "relist": "Remettre sous le moins cher", "relist_all": "Toute la liste",
+                  "pause": "Pause / reprise", "cheatsheet": "Fermer cet aide-mémoire"}
+
+    def _toggle_cheatsheet(self, ms: int = 10000):
+        w = self._cheat
+        if w is not None and w.winfo_exists():
+            w.destroy()
+            self._cheat = None
+            return
+        t, card = rounded_popup(self)
+        ctk.CTkLabel(card, text="◆  Raccourcis", text_color=P["gold"], anchor="w",
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", padx=14, pady=(10, 4))
+        g = ctk.CTkFrame(card, fg_color="transparent")
+        g.pack(padx=12, pady=(0, 10))
+        for i, name in enumerate(self.CHEAT_KEYS):
+            ctk.CTkLabel(g, text=self.cfg.hotkeys[name].upper(), fg_color=P["card2"], corner_radius=6,
+                         width=96, font=ctk.CTkFont(family=style.MONO, size=12, weight="bold")
+                         ).grid(row=i, column=0, sticky="w", pady=2)
+            txt = self.CHEAT_TEXT[name]
+            if name == "relist_all" and not self.cfg.relist_auto:
+                txt += "  (désactivé)"
+            ctk.CTkLabel(g, text=txt, anchor="w", font=ctk.CTkFont(size=13),
+                         text_color=MUTED if txt.endswith("(désactivé)") else P["text"]
+                         ).grid(row=i, column=1, sticky="w", padx=(10, 4))
+        x, y = self._overlay_anchor()
+        t.geometry(f"+{max(0, int(x))}+{max(0, int(y))}")
+        self._cheat = t
+        t.after(ms, lambda: t.winfo_exists() and t.destroy())
+
+    def _overlay_anchor(self):
+        """Où afficher bandeau et aide-mémoire : au-dessus de l'HDV si on sait où il est."""
+        c = self.cfg
+        if c.anchor_region:
+            return c.anchor_region[0] - 40, c.anchor_region[1] - 50
+        if c.price_field:
+            return c.price_field[0] - 80, c.price_field[1] - 200
+        if c.table_region:
+            return c.table_region[0], c.table_region[1] - 60
+        try:
+            x, y = core.mouse_position()
+        except Exception:
+            x, y = self.winfo_pointerx(), self.winfo_pointery()
+        return x + 18, y + 18
+
+    # ---- confirmation au style de l'outil (au lieu de la boîte Windows)
+    def _confirm(self, title: str, text: str, ok: str = "Oui", danger: bool = False) -> bool:
+        d = ctk.CTkToplevel(self)
+        d.title(title)
+        d.resizable(False, False)
+        d.attributes("-topmost", True)
+        d.transient(self)
+        res = {"ok": False}
+        ctk.CTkLabel(d, text=title, anchor="w", font=ctk.CTkFont(size=16, weight="bold")
+                     ).pack(fill="x", padx=18, pady=(16, 6))
+        ctk.CTkLabel(d, text=text, anchor="w", justify="left", wraplength=400).pack(fill="x", padx=18)
+        bar = ctk.CTkFrame(d, fg_color="transparent")
+        bar.pack(fill="x", padx=18, pady=(18, 16))
+
+        def done(v):
+            res["ok"] = v
+            d.destroy()
+        kw = dict(fg_color=style.CHIP["red"][0], hover_color="#5a2730", text_color=P["red"]) if danger else {}
+        ctk.CTkButton(bar, text=ok, width=110, command=lambda: done(True), **kw).pack(side="right")
+        ctk.CTkButton(bar, text="Annuler", width=100, fg_color=BTN2, hover_color=BTN2_HOVER,
+                      command=lambda: done(False)).pack(side="right", padx=8)
+        d.protocol("WM_DELETE_WINDOW", lambda: done(False))
+        d.bind("<Escape>", lambda _e: done(False))
+        d.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - d.winfo_reqwidth()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - d.winfo_reqheight()) // 3
+        d.geometry(f"+{max(0, x)}+{max(0, y)}")
+        d.after(250, lambda: d.winfo_exists() and (d.grab_set(), d.focus_force()))
+        self.wait_window(d)
+        return res["ok"]
+
     # ---- mode compact : petite fenêtre au premier plan pendant le jeu
     def _open_compact(self):
         w = self._compact
@@ -2161,7 +2586,8 @@ class App(ctk.CTk):
             ok = bool(g) and geometry_on_screen(g, core.screen_bounds())
         except Exception:
             ok = False
-        w.geometry(g if ok else "340x150")
+        pos = g[g.index("+"):] if ok and "+" in g else ""   # position gardée, taille fixe
+        w.geometry("340x170" + pos)
         if self._glass_on():
             w.configure(fg_color=style.GLASS_BG)
         top = ctk.CTkFrame(w, fg_color="transparent")
@@ -2176,6 +2602,7 @@ class App(ctk.CTk):
         self._cmp_head.pack(fill="x", padx=12)
         self._cmp_sub = ctk.CTkLabel(w, text="", anchor="w", wraplength=300, justify="left")
         self._cmp_sub.pack(fill="x", padx=12)
+        self._cmp_pb = ctk.CTkProgressBar(w, height=6, progress_color=P["accent"])   # pendant une boucle
         bar = ctk.CTkFrame(w, fg_color="transparent")
         bar.pack(fill="x", padx=10, pady=(6, 10), side="bottom")
         self._cmp_pause = ctk.CTkButton(bar, text="", width=120, command=self._toggle_pause)
@@ -2221,10 +2648,34 @@ class App(ctk.CTk):
                 text = "HDV ✓" if self.hdv_state == "ok" else "HDV ?"
             bg, fg = style.CHIP[color]
             lbl.configure(text=short.get(text, text), fg_color=bg, text_color=fg)
+        lp = self._loop
+        if lp is not None:                       # boucle en cours : progression + Arrêter
+            self._cmp_head.configure(text=self.LOOP_NAMES.get(lp["kind"], "En cours") + "…")
+            self._cmp_sub.configure(text=lp["text"], text_color=P["text"])
+            if lp["frac"] is None:
+                if self._cmp_pb.cget("mode") != "indeterminate":
+                    self._cmp_pb.configure(mode="indeterminate")
+                    self._cmp_pb.start()
+            else:
+                if self._cmp_pb.cget("mode") != "determinate":
+                    self._cmp_pb.stop()
+                    self._cmp_pb.configure(mode="determinate")
+                self._cmp_pb.set(lp["frac"])
+            if not self._cmp_pb.winfo_ismapped():
+                self._cmp_pb.pack(fill="x", padx=12, pady=(4, 0))
+            stopping = self.engine.stop_requested
+            self._cmp_pause.configure(text="Arrêt…" if stopping else "■ Arrêter", command=self._stop_loop,
+                                      fg_color=style.CHIP["red"][0], hover_color="#5a2730",
+                                      text_color=P["red"])
+            return
+        self._cmp_pb.stop()
+        self._cmp_pb.pack_forget()
         head, sub, color = self.last_action
         self._cmp_head.configure(text=head)
         self._cmp_sub.configure(text=sub, text_color=color)
-        self._cmp_pause.configure(text="▶ Reprendre" if self.engine.paused else "⏸ Pause")
+        self._cmp_pause.configure(text="▶ Reprendre" if self.engine.paused else "⏸ Pause",
+                                  command=self._toggle_pause, fg_color=P["accent"],
+                                  hover_color=P["accent_hover"], text_color="#ffffff")
 
     # ---- mises à jour / journal
     def _on_update(self, up):
@@ -2241,17 +2692,16 @@ class App(ctk.CTk):
         self.update_btn.pack(side="right", padx=4)
 
     def _install_update(self):
-        from tkinter import messagebox
         up = self._update
         if getattr(self, "_installing", False):
             return
         if self.engine._lock.locked():
             self._log("[Version] Une action est en cours : installe la mise à jour quand elle est finie.", "WARN")
             return
-        if not messagebox.askyesno(
+        if not self._confirm(
                 "Mise à jour", f"Installer {up.tag} maintenant ?\n\nL'outil télécharge la nouvelle version "
                 f"({up.size / 1e6:.0f} Mo), se ferme, puis redémarre tout seul (moins d'une minute).\n"
-                "Tes réglages, ta calibration et tes profils sont gardés.", parent=self):
+                "Tes réglages, ta calibration et tes profils sont gardés.", ok="Installer"):
             return
         self._installing = True
         self._log(f"[Version] Téléchargement de {up.tag}…", "INFO")

@@ -702,6 +702,45 @@ def test_relist_all_scrolls_until_list_stops(relist_engine, monkeypatch):
     assert clicks == [(100, 100), (100, 100), (100, 150), (100, 100), (100, 150)]
 
 
+def _relist_loop_setup(eng, st, monkeypatch):
+    """Même liste que test_relist_all_scrolls_until_list_stops (5 lignes, 1 modifiée)."""
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 2
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    moves = iter([(50, None), (0, None)])
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: next(moves))
+    n = [0]
+    monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
+                        np.random.default_rng(n[0]).integers(0, 255, (8, 8, 3)).astype(np.uint8))
+    st["screens"] = [scr({1: 760}), scr({1: 759}), scr({1: 87}), scr({1: 87}), scr({1: 76})]
+    st["mine"] = [774, None, 759, 87, 87, 76]
+
+
+def test_relist_all_reports_progress_with_total(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    _relist_loop_setup(eng, st, monkeypatch)
+    eng.cfg.count_region = [0, 0, 10, 10]
+    monkeypatch.setattr(core, "read_counter", lambda cfg: (3, 100))   # « 3/100 lots en vente »
+    seen = []
+    eng.on_loop_progress = seen.append
+    eng.relist_all()
+    assert seen[0]["row"] == 1 and seen[0]["total"] == 3 and seen[0]["changed"] == 0
+    assert any(d["changed"] == 1 for d in seen)              # la ligne modifiée est comptée
+    assert seen[-1]["finished"] and seen[-1]["done"] == 5
+
+
+def test_relist_all_stop_button(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    _relist_loop_setup(eng, st, monkeypatch)
+    eng.on_loop_progress = lambda d: setattr(eng, "stop_requested", d["done"] >= 2)
+    res = eng.relist_all()
+    assert "arrêt demandé" in res.message and not eng.paused     # « Arrêter » ne met pas en pause
+    eng.stop_requested = True
+    eng.on_loop_progress = None
+    _relist_loop_setup(eng, st, monkeypatch)
+    assert "arrêt demandé" not in eng.relist_all().message       # remis à zéro au départ suivant
+
+
 def test_visible_rows_after_pixel_scroll():
     eng = core.PriceEngine(core.Config(relist_row=[0, 100], relist_step=50, relist_rows=4))
     assert eng._visible_rows(0) == [(100, 0), (150, 1), (200, 2), (250, 3)]
