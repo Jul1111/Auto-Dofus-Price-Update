@@ -21,6 +21,7 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - [Structure du projet](#structure-du-projet)
 - [Tests](#tests)
 - [Publier une version](#publier-une-version)
+- [Participer](#participer)
 - [Licence](#licence)
 
 ## Démonstration
@@ -76,7 +77,7 @@ Rien d'autre à installer : Tesseract est inclus. Si un Tesseract 5 ou plus réc
 
 Au démarrage, l'outil vérifie sur GitHub si une version plus récente est publiée et affiche alors un bouton « ⬆ Installer vX.Y.Z » (désactivable dans l'onglet **Options**) : un clic la télécharge, vérifie le fichier, puis l'outil se ferme et redémarre dans la nouvelle version. Réglages, calibration et profils sont gardés ; si la copie échoue, l'ancienne version est remise en place.
 
-Un problème ? Onglet **Options**, **📦 Rapport de problème** : l'outil crée un zip (journal, réglages, captures de diagnostic, image de l'HDV) à envoyer avec quelques mots. Rien n'est envoyé automatiquement, et l'historique des ventes n'est pas inclus. Le fichier journal seul est dans `%APPDATA%\Dofus Price Helper\journaux\journal.log`.
+Un problème ? Onglet **Options**, **📦 Rapport de problème** : l'outil crée un zip (journal, réglages, captures de diagnostic, image de l'HDV) à envoyer avec quelques mots dans les [Discussions](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/bugs). Rien n'est envoyé automatiquement, et l'historique des ventes n'est pas inclus. Le fichier journal seul est dans `%APPDATA%\Dofus Price Helper\journaux\journal.log`.
 
 L'exe n'est pas signé et il lit le clavier : Windows SmartScreen peut afficher « Windows a protégé votre PC » (« Informations complémentaires », puis « Exécuter quand même »), et certains antivirus peuvent le signaler.
 
@@ -210,6 +211,12 @@ git push origin v1.0.0
 ```
 
 Construction locale (Windows, Tesseract installé) : `pip install pyinstaller`, puis `python packaging/build.py --version v1.0.0`. Le zip est créé dans `dist/`.
+
+## Participer
+
+- Un problème : onglet **Options** › **📦 Rapport de problème**, puis une discussion dans [Bugs](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/bugs) avec le zip.
+- Une question : [Q&A](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/q-a). Une idée : [Ideas](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/ideas).
+- Du code, des tests, des captures : voir [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 

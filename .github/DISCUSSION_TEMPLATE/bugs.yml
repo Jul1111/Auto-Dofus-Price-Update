@@ -1,0 +1,60 @@
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de prendre le temps de signaler un problème 🙏
+
+        **Le plus utile** : dans l'outil, onglet **Options** › **📦 Rapport de problème**. Un zip est créé (journal, réglages, captures de diagnostic, image de l'HDV) : glisse-le dans la zone « Rapport » plus bas.
+        Rien n'est envoyé automatiquement et l'historique des ventes n'est pas inclus. Jette quand même un œil au contenu avant de le publier : ce fil est public.
+  - type: textarea
+    id: probleme
+    attributes:
+      label: Que s'est-il passé ?
+      description: Ce que tu as fait, ce que l'outil a fait, et ce que tu attendais à la place.
+      placeholder: "J'appuie sur F1 sur une de mes ventes, l'outil met 1 kama au lieu de 9 999…"
+    validations:
+      required: true
+  - type: dropdown
+    id: fonction
+    attributes:
+      label: Fonction concernée
+      multiple: true
+      options:
+        - F1 (vendre / mettre à jour)
+        - F2 (tout vendre)
+        - F3 / Ctrl+F3 (mise à jour de la liste)
+        - F4 (meilleur lot)
+        - Calibration automatique
+        - Calibration manuelle / assistant
+        - Lecture des prix (OCR)
+        - Mise à jour de l'outil
+        - Interface / affichage
+        - Autre
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version de l'outil
+      description: Affichée dans le titre de la fenêtre (ex. v1.4.0), ou « code source » si lancé depuis Python.
+    validations:
+      required: true
+  - type: input
+    id: ecran
+    attributes:
+      label: Résolution et échelle de l'interface Dofus
+      placeholder: "1920 x 1080, interface à 100 %, plein écran fenêtré"
+  - type: dropdown
+    id: frequence
+    attributes:
+      label: Fréquence
+      options:
+        - À chaque fois
+        - Souvent
+        - Une seule fois / rarement
+  - type: textarea
+    id: rapport
+    attributes:
+      label: Rapport de problème, captures, extrait du journal
+      description: 'Glisse le zip du rapport ou des captures ici. Journal seul : `%APPDATA%\Dofus Price Helper\journaux\journal.log`.'

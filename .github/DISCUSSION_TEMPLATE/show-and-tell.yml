@@ -1,0 +1,37 @@
+title: "[Retour] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Raconte comment l'outil se passe chez toi, même quand tout marche : savoir sur quelles configurations la calibration automatique fonctionne aide beaucoup.
+  - type: dropdown
+    id: avis
+    attributes:
+      label: Globalement
+      options:
+        - Tout fonctionne
+        - Fonctionne avec quelques soucis
+        - Ne fonctionne pas chez moi
+    validations:
+      required: true
+  - type: input
+    id: ecran
+    attributes:
+      label: Résolution et échelle de l'interface Dofus
+      placeholder: "2560 x 1440, interface à 90 %"
+  - type: dropdown
+    id: autocal
+    attributes:
+      label: Calibration automatique
+      options:
+        - Fonctionne du premier coup
+        - Fonctionne après quelques essais
+        - Ne fonctionne pas (calibration manuelle)
+        - Pas essayée
+  - type: textarea
+    id: retour
+    attributes:
+      label: Ton retour
+      description: Ce qui t'aide, ce qui est pénible, ce qui pourrait être plus clair…
+    validations:
+      required: true
