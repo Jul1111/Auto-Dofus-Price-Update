@@ -1183,3 +1183,36 @@ def test_tesseract_old_without_bundled_warns(fake_tesseracts):
 def test_tesseract_missing(fake_tesseracts):
     setup, *_ = fake_tesseracts
     assert "introuvable" in core.setup_tesseract(setup(None, None))
+
+
+# --- Touche restée « enfoncée » dans `keyboard` : plus aucun raccourci ne répondait
+def test_release_stuck_keys_fake_module():
+    import threading
+    import types
+    ev = lambda name: types.SimpleNamespace(name=name)
+    kb = types.SimpleNamespace(
+        _pressed_events={29: ev("ctrl"), 47: ev("v"), 61: ev("f3")},
+        _pressed_events_lock=threading.Lock(),
+        _logically_pressed_keys={47: ev("v")},
+        _listener=types.SimpleNamespace(active_modifiers={29}))
+    down = {29: True, 47: False, 61: None}          # ctrl tenu, v relâché (raté), f3 inconnu
+    assert core.release_stuck_keys(kb, lambda sc: down[sc]) == ["v"]
+    assert set(kb._pressed_events) == {29, 61}       # ctrl gardé, f3 inconnu gardé (prudence)
+    assert 47 not in kb._logically_pressed_keys and kb._listener.active_modifiers == {29}
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="état réel du clavier : Windows")
+def test_release_stuck_keys_real_keyboard():
+    import types
+    kb = pytest.importorskip("keyboard")
+    sc_v = kb.key_to_scan_codes("v")[0]
+    with kb._pressed_events_lock:
+        saved = dict(kb._pressed_events)
+        kb._pressed_events[sc_v] = types.SimpleNamespace(name="v")   # relâchement raté
+    try:
+        assert "v" in core.release_stuck_keys()      # V n'est pas enfoncée en vrai
+        assert sc_v not in kb._pressed_events
+    finally:
+        with kb._pressed_events_lock:
+            kb._pressed_events.clear()
+            kb._pressed_events.update(saved)
