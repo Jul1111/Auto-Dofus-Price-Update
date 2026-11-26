@@ -143,6 +143,9 @@ class App(ctk.CTk):
         err = core.setup_tesseract(self.cfg)
         if err:
             self._log(err, "ERROR")
+        if self.cfg.check_updates:
+            threading.Thread(target=lambda: self.ui_events.put(
+                ("update", core.newer_release(core.app_version()))), daemon=True).start()
         if core.TESSERACT_USED:
             self._log(f"[OCR] {core.TESSERACT_USED}. Réglages : {core.BASE_DIR}", "INFO")
         self._register_hotkeys()
@@ -178,6 +181,7 @@ class App(ctk.CTk):
             "verify_before_enter": ctk.BooleanVar(value=c.verify_before_enter),
             "smart_f1": ctk.BooleanVar(value=c.smart_f1),
             "always_on_top": ctk.BooleanVar(value=c.always_on_top),
+            "check_updates": ctk.BooleanVar(value=c.check_updates),
         }
         for var in self.v.values():
             var.trace_add("write", lambda *_: self._schedule_save())
@@ -240,6 +244,8 @@ class App(ctk.CTk):
                         ).pack(side="right", padx=(8, 2))
         self.pause_btn = ctk.CTkButton(head, text="⏸ Pause", width=90, command=self._toggle_pause)
         self.pause_btn.pack(side="right", padx=4)
+        self.update_btn = ctk.CTkButton(head, text="", width=150, fg_color="#1e5631",
+                                        hover_color="#27703f")   # affiché si une version plus récente existe
 
         # ---------------- onglets
         tabs = ctk.CTkTabview(self, anchor="nw", segmented_button_selected_color="#1f6aa5")
@@ -524,6 +530,16 @@ class App(ctk.CTk):
         ctk.CTkSwitch(b, text="Utiliser la lecture rapide", variable=self.v["fast_digits"]).pack(anchor="w", pady=2)
         ctk.CTkButton(b, text="Réapprendre les chiffres", width=180, fg_color=BTN2,
                       command=self._reset_digits).pack(anchor="w", pady=4)
+        b = self._section(page, "Mises à jour et journal",
+                          f"Version {core.app_version()}. Le journal (fichier) garde l'historique des "
+                          "messages et des erreurs : à joindre quand tu signales un problème.")
+        ctk.CTkSwitch(b, text="Vérifier au démarrage si une nouvelle version est publiée (GitHub)",
+                      variable=self.v["check_updates"]).pack(anchor="w", pady=2)
+        r = self._row(b)
+        ctk.CTkButton(r, text="Ouvrir le dossier du journal", width=200, fg_color=BTN2,
+                      command=self._open_log_dir).pack(side="left")
+        ctk.CTkButton(r, text="Page des versions", width=150, fg_color=BTN2,
+                      command=lambda: self._open_url(core.RELEASES_URL)).pack(side="left", padx=8)
     CLEAR_FIELDS = {"anchor": ("anchor_region",), "avg": ("avg_region",), "count": ("count_region",),
                     "modify_button": ("modify_button",), "rows": ("relist_row",), "sell_button": ("sell_button",),
                     "mine": ("mine_region",), "name": ("name_region",)}
@@ -603,6 +619,7 @@ class App(ctk.CTk):
             self.log_text.tag_configure(tag, foreground=color)
 
     def _log(self, msg: str, tag: str = "INFO"):
+        core.log_line(msg, tag)
         self.log_text.configure(state="normal")
         self.log_text.insert("end", time.strftime("%H:%M:%S") + "  ", ("TIME",))
         self.log_text.insert("end", msg + "\n", (tag,))
@@ -640,7 +657,7 @@ class App(ctk.CTk):
         was_auto = c.relist_auto
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
                      "relist_auto", "relist_confirm_enter", "fast_digits",
-                     "banner", "verify_before_enter", "smart_f1", "always_on_top"):
+                     "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates"):
             setattr(c, name, bool(v[name].get()))
         self._apply_topmost()
         if c.relist_auto and not was_auto:
@@ -811,6 +828,8 @@ class App(ctk.CTk):
                     self._refresh_status()
                 elif name == "wizard_test":
                     self._wiz_report_show(arg)
+                elif name == "update":
+                    self._on_update(arg)
                 elif name == "hotkey":
                     self._on_hotkey_captured(*arg)
         except queue.Empty:
@@ -1251,6 +1270,33 @@ class App(ctk.CTk):
         self.status_var.set(("À calibrer : " + ", ".join(missing) + " (onglet Calibration)")
                             if missing else "Calibration de base OK.")
 
+    # ---- mises à jour / journal
+    def _on_update(self, found):
+        if not found:
+            return
+        tag, url = found
+        self._log(f"[Version] {tag} est disponible (tu as {core.app_version()}) : {url}", "OK")
+        self.update_btn.configure(text=f"⬆ {tag} disponible", command=lambda: self._open_url(url))
+        self.update_btn.pack(side="right", padx=4)
+
+    def _open_url(self, url: str):
+        import webbrowser
+        webbrowser.open(url)
+
+    def _open_log_dir(self):
+        import os
+        core.LOG_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            os.startfile(core.LOG_DIR)
+        except (AttributeError, OSError) as e:
+            self._log(f"[Journal] Dossier : {core.LOG_DIR} ({e})", "WARN")
+
+    def report_callback_exception(self, exc, val, tb):
+        """Erreur dans l'interface : au journal (fichier) au lieu d'être perdue."""
+        import traceback
+        core.log_line("Erreur interface :\n" + "".join(traceback.format_exception(exc, val, tb)), "ERROR")
+        self._log(f"[Erreur] {val}", "ERROR")
+
     def _on_close(self):
         self._apply_settings()
         if KEYBOARD_AVAILABLE:
@@ -1262,4 +1308,8 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
+    try:
+        core.setup_file_log()
+    except OSError:
+        pass   # dossier non accessible : l'outil marche sans fichier journal
     App().mainloop()

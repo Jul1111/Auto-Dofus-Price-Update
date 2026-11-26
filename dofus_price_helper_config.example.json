@@ -53,6 +53,7 @@
   "SMART_F1": true,
   "BANNER": true,
   "ALWAYS_ON_TOP": true,
+  "CHECK_UPDATES": true,
   "VALIDATE_METHOD": "enter",
   "RESTORE_CLIPBOARD": true,
   "WINDOW_PROCESS": "dofus",

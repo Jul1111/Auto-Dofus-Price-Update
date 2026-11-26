@@ -109,6 +109,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     import keyboard  # Windows : chargé ici pour que --help et les tests marchent sans
 
     debug_dir = core.BASE_DIR / "captures" if args.debug else None
+    try:
+        core.setup_file_log()   # tout ce qui s'affiche est aussi gardé dans journaux/journal.log
+    except OSError:
+        pass
     cfg = core.Config.load()
     try:
         if apply_args(cfg, args):

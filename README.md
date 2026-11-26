@@ -66,6 +66,8 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 
 Rien d'autre à installer : Tesseract est inclus. Si un Tesseract 5 ou plus récent est déjà installé, c'est lui qui est utilisé. Les réglages et la calibration sont enregistrés dans `%APPDATA%\Dofus Price Helper` et sont conservés d'une version à l'autre.
 
+Au démarrage, l'outil vérifie sur GitHub si une version plus récente est publiée et affiche alors un bouton « ⬆ vX.Y.Z disponible » (désactivable dans l'onglet **Options**). Un fichier journal (`%APPDATA%\Dofus Price Helper\journaux\journal.log`) garde les messages et les erreurs : joignez-le quand vous signalez un problème (onglet **Options**, « Ouvrir le dossier du journal »).
+
 L'exe n'est pas signé et il lit le clavier : Windows SmartScreen peut afficher « Windows a protégé votre PC » (« Informations complémentaires », puis « Exécuter quand même »), et certains antivirus peuvent le signaler.
 
 ### Depuis le code source
