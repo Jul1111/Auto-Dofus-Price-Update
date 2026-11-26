@@ -1700,7 +1700,10 @@ _MOD_NAMES = {
     "shift": "shift", "left shift": "shift", "right shift": "shift",
     "windows": "win", "win": "win", "left windows": "win", "right windows": "win",
 }
-_MOD_VKS = {"ctrl": (0x11,), "alt": (0x12,), "shift": (0x10,), "win": (0x5B, 0x5C)}
+# Touche générique ET touches gauche/droite : certains claviers ou logiciels de clavier ne
+# mettent à jour que l'une des deux.
+_MOD_VKS = {"ctrl": (0x11, 0xA2, 0xA3), "alt": (0x12, 0xA4, 0xA5), "shift": (0x10, 0xA0, 0xA1),
+            "win": (0x5B, 0x5C)}
 _NAMED_VKS = {
     "backspace": 0x08, "tab": 0x09, "enter": 0x0D, "pause": 0x13, "caps lock": 0x14, "esc": 0x1B,
     "escape": 0x1B, "space": 0x20, "page up": 0x21, "page down": 0x22, "end": 0x23, "home": 0x24,
@@ -1803,6 +1806,11 @@ class HotkeyPoller:
                     fire.append((combo, cb))
                 self._down[combo] = down
         for combo, cb in fire:
+            vk = next(b[2] for b in bindings if b[0] == combo)
+            if sum(b[2] == vk for b in bindings) > 1:   # ex. F3 / Ctrl+F3 : noter ce qui a été vu
+                raw = " ".join(f"{v:02X}={self._state(v) & 0xFFFF:04X}" for v in (0x11, 0xA2, 0xA3, 0x12, 0x10))
+                log_line(f"[Hotkeys] {combo} (modificateurs vus : {'+'.join(sorted(mods_now)) or 'aucun'} ; "
+                         f"{raw})")
             try:
                 cb()
             except Exception as e:      # une action en erreur ne coupe jamais les raccourcis
