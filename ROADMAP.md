@@ -1,7 +1,7 @@
 # 🗺️ Roadmap — Dofus Price Helper
 
 Pistes d'amélioration, de la plus utile à la moins utile.
-Reste : **7** (version .exe).
+Tout est fait.
 
 ---
 
@@ -40,8 +40,10 @@ Reste : **7** (version .exe).
 - Ancienne version : onglet calculé depuis l'historique (`dofus_dashboard.py`), actualisé à chaque action : lots et kamas mis en vente, prix modifiés, activité par heure, taille des lots, baisse moyenne, lectures suspectes, dernières actions.
 - Nom des objets lu en arrière-plan (`dofus_items.py`) → détail par objet : courbe « moins cher lu / ton prix » dans le temps et liste des objets.
 
-### 7. Version .exe
-- Un seul fichier à lancer (PyInstaller), sans Python ni terminal.
+### 7. Version .exe — ✅ FAIT (zip construit par GitHub)
+- `DofusPriceHelper.exe` (PyInstaller, mode dossier : démarrage rapide, moins d'alertes antivirus), Tesseract inclus (utilisé seulement si aucun Tesseract 5+ n'est installé).
+- Réglages dans `%APPDATA%` : gardés d'une version à l'autre.
+- GitHub Actions : tests + zip à chaque PR, publication dans Releases à chaque tag `v*`.
 
 ---
 
