@@ -39,7 +39,31 @@ import numpy as np
 Region = Tuple[int, int, int, int]  # x, y, w, h
 Point = Tuple[int, int]
 
-BASE_DIR = Path(__file__).resolve().parent
+IS_FROZEN = bool(getattr(sys, "frozen", False))   # lancé depuis l'exe (PyInstaller)
+# Fichiers livrés avec l'outil (Tesseract inclus, version) : dossier de l'exe, sinon du script.
+APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+
+
+def _data_dir() -> Path:
+    """Où ranger config, calibration, chiffres appris, historique.
+    Depuis le code source : à côté du script (comme avant). Depuis l'exe : %APPDATA%, pour que
+    les réglages survivent aux mises à jour (une nouvelle version = un nouveau dossier)."""
+    if not IS_FROZEN:
+        return Path(__file__).resolve().parent
+    d = Path(os.environ.get("APPDATA") or Path.home()) / "Dofus Price Helper"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+BASE_DIR = _data_dir()
+
+
+def app_version() -> str:
+    """Version de l'exe (fichier version.txt ajouté à la construction), sinon « dev »."""
+    try:
+        return (APP_DIR / "version.txt").read_text(encoding="utf-8").strip() or "dev"
+    except OSError:
+        return "dev"
 CONFIG_PATH = BASE_DIR / "dofus_price_helper_config.json"
 HISTORY_PATH = BASE_DIR / "dofus_price_history.csv"
 DIGITS_PATH = BASE_DIR / "digit_templates.npz"   # modèles de chiffres appris (lecture rapide)
@@ -505,18 +529,53 @@ COUNT_CONFIG = f"--psm 7 -c tessedit_char_blacklist={_COUNT_BLACKLIST}"
 _COUNT_RE = re.compile(r"(\d+)\s*/\s*(\d+)")
 
 
+MIN_TESSERACT = (5, 0)          # versions plus anciennes : lectures différentes, non testées
+BUNDLED_TESSERACT = APP_DIR / "tesseract" / "tesseract.exe"   # inclus dans l'exe (zip)
+TESSERACT_USED = ""             # « Tesseract 5.5 (installé) » : affiché au démarrage
+_VERSION_RE = re.compile(r"tesseract\s+v?(\d+)\.(\d+)", re.IGNORECASE)
+
+
+def tesseract_version(cmd: str) -> Optional[Tuple[int, int]]:
+    """(majeure, mineure) de `cmd --version`, None si illisible ou pas un Tesseract."""
+    import subprocess
+    try:
+        si = None
+        if IS_WINDOWS:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW   # pas de fenêtre console
+        out = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=15,
+                             startupinfo=si)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    m = _VERSION_RE.search((out.stdout or "") + (out.stderr or ""))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
 def setup_tesseract(cfg: Config) -> Optional[str]:
-    """Configure le binaire Tesseract. Retourne un message d'erreur ou None."""
+    """Choisit le Tesseract à utiliser. Retourne un message d'erreur ou None.
+    Ordre : celui de la config ou du PATH s'il est en version >= 5 ; sinon celui inclus dans
+    l'exe ; sinon un Tesseract installé plus ancien (mieux que rien)."""
+    global TESSERACT_USED
     import pytesseract
-    if cfg.tesseract_cmd and Path(cfg.tesseract_cmd).exists():
-        pytesseract.pytesseract.tesseract_cmd = cfg.tesseract_cmd
-        return None
-    found = shutil.which("tesseract")
-    if found:
-        pytesseract.pytesseract.tesseract_cmd = found
-        return None
-    return ("Tesseract introuvable. Installe-le ou corrige TESSERACT_CMD "
-            "dans dofus_price_helper_config.json.")
+    installed = []
+    for cmd in (cfg.tesseract_cmd, shutil.which("tesseract")):
+        if cmd and Path(cmd).exists() and cmd not in installed:
+            installed.append(cmd)
+    candidates = [(c, tesseract_version(c), "installé") for c in installed]
+    good = [c for c in candidates if c[1] and c[1] >= MIN_TESSERACT]
+    if not good and BUNDLED_TESSERACT.exists():
+        good = [(str(BUNDLED_TESSERACT), tesseract_version(str(BUNDLED_TESSERACT)), "inclus")]
+    pick = (good or [c for c in candidates if c[1]] or [None])[0]
+    if pick is None:
+        return ("Tesseract introuvable. Installe-le (version 5 ou plus) ou corrige TESSERACT_CMD "
+                "dans dofus_price_helper_config.json.")
+    cmd, ver, origin = pick
+    pytesseract.pytesseract.tesseract_cmd = cmd
+    TESSERACT_USED = f"Tesseract {ver[0]}.{ver[1]} ({origin})" if ver else f"Tesseract ({origin})"
+    if ver and ver < MIN_TESSERACT:
+        return (f"Tesseract {ver[0]}.{ver[1]} est ancien : installe la version 5 ou plus "
+                "(lectures moins fiables).")
+    return None
 
 
 def grab_screen(region: Region) -> np.ndarray:

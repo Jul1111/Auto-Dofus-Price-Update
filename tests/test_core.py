@@ -1128,3 +1128,58 @@ def test_field_check_rereads_until_caret_gone(monkeypatch):
     reads = iter([446, 446, 448])                           # curseur visible, puis éteint
     monkeypatch.setattr(core, "read_mine", lambda c, **k: core.Reading(next(reads), 95))
     assert core.field_check(core.Config(price_field=[10, 10]), 448) == (True, 448)
+
+
+# --- Choix de Tesseract : installé (>= 5) sinon celui inclus dans l'exe
+@pytest.fixture
+def fake_tesseracts(tmp_path, monkeypatch):
+    pt = pytest.importorskip("pytesseract")
+    monkeypatch.setattr(pt.pytesseract, "tesseract_cmd", pt.pytesseract.tesseract_cmd)  # remis après
+    monkeypatch.setattr(core, "TESSERACT_USED", core.TESSERACT_USED)
+    installed, bundled = tmp_path / "installed.exe", tmp_path / "bundled" / "tesseract.exe"
+    versions = {}
+
+    def setup(installed_ver=None, bundled_ver=None):
+        for f, v in ((installed, installed_ver), (bundled, bundled_ver)):
+            if v:
+                f.parent.mkdir(exist_ok=True)
+                f.write_text("")
+                versions[str(f)] = v
+        monkeypatch.setattr(core, "BUNDLED_TESSERACT", bundled)
+        monkeypatch.setattr(core.shutil, "which", lambda name: None)
+        monkeypatch.setattr(core, "tesseract_version", lambda cmd: versions.get(str(cmd)))
+        return core.Config(tesseract_cmd=str(installed))
+    return setup, installed, bundled
+
+
+def _used():
+    import pytesseract
+    return pytesseract.pytesseract.tesseract_cmd
+
+
+def test_tesseract_prefers_recent_installed(fake_tesseracts):
+    setup, installed, bundled = fake_tesseracts
+    assert core.setup_tesseract(setup((5, 5), (5, 4))) is None
+    assert _used() == str(installed) and "installé" in core.TESSERACT_USED
+
+
+def test_tesseract_old_installed_uses_bundled(fake_tesseracts):
+    setup, installed, bundled = fake_tesseracts
+    assert core.setup_tesseract(setup((4, 1), (5, 4))) is None
+    assert _used() == str(bundled) and core.TESSERACT_USED == "Tesseract 5.4 (inclus)"
+
+
+def test_tesseract_none_installed_uses_bundled(fake_tesseracts):
+    setup, installed, bundled = fake_tesseracts
+    assert core.setup_tesseract(setup(None, (5, 4))) is None and _used() == str(bundled)
+
+
+def test_tesseract_old_without_bundled_warns(fake_tesseracts):
+    setup, installed, bundled = fake_tesseracts
+    err = core.setup_tesseract(setup((4, 1), None))
+    assert "ancien" in err and _used() == str(installed)
+
+
+def test_tesseract_missing(fake_tesseracts):
+    setup, *_ = fake_tesseracts
+    assert "introuvable" in core.setup_tesseract(setup(None, None))

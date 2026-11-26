@@ -1,0 +1,60 @@
+# Version Windows sans Python (zip : DofusPriceHelper.exe + Tesseract inclus)
+# - Pull request vers main : tests + construction ; le zip est téléchargeable dans l'onglet
+#   « Actions » de l'exécution (artefact « DofusPriceHelper », gardé 14 jours) pour l'essayer.
+# - Tag « v* » (ex. git tag v1.0.0 && git push origin v1.0.0) : idem + publication dans Releases.
+name: Version Windows (.exe)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # créer la Release sur un tag
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt pyinstaller
+
+      - name: Tesseract (inclus dans le zip)
+        run: |
+          choco install tesseract -y --no-progress
+          & "C:\Program Files\Tesseract-OCR\tesseract.exe" --version
+
+      - name: Tests (dont OCR sur captures réelles)
+        run: python -m pytest -q
+
+      - name: Construction du zip
+        shell: bash
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then v="${{ github.ref_name }}"; else v="dev-${GITHUB_SHA::7}"; fi
+          python packaging/build.py --version "$v" --tesseract-dir "C:/Program Files/Tesseract-OCR"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DofusPriceHelper
+          path: dist/*.zip
+          retention-days: 14
+
+      - name: Publication dans Releases
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/*.zip \
+            --title "Dofus Price Helper ${{ github.ref_name }}" --generate-notes

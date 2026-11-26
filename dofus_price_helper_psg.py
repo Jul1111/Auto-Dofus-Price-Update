@@ -117,7 +117,7 @@ class App(ctk.CTk):
         super().__init__()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        self.title("Dofus Price Helper")
+        self.title(f"Dofus Price Helper {core.app_version()}")
         self.geometry("1120x800")
         self.minsize(980, 680)
 
@@ -142,6 +142,8 @@ class App(ctk.CTk):
         err = core.setup_tesseract(self.cfg)
         if err:
             self._log(err, "ERROR")
+        if core.TESSERACT_USED:
+            self._log(f"[OCR] {core.TESSERACT_USED}. Réglages : {core.BASE_DIR}", "INFO")
         self._register_hotkeys()
         self._refresh_status()
         self._apply_topmost()

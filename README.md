@@ -20,6 +20,7 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - [Configuration](#configuration)
 - [Structure du projet](#structure-du-projet)
 - [Tests](#tests)
+- [Publier une version](#publier-une-version)
 - [Licence](#licence)
 
 ## Démonstration
@@ -58,14 +59,25 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 
 ## Installation
 
-### Prérequis
+### Version Windows prête à l'emploi (recommandé)
+
+1. Téléchargez `DofusPriceHelper-vX.Y.Z.zip` dans les [Releases](https://github.com/Jul1111/Auto-Dofus-Price-Update/releases/latest).
+2. Décompressez-le où vous voulez, puis lancez `DofusPriceHelper.exe` (gardez le dossier `_internal` à côté).
+
+Rien d'autre à installer : Tesseract est inclus. Si un Tesseract 5 ou plus récent est déjà installé, c'est lui qui est utilisé. Les réglages et la calibration sont enregistrés dans `%APPDATA%\Dofus Price Helper` et sont conservés d'une version à l'autre.
+
+L'exe n'est pas signé et il lit le clavier : Windows SmartScreen peut afficher « Windows a protégé votre PC » (« Informations complémentaires », puis « Exécuter quand même »), et certains antivirus peuvent le signaler.
+
+### Depuis le code source
+
+Prérequis :
 
 - Windows 10 ou 11
 - Python 3.10 ou plus récent
-- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki)
+- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) 5 ou plus récent
 - Dofus en mode fenêtré ou plein écran fenêtré
 
-### Étapes
+Étapes :
 
 ```bash
 git clone https://github.com/Jul1111/Auto-Dofus-Price-Update
@@ -159,6 +171,8 @@ Auto-Dofus-Price-Update/
 ├── dofus_price_helperV2.py     Version ligne de commande
 ├── dofus_core.py               Moteur : lecture, calcul des prix, saisie, contrôles
 ├── dofus_digits.py             Reconnaissance rapide des chiffres
+├── packaging/build.py          Construction de la version Windows (zip)
+├── .github/workflows/          Construction automatique et publication des versions
 ├── docs/                       Captures d'écran
 └── tests/                      Tests unitaires et tests OCR sur captures réelles
 ```
@@ -171,6 +185,17 @@ Fichiers générés localement et non versionnés : `dofus_price_helper_config.j
 pip install -r requirements-dev.txt
 pytest
 ```
+
+## Publier une version
+
+Chaque pull request vers `main` construit le zip et lance les tests sur GitHub : le zip est téléchargeable dans l'onglet **Actions** de l'exécution, pour l'essayer. Pour publier une version dans les Releases :
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Construction locale (Windows, Tesseract installé) : `pip install pyinstaller`, puis `python packaging/build.py --version v1.0.0`. Le zip est créé dans `dist/`.
 
 ## Licence
 
