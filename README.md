@@ -62,6 +62,11 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Journal filtrable (**Tout** / **Ventes** / **Problèmes**), bouton **Copier**, et chaque Ctrl+F3 regroupé dans un bloc qu'un clic déplie ou replie.
 - Aperçu en direct dans l'onglet **Prix** : « Moins cher 1 000 → ton prix 999 (plancher 700) », recalculé à chaque réglage.
 - **Mode compact** (bouton 🗗 Compact) : petite fenêtre toujours au premier plan pendant le jeu, avec la dernière action, l'état et la pause.
+- Onglet **Accueil** au démarrage : premiers pas qui se cochent tout seuls (calibrer, tester une lecture, première vente), les touches principales et le bilan de la session.
+- Panneau **Activité** : les dernières actions (ancien → nouveau prix, statut en couleur) et la dernière lecture.
+- Progression de **Tout vendre** et **Toute la liste** en haut et en mode compact (« Ligne 34 / 87 · 12 modifiées », total connu si le compteur « x/100 lots » est calibré), avec un bouton **Arrêter** qui ne met pas l'outil en pause.
+- Aide-mémoire des touches par-dessus le jeu (`Ctrl+Alt+H`) et notification Windows à la fin d'un long parcours quand vous êtes dans une autre fenêtre (désactivable dans **Options**).
+- Popups, bandeau et boîtes de confirmation au même style que l'interface.
 - Aide au survol sur les options, taille du texte réglable (onglet **Options**), taille et position de la fenêtre mémorisées.
 - Style **Verre** (onglet **Options** › Apparence) : le jeu derrière l'outil apparaît flouté, comme une vitre teintée, même pendant que vous jouez ; teinte réglable. Windows 10 (1803+) ou 11. Le style **Classique** reste opaque.
 - Profils de calibration (onglet **Calibration**) : un par HDV ou par personnage, on passe de l'un à l'autre en un clic. « Nouveau » copie le profil actuel ; il ne reste qu'à recalibrer ce qui change.
@@ -150,8 +155,9 @@ Au premier lancement, l'outil propose directement la calibration automatique. Si
 | Même touche deux fois | Forcer une lecture jugée suspecte |
 | `Ctrl+Alt+P` | Pause et reprise, arrêt des boucles |
 | `Ctrl+Alt+V` | Afficher les zones calibrées |
+| `Ctrl+Alt+H` | Aide-mémoire des touches par-dessus le jeu |
 
-Les raccourcis de calibration (`Ctrl+Alt+F1` à `Ctrl+Alt+F12`) sont listés dans l'onglet **Calibration**. Tous les raccourcis se changent dans l'onglet **Raccourcis**.
+Les raccourcis de calibration (`Ctrl+Alt+F1` à `Ctrl+Alt+F12`) sont listés dans l'onglet **Raccourcis**, section **Avancé**. Tous les raccourcis se changent dans l'onglet **Raccourcis**.
 
 ## Sécurité des prix
 

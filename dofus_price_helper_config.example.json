@@ -69,6 +69,8 @@
   "GLASS_OPACITY": 0.6,
   "WINDOW_GEOMETRY": "",
   "COMPACT_GEOMETRY": "",
+  "NOTIFY": true,
+  "FIRST_STEPS": [],
   "HOTKEYS": {
     "sell": "f1",
     "sell_all": "f2",
@@ -89,6 +91,7 @@
     "calibrate_auto": "ctrl+alt+f12",
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
+    "cheatsheet": "ctrl+alt+h",
     "quit": "ctrl+alt+q"
   }
 }
