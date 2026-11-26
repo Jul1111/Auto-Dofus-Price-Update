@@ -6,7 +6,8 @@ Dofus Price Helper — version ligne de commande
 Même moteur que l'interface graphique (dofus_core.py), sans fenêtre.
 
 Raccourcis par défaut (clé HOTKEYS de la config) :
-  F1                  vendre à la quantité affichée dans le jeu
+  F1                  vendre (objet de l'inventaire) OU mettre à jour (une de tes ventes) :
+                      le mode est détecté seul (SMART_F1 ; --f1-simple = toujours vendre)
   F2                  tout vendre au même prix (s'arrête seul : stock épuisé, autre objet, concurrent)
   F4                  optimiser (meilleur prix unitaire)
   (même touche 2x)    forcer une lecture suspecte
@@ -18,6 +19,7 @@ Raccourcis par défaut (clé HOTKEYS de la config) :
   Ctrl+Alt+F7 (x2)    mes ventes : texte du champ « Prix du lot » ; Ctrl+Alt+F8 : bouton « Modifier »
   Ctrl+Alt+F9 (x2)    mes ventes : 1re puis 2e ligne de la liste
   Ctrl+Alt+F10 (x2)   repère : titre « Hôtel de vente » (les zones suivent l'HDV déplacé)
+  Ctrl+Alt+F11 (x2)   (optionnel) nom de l'objet (historique des prix)
   Ctrl+Alt+F5 (x2)    (optionnel) calibrer la valeur du « Prix moyen »
   Ctrl+Alt+F6 (x2)    (optionnel) calibrer le compteur « 21/100 lots en vente »
   Ctrl+Shift+P        afficher ce qui est lu (debug)
@@ -25,19 +27,91 @@ Raccourcis par défaut (clé HOTKEYS de la config) :
   Ctrl+Alt+Q          quitter   (Échap n'est plus utilisé : il ferme les fenêtres du jeu)
 
 Options de vente rapide : AUTO_PASTE, CLICK_FIELD, AUTO_VALIDATE dans la config.
-Option : --debug  enregistre les images envoyées à l'OCR dans captures/
+
+Options de la ligne de commande (enregistrées dans la config, comme dans l'interface) :
+  --plancher PCT         prix plancher = PCT % du « Prix moyen » (0 = désactivé)
+  --sous-plancher MODE   concurrent sous le plancher : plancher | garder | arret
+  --f1-simple            F1 vend toujours (pas de mise à jour automatique)
+  --f1-intelligent       F1 vend OU met à jour selon le panneau ouvert (défaut)
+  --debug                enregistre les images envoyées à l'OCR dans captures/
 """
 from __future__ import annotations
 
+import argparse
 import sys
+from typing import List, Optional
 
 import dofus_core as core
-import keyboard
+
+FLOOR_MODES = {"plancher": "floor", "garder": "keep", "arret": "stop"}
+FLOOR_LABELS = {"floor": "au plancher", "keep": "garder mon prix", "stop": "arrêt (suspect)"}
 
 
-def main() -> int:
-    debug_dir = core.BASE_DIR / "captures" if "--debug" in sys.argv else None
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Dofus Price Helper, version ligne de commande.")
+    ap.add_argument("--plancher", type=float, metavar="PCT",
+                    help="prix plancher en %% du « Prix moyen » (0 = désactivé)")
+    ap.add_argument("--sous-plancher", choices=list(FLOOR_MODES), dest="sous_plancher",
+                    help="concurrent sous le plancher : plancher, garder (mon prix) ou arret")
+    f1 = ap.add_mutually_exclusive_group()
+    f1.add_argument("--f1-simple", dest="smart_f1", action="store_false", default=None,
+                    help="F1 vend toujours")
+    f1.add_argument("--f1-intelligent", dest="smart_f1", action="store_true",
+                    help="F1 vend OU met à jour une de tes ventes (défaut)")
+    ap.add_argument("--debug", action="store_true", help="images OCR dans captures/")
+    return ap.parse_args(argv)
+
+
+def apply_args(cfg: "core.Config", args: argparse.Namespace) -> bool:
+    """Reporte les options dans la config. True si quelque chose a changé."""
+    changed = False
+    if args.plancher is not None:
+        if args.plancher < 0:
+            raise ValueError("--plancher doit être positif (0 = désactivé)")
+        cfg.floor_ratio = round(args.plancher / 100, 4)
+        changed = True
+    if args.sous_plancher is not None:
+        cfg.floor_mode = FLOOR_MODES[args.sous_plancher]
+        changed = True
+    if args.smart_f1 is not None:
+        cfg.smart_f1 = args.smart_f1
+        changed = True
+    return changed
+
+
+def describe(cfg: "core.Config") -> str:
+    """Résumé des réglages de prix et du mode F1, affiché au démarrage."""
+    if cfg.floor_mode == "stop":
+        floor = (f"arrêt si < {cfg.min_avg_ratio:.0%} du prix moyen" if cfg.min_avg_ratio > 0
+                 else "désactivé")
+    elif cfg.floor_ratio > 0:
+        floor = f"{cfg.floor_ratio:.0%} du prix moyen, concurrent dessous : {FLOOR_LABELS[cfg.floor_mode]}"
+    else:
+        floor = "désactivé"
+    if cfg.floor_mode != "stop" and cfg.floor_ratio > 0 and not cfg.avg_region:
+        floor += " (zone « Prix moyen » à calibrer : Ctrl+Alt+F5)"
+    f1 = "vendre OU mettre à jour (auto)" if cfg.smart_f1 else "vendre"
+    if cfg.smart_f1 and not cfg.modify_button:
+        f1 += " (bouton « Modifier » à calibrer : Ctrl+Alt+F8)"
+    return f"F1 : {f1}\nPlancher : {floor}"
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    try:
+        args = parse_args(argv)
+    except SystemExit as e:
+        return int(e.code or 0)
+    import keyboard  # Windows : chargé ici pour que --help et les tests marchent sans
+
+    debug_dir = core.BASE_DIR / "captures" if args.debug else None
     cfg = core.Config.load()
+    try:
+        if apply_args(cfg, args):
+            cfg.save()
+            print("[Param] Réglages enregistrés dans la config.")
+    except ValueError as e:
+        print("[Erreur]", e)
+        return 2
     engine = core.PriceEngine(cfg, debug_dir=debug_dir)
 
     err = core.setup_tesseract(cfg)
@@ -75,11 +149,17 @@ def main() -> int:
 
     def print_all():
         sr = engine.read_only()
-        print(f"Quantité affichée : {sr.selected} (lu {sr.selected_raw!r})")
+        print(f"Quantité affichée : {sr.selected} (lu {sr.selected_raw!r})"
+              f" | prix moyen : {sr.avg if sr.avg else 'non lu'}")
         for lot, r in sr.prices.items():
             new_p = core.compute_price(r.value, cfg.undercut_mode, cfg.undercut_value,
                                        cfg.rounding, cfg.min_price)
-            print(f"  Lot {lot:>4}: {r.value} (conf {r.confidence:.0f}) -> {new_p}")
+            fp = (core.floor_price(lot, sr.avg, cfg.floor_ratio)
+                  if cfg.floor_mode != "stop" else None)
+            extra = ""
+            if fp and new_p is not None and new_p < fp:
+                extra = f"  -> plancher {fp} ({cfg.floor_ratio:.0%} du prix moyen)"
+            print(f"  Lot {lot:>4}: {r.value} (conf {r.confidence:.0f}) -> {new_p}{extra}")
 
     def toggle_pause():
         engine.paused = not engine.paused
@@ -118,6 +198,7 @@ def main() -> int:
     print("Dofus Price Helper (CLI) prêt.")
     print(f"Tableau: {'OK' if cfg.table_region else 'à calibrer'} | "
           f"Quantité: {'OK' if cfg.qty_region else 'à calibrer'} | coller auto : {cfg.auto_paste}")
+    print(describe(cfg))
     print(f"Quitter : {hk['quit']}")
     try:
         keyboard.wait(hk["quit"])

@@ -84,6 +84,15 @@ python dofus_price_helperV2.py     # ligne de commande
 
 Le module `keyboard` peut nécessiter des droits administrateur.
 
+La version ligne de commande a les mêmes raccourcis (F1 vend ou met à jour selon le panneau ouvert) et accepte quelques options, enregistrées dans la configuration :
+
+```bash
+python dofus_price_helperV2.py --plancher 70 --sous-plancher plancher   # plancher à 70 % du prix moyen
+python dofus_price_helperV2.py --plancher 0                             # plancher désactivé
+python dofus_price_helperV2.py --f1-simple                              # F1 vend toujours
+python dofus_price_helperV2.py --help
+```
+
 ## Utilisation
 
 ### Première calibration
