@@ -116,8 +116,7 @@ class Config:
     avg_region: Optional[List[int]] = None    # chiffres sous « PRIX MOYEN » (optionnel)
     count_region: Optional[List[int]] = None  # texte « 21/100 lots en vente » (optionnel)
     anchor_region: Optional[List[int]] = None # repère : titre « Hôtel de vente » (zones suivent l'HDV)
-    name_region: Optional[List[int]] = None   # nom de l'objet (sinon déduit du champ « Prix du lot »)
-    read_item_names: bool = True      # lire le nom de l'objet pour l'historique (en arrière-plan)
+    name_region: Optional[List[int]] = None   # nom de l'objet (reconnaître tes ventes ; sinon déduit)
     mine_region: Optional[List[int]] = None   # mes ventes : texte du champ « Prix du lot »
     modify_button: Optional[List[int]] = None # mes ventes : (x, y) bouton « Modifier »
     relist_row: Optional[List[int]] = None    # mes ventes : (x, y) centre de la 1re ligne visible
@@ -137,7 +136,7 @@ class Config:
     min_confidence: float = 60.0      # confiance OCR mini (0-100) pour coller auto
     max_ratio: float = 5.0            # écart max de prix unitaire entre lots
     confirm_window: float = 3.0       # ré-appuyer dans ce délai = forcer
-    own_price_ttl: float = 1800.0     # s : prix en tête = ton dernier prix -> pas d'undercut
+    own_price_ttl: float = 1800.0     # s : objet non reconnu -> prix en tête = ton dernier prix (même lot)
     min_avg_ratio: float = 0.5        # FLOOR_MODE "stop" : prix unitaire < 50 % du prix moyen = suspect
     floor_mode: str = "floor"         # concurrent sous le plancher : "floor" (se mettre au plancher)
                                       # | "keep" (garder ton prix en F3) | "stop" (suspect, arrêt)
@@ -1305,9 +1304,7 @@ def name_region_for(cfg: Config) -> Optional[Region]:
 
 
 def grab_name(cfg: Config) -> Optional[np.ndarray]:
-    """Image du nom (~1 ms). La lecture (lente) se fera en arrière-plan."""
-    if not cfg.read_item_names:
-        return None
+    """Image du nom de l'objet (~1 ms) : sert d'empreinte pour reconnaître l'objet (item_key)."""
     region = name_region_for(cfg)
     if region is None:
         return None
@@ -1316,23 +1313,6 @@ def grab_name(cfg: Config) -> Optional[np.ndarray]:
         return img.copy() if img is not None and img.size else None
     except Exception:
         return None
-
-
-_names = None
-
-
-def name_reader():
-    global _names
-    if _names is None:
-        from dofus_items import NameBook, NameReader
-        known = []
-        try:
-            with HISTORY_PATH.open(encoding="utf-8", newline="") as f:
-                known = [r.get("item", "") for r in csv.DictReader(f)]
-        except (OSError, csv.Error):
-            pass
-        _names = NameReader(NameBook(known))
-    return _names
 
 
 def _history_row(ts: float, action, lot, selected, reading, new_price, status, cfg: Config, item: str):
@@ -1373,51 +1353,98 @@ def _write_history(row: list, path: Path) -> None:
             print(f"[Historique] Écriture impossible: {e}")
 
 
-_hist_queue = None
-
-
-def _hist_worker():
-    while True:
-        args = _hist_queue.get()
-        if args is None:
-            break
-        img, row, path = args
-        try:
-            row[-1] = name_reader().read(img)
-        except Exception:
-            row[-1] = ""
-        _write_history(row, path)
-        _hist_queue.task_done()
-
-
-def flush_history(timeout: float = 5.0) -> None:
-    """Attend la fin des écritures en arrière-plan (à la fermeture)."""
-    if _hist_queue is None:
-        return
-    end = time.time() + timeout
-    while _hist_queue.unfinished_tasks and time.time() < end:
-        time.sleep(0.05)
-
-
 def log_history(action: str, lot: Optional[int], selected: Optional[int],
                 reading: Optional[Reading], new_price: Optional[int],
-                status: str, cfg: Config, path: Optional[Path] = None,
-                item_img: Optional[np.ndarray] = None) -> None:
-    """Une ligne d'historique. Avec `item_img`, le nom de l'objet est lu en arrière-plan
-    (la ligne est écrite juste après, avec l'heure de l'action)."""
-    global _hist_queue
-    path = path or HISTORY_PATH
-    row = _history_row(time.time(), action, lot, selected, reading, new_price, status, cfg, "")
-    if item_img is None:
-        _write_history(row, path)
-        return
-    if _hist_queue is None:
-        import atexit
-        import queue
-        _hist_queue = queue.Queue()
-        threading.Thread(target=_hist_worker, daemon=True).start()
-        atexit.register(flush_history)
-    _hist_queue.put((item_img, row, path))
+                status: str, cfg: Config, path: Optional[Path] = None) -> None:
+    """Une ligne d'historique (colonne « item » laissée vide : gardée pour la compatibilité)."""
+    _write_history(_history_row(time.time(), action, lot, selected, reading, new_price, status, cfg, ""),
+                   path or HISTORY_PATH)
+
+
+# --------------------------------------------------------------------------
+# Tes prix : reconnaître TES ventes dans le tableau (pas d'undercut contre toi-même)
+# --------------------------------------------------------------------------
+MY_PRICES_PATH = BASE_DIR / "dofus_my_prices.json"
+MY_PRICES_TTL = 2 * 86400   # s : un prix de vente vu ou posé est oublié après 2 jours
+
+
+def item_key(img: Optional[np.ndarray]) -> Optional[str]:
+    """Empreinte de l'objet = image binarisée de son nom (même objet -> mêmes pixels).
+    None si rien n'est écrit (panneau vide) : on ne sait alors pas de quel objet il s'agit."""
+    if img is None or img.size == 0:
+        return None
+    import hashlib
+    ink = _gray(img) > 110
+    if ink.sum() < 15:
+        return None
+    return hashlib.sha1(np.packbits(ink).tobytes() + str(ink.shape).encode()).hexdigest()[:16]
+
+
+class MyPrices:
+    """Prix de tes ventes en cours, par objet (empreinte du nom) et par lot.
+    Si le moins cher du tableau est l'un d'eux, c'est toi : on s'aligne au lieu de passer
+    dessous. Sans ça, chaque Ctrl+F3 baissait tes propres ventes d'un cran.
+    - « sûr » (objet reconnu, vente confirmée ou prix lu) : gardé 2 jours, sur le disque ;
+    - sinon (objet inconnu) : mémoire courte (OWN_PRICE_TTL), par lot seulement, comme avant."""
+
+    def __init__(self, path: Optional[Path] = None):
+        self.path = path
+        self._lock = threading.Lock()
+        self._data: Optional[Dict[str, Dict[str, float]]] = None   # "clé|lot" -> {prix: t}
+        self._short: Dict[tuple, float] = {}                       # (clé, lot, prix) -> t
+
+    def _load(self) -> Dict[str, Dict[str, float]]:
+        if self._data is None:
+            self._data = {}
+            if self.path and self.path.exists():
+                try:
+                    raw = json.loads(self.path.read_text(encoding="utf-8"))
+                    self._data = {k: {str(p): float(t) for p, t in v.items()} for k, v in raw.items()}
+                except (OSError, ValueError, AttributeError):
+                    self._data = {}
+        return self._data
+
+    def _save(self) -> None:
+        if not self.path:
+            return
+        now = time.time()
+        data = {k: {p: t for p, t in v.items() if now - t <= MY_PRICES_TTL} for k, v in self._data.items()}
+        data = {k: v for k, v in data.items() if v}
+        self._data = data
+        try:
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError as e:
+            print(f"[Tes prix] Sauvegarde impossible : {e}")
+
+    def has(self, key: Optional[str], lot: int, price: Optional[int], short_ttl: float) -> bool:
+        if price is None:
+            return False
+        now = time.time()
+        with self._lock:
+            if key is not None:
+                t = self._load().get(f"{key}|{lot}", {}).get(str(price))
+                if t is not None and now - t <= MY_PRICES_TTL:
+                    return True
+            # clé None = objet non reconnu à ce moment-là : peut être le même objet (prudence)
+            ts = [self._short.get((k, lot, price)) for k in {key, None}]
+            return any(t is not None and now - t <= short_ttl for t in ts)
+
+    def add(self, key: Optional[str], lot: int, price: Optional[int], sure: bool = True,
+            replaces: Optional[int] = None) -> None:
+        """Note une de tes ventes à `price`. `replaces` = son ancien prix (modifiée)."""
+        if price is None:
+            return
+        with self._lock:
+            self._short[(key, lot, price)] = time.time()
+            if key is None or not sure:
+                return
+            entry = self._load().setdefault(f"{key}|{lot}", {})
+            if replaces is not None and replaces != price:
+                entry.pop(str(replaces), None)
+            entry[str(price)] = time.time()
+            self._save()
 
 
 # --------------------------------------------------------------------------
@@ -1444,7 +1471,8 @@ class PriceEngine:
         self._lock = threading.Lock()
         self._pending: Optional[Tuple[int, int, float]] = None  # (lot, prix, t) à confirmer
         self._first_point: Dict[str, Tuple[Point, float]] = {}
-        self._my_last: Dict[int, Tuple[int, float]] = {}  # lot -> (prix mis en vente, t)
+        self.my_prices = MyPrices(MY_PRICES_PATH)   # tes ventes : pas d'undercut contre toi-même
+        self.progress = None   # Ctrl+F3 : appelé avec le Result de chaque ligne (journal en direct)
         self.last_anchor_msg = ""  # dernier message du repère HDV (lu puis vidé par l'interface)
 
     # ---- calibration ----
@@ -1576,7 +1604,7 @@ class PriceEngine:
                 break
             if attempt < RELIST_READ_TRIES - 1:
                 time.sleep(0.12)
-        name_img = grab_name(cfg)  # avant « Modifier » : le panneau se vide ensuite
+        key = item_key(grab_name(cfg))  # avant « Modifier » : le panneau se vide ensuite
         mine = sr.mine_r
         if mine is None or mine.value is None or mine.confidence < cfg.min_confidence:
             alone = read_mine(cfg)  # 2e lecture seule, plus grande : garder la plus sûre
@@ -1594,13 +1622,14 @@ class PriceEngine:
             return Result(lot, "error", f"[{tag}] Lot {lot} : aucun prix lu dans le tableau.", sr,
                           hint="Aucun prix lu")
         head = f"[{tag}] Lot {lot} | ton prix {mine.value} | moins cher {top.value}"
+        if key is not None and mine.confidence >= cfg.min_confidence:
+            self.my_prices.add(key, lot, mine.value)     # une de tes ventes est à ce prix
         if top.value >= mine.value:
             msg = "déjà le moins cher" if top.value == mine.value else "ton prix est déjà plus bas"
-            log_history("observe", lot, lot, top, mine.value, "cheapest", cfg, item_img=name_img)
+            log_history("observe", lot, lot, top, mine.value, "cheapest", cfg)
             return Result(lot, "ok", f"{head} | {msg}, rien à faire", sr, mine.value, hint="Déjà le moins cher")
 
-        last = self._my_last.get(lot)
-        own = last is not None and top.value == last[0] and time.time() - last[1] <= cfg.own_price_ttl
+        own = self.my_prices.has(key, lot, top.value, cfg.own_price_ttl)
         new_p = top.value if own else compute_price(top.value, cfg.undercut_mode, cfg.undercut_value,
                                                     cfg.rounding, cfg.min_price)
         # ---- plancher : un concurrent qui brade ne fait pas baisser sous FLOOR_RATIO × prix moyen
@@ -1608,12 +1637,12 @@ class PriceEngine:
         floored = fp is not None and new_p < fp
         if floored:
             if cfg.floor_mode == "keep":
-                log_history("observe", lot, lot, top, mine.value, "floor_keep", cfg, item_img=name_img)
+                log_history("observe", lot, lot, top, mine.value, "floor_keep", cfg)
                 return Result(lot, "ok", f"{head} | sous le plancher ({fp}) : ton prix gardé, rien à faire",
                               sr, mine.value, hint="Plancher : prix gardé", floored_top=top.value)
             new_p = fp
             if mine.value <= new_p:
-                log_history("observe", lot, lot, top, mine.value, "at_floor", cfg, item_img=name_img)
+                log_history("observe", lot, lot, top, mine.value, "at_floor", cfg)
                 return Result(lot, "ok", f"{head} | déjà au plancher ({fp}), rien à faire", sr,
                               mine.value, hint="Déjà au plancher", floored_top=top.value)
         problems = []
@@ -1640,7 +1669,7 @@ class PriceEngine:
         if problems and not forced:
             self._pending = (-lot, new_p, now)   # lot négatif : ne pas confondre avec F1
             input_price(new_p, cfg, paste=False)
-            log_history("read", lot, lot, top, new_p, "relist_suspect", cfg, item_img=name_img)
+            log_history("read", lot, lot, top, new_p, "relist_suspect", cfg)
             return Result(lot, "warn", f"{prefix} | SUSPECT ({'; '.join(problems)}). Copié seulement."
                           + ("" if auto else f" Ré-appuie dans {cfg.confirm_window:.0f}s pour forcer."),
                           sr, new_p, hint="Suspect")
@@ -1650,14 +1679,14 @@ class PriceEngine:
         if can_verify(cfg):
             ok, got = field_check(cfg, new_p)
             if not ok:
-                log_history("relist", lot, lot, top, new_p, "not_validated", cfg, item_img=name_img)
+                log_history("relist", lot, lot, top, new_p, "not_validated", cfg)
                 return Result(lot, "warn", f"{prefix} | collé mais PAS modifié : le champ affiche "
                               f"{got if got is not None else '?'} au lieu de {new_p}", sr, new_p,
                               hint="Prix collé incorrect")
         mine_box = mine_regions(cfg)[0]
         before = grab_screen(mine_box)
         press_modify(cfg)
-        self._my_last[lot] = (new_p, time.time())
+        self.my_prices.add(key, lot, new_p, sure=False)   # sûr seulement une fois confirmé
         wait_change(mine_box, before, cfg.relist_delay)
         # Après « Modifier », le jeu désélectionne la vente : panneau vide (« Veuillez
         # sélectionner un objet ») = modification acceptée. Ancien prix encore affiché = échec.
@@ -1672,17 +1701,17 @@ class PriceEngine:
             check = read_mine(cfg)
             confirmed = " (confirmation validée)"
         if check.value is None or check.confidence < cfg.min_confidence:
-            log_history("relist", lot, lot, top, new_p, "forced" if forced else "modified", cfg,
-                        item_img=name_img)
+            self.my_prices.add(key, lot, new_p, replaces=mine.value)
+            log_history("relist", lot, lot, top, new_p, "forced" if forced else "modified", cfg)
             return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}{confirmed}",
                           sr, new_p, hint=f"Modifié : {new_p}")
         if check.value != new_p:
-            log_history("relist", lot, lot, top, new_p, "unconfirmed", cfg, item_img=name_img)
+            log_history("relist", lot, lot, top, new_p, "unconfirmed", cfg)
             return Result(lot, "warn", f"{prefix} | modification NON confirmée (lu ensuite : "
                           f"{check.value if check.value is not None else '?'})", sr, new_p,
                           hint="Modif. non confirmée")
-        log_history("relist", lot, lot, top, new_p, "forced" if forced else "modified", cfg,
-                        item_img=name_img)
+        self.my_prices.add(key, lot, new_p, replaces=mine.value)
+        log_history("relist", lot, lot, top, new_p, "forced" if forced else "modified", cfg)
         return Result(lot, "ok", f"{prefix} | modifié{' (forcé)' if forced else ''}{confirmed}",
                       sr, new_p, hint=f"Modifié : {new_p}")
 
@@ -1827,6 +1856,11 @@ class PriceEngine:
                             time.sleep(0.15)          # lecture douteuse : on relit une fois
                             res = self._relist(auto=True)
                         done += 1
+                        if self.progress:
+                            try:
+                                self.progress(res)
+                            except Exception:
+                                pass
                         if res.level != "ok":
                             if "NON confirmée" in res.message:
                                 stop = f"ligne {g + 1} : {res.message}"  # sécurité : arrêt
@@ -1967,8 +2001,8 @@ class PriceEngine:
                 if not press_validate(cfg, expected=price):  # même lot, même prix -> Entrée
                     stop = f"le champ « Prix du lot » n'affiche plus {price} : pas validé"
                     break
-                self._my_last[lot] = (price, time.time())
-                log_history("sell", lot, sr.selected, top, price, "sell_all", cfg, item_img=grab_name(cfg))
+                self.my_prices.add(item_key(grab_name(cfg)), lot, price)
+                log_history("sell", lot, sr.selected, top, price, "sell_all", cfg)
                 segments[-1][2] += 1
                 n += 1
                 continue
@@ -2024,7 +2058,7 @@ class PriceEngine:
             return Result(None, "error", f"Tableau non calibré ({cfg.hotkeys['calibrate_table']} ×2).",
                           hint="Calibre le tableau")
         sr = screen if screen is not None else read_screen(cfg, self.debug_dir)
-        name_img = grab_name(cfg)
+        key = item_key(grab_name(cfg))
         prices = sr.values
         sel = sr.selected
 
@@ -2068,9 +2102,7 @@ class PriceEngine:
             conf = min((x.confidence for x in sr.prices.values()), default=-1)
             r = Reading(est, conf, "estimé")
             problems.append(f"personne ne vend le lot {lot}, prix estimé depuis les autres lots")
-        mine = self._my_last.get(lot)
-        own = (r.raw != "estimé" and mine is not None and r.value == mine[0]
-               and time.time() - mine[1] <= cfg.own_price_ttl)
+        own = r.raw != "estimé" and self.my_prices.has(key, lot, r.value, cfg.own_price_ttl)
         if own:  # le moins cher, c'est toi : on garde ton prix, pas d'undercut
             new_p = r.value
         else:
@@ -2105,7 +2137,7 @@ class PriceEngine:
         if problems and not forced:
             self._pending = (lot, new_p, now)
             input_price(new_p, cfg, paste=False)
-            log_history("read", lot, sel, r, new_p, "suspect", cfg, item_img=name_img)
+            log_history("read", lot, sel, r, new_p, "suspect", cfg)
             return Result(lot, "warn",
                           f"{prefix} | SUSPECT ({'; '.join(problems)}). Copié seulement. "
                           f"Ré-appuie dans {cfg.confirm_window:.0f}s pour forcer.",
@@ -2117,9 +2149,10 @@ class PriceEngine:
         done = input_price(new_p, cfg, paste=paste, validate=validate)
         refused = "PAS validé" in done   # champ relu différent : rien n'a été mis en vente
         if paste and not refused:
-            self._my_last[lot] = (new_p, time.time())
+            # mise en vente faite par l'outil : sûre ; simple collage (Entrée à toi) : mémoire courte
+            self.my_prices.add(key, lot, new_p, sure="mis en vente" in done)
         log_history("sell" if paste else "copy", lot, sel, r, new_p,
-                    "forced" if forced else done, cfg, item_img=name_img)
+                    "forced" if forced else done, cfg)
         return Result(lot, "warn" if refused else "ok", f"{prefix} | {done}{' (forcé)' if forced else ''}",
                       sr, new_p, hint="Prix collé incorrect" if refused else done.capitalize(),
                       floored_top=r.value if floored else None)

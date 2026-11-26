@@ -928,58 +928,103 @@ def test_reanchor_hdv_closed_keeps_zones(monkeypatch, tmp_path):
     assert "introuvable" in eng.last_anchor_msg
 
 
-# --- Tableau de bord
-def test_dashboard_builds(tmp_path):
-    import dofus_dashboard as dash
-    h = tmp_path / "dofus_price_history.csv"
-    h.write_text(",".join(core.HISTORY_HEADER) + "\n"
-                 "1794603901,2026-11-13 22:05:01,sell,1,1,600,95,599,saisi + mis en vente,fixed,1.0,none\n"
-                 "1794603917,2026-11-13 22:05:17,sell,10,10,6000,95,5999,sell_all,fixed,1.0,none\n"
-                 "1794651321,2026-11-14 11:15:21,relist,1,1,757,83,756,modified,fixed,1.0,none\n"
-                 "1794651322,2026-11-14 11:15:22,read,1,1,757,40,756,suspect,fixed,1.0,none\n",
-                 encoding="utf-8")
-    data = dash.compute(dash.load_rows(h))
-    assert data["count"]["vente"] == 2 and data["count"]["modif"] == 1 and data["count"]["suspect"] == 1
-    assert data["kamas"] == 599 + 5999 and data["lots"] == {1: 1, 10: 1}
-    assert dash.fmt(data["kamas"]) == "6 598" and list(data["days"]) == ["2026-11-13", "2026-11-14"]
-
-
-# --- Nom des objets
-def test_clean_name():
-    from dofus_items import clean_name
-    assert clean_name("Nageoire de\nCompétition\nNIV. 18") == "Nageoire de Compétition"
-    assert clean_name("Laine Céleste\nNIv, 3") == "Laine Céleste"
-    assert clean_name("Cuivre\n") == "Cuivre"
-    assert clean_name("|\n,,") == ""
-
-
-def test_name_snap_and_group():
-    from dofus_items import NameBook, group_names
-    book = NameBook(["Nageoire de Compétition"] * 5 + ["Cuivre"])
-    assert book.snap("Nagcoire de Compétition") == "Nageoire de Compétition"
-    assert book.snap("Bec du Tofu") is None
-    g = group_names(["Poils du Milimulou"] * 4 + ["Poiis du Milimulou", "Cuivre"])
-    assert g["Poiis du Milimulou"] == "Poils du Milimulou" and g["Cuivre"] == "Cuivre"
-
-
-def test_history_migrates_old_header_and_writes_item(tmp_path, monkeypatch):
+# --- Historique
+def test_history_migrates_old_header(tmp_path):
     h = tmp_path / "h.csv"
     old = core.HISTORY_HEADER[:-1]
     h.write_text(",".join(old) + "\n1,2026-11-13 22:05:01,sell,1,1,600,95,599,saisi,fixed,1.0,none\n",
                  encoding="utf-8")
-
-    class FakeReader:
-        def read(self, img):
-            return "Cuivre"
-    monkeypatch.setattr(core, "name_reader", lambda: FakeReader())
-    cfg = core.Config()
-    core.log_history("relist", 1, 1, core.Reading(77, 95), 76, "modified", cfg, path=h,
-                     item_img=np.zeros((4, 4, 3), np.uint8))
-    core.flush_history(3)
+    core.log_history("relist", 1, 1, core.Reading(77, 95), 76, "modified", core.Config(), path=h)
     rows = list(csv.DictReader(h.open(encoding="utf-8")))
     assert list(rows[0]) == core.HISTORY_HEADER and len(rows) == 2
-    assert rows[0]["item"] == "" and rows[1]["item"] == "Cuivre" and rows[1]["new_price"] == "76"
+    assert rows[1]["item"] == "" and rows[1]["new_price"] == "76"
     assert not list(tmp_path.glob("*_old_*"))          # rien d'archivé, colonne ajoutée
+
+
+# --- Tes prix : pas d'undercut contre toi-même
+def _name(seed: int) -> np.ndarray:
+    """Fausse image de nom d'objet (texte blanc), différente selon `seed`."""
+    img = np.zeros((20, 60, 3), np.uint8)
+    img[5:15, 4 + seed * 3:20 + seed * 5] = 255
+    return img
+
+
+def test_item_key():
+    assert core.item_key(_name(1)) == core.item_key(_name(1).copy())
+    assert core.item_key(_name(1)) != core.item_key(_name(2))
+    assert core.item_key(np.zeros((20, 60, 3), np.uint8)) is None      # panneau vide
+    assert core.item_key(None) is None
+
+
+def test_my_prices_persist_replace_and_expire(tmp_path, monkeypatch):
+    path = tmp_path / "p.json"
+    mp = core.MyPrices(path)
+    mp.add("abc", 100, 520)
+    mp.add("abc", 100, 499, replaces=520)                # vente modifiée : 520 n'existe plus
+    again = core.MyPrices(path)                          # nouvelle session
+    assert again.has("abc", 100, 499, 0) and not again.has("abc", 100, 520, 0)
+    assert not again.has("abc", 10, 499, 0) and not again.has("xyz", 100, 499, 0)
+    now = core.time.time()
+    monkeypatch.setattr(core.time, "time", lambda: now + core.MY_PRICES_TTL + 1)
+    assert not core.MyPrices(path).has("abc", 100, 499, 0)
+
+
+def test_my_prices_unknown_item_is_short_memory(tmp_path):
+    mp = core.MyPrices(tmp_path / "p.json")
+    mp.add(None, 1, 75)
+    assert mp.has(None, 1, 75, 60) and mp.has("abc", 1, 75, 60)      # par lot seulement, comme avant
+    assert not core.MyPrices(tmp_path / "p.json").has(None, 1, 75, 60)  # rien sur le disque
+    mp.add("abc", 1, 80, sure=False)
+    assert not core.MyPrices(tmp_path / "p.json").has("abc", 1, 80, 60)
+
+
+def test_relist_never_undercuts_own_listing_next_session(relist_engine, monkeypatch):
+    # Tu as 2 ventes du même objet : A à 500 (le moins cher du tableau, c'est toi) et B à 520.
+    eng, calls, st = relist_engine
+    monkeypatch.setattr(core, "grab_name", lambda c: _name(1))
+    st["screens"], st["mine"] = [scr({1: 500})], [500]
+    assert "déjà le moins cher" in eng.relist().message       # ligne A : prix noté
+    eng2 = core.PriceEngine(eng.cfg)                           # outil relancé
+    st["screens"], st["mine"] = [scr({1: 500})], [520, None]
+    res = eng2.relist()                                        # ligne B
+    assert calls == [("paste", 500), "modify"] and "aligné" in res.message   # pas 499
+
+
+def test_relist_other_item_same_price_is_undercut(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    names = iter([_name(1), _name(2)])
+    monkeypatch.setattr(core, "grab_name", lambda c: next(names))
+    st["screens"], st["mine"] = [scr({1: 500})], [500]
+    eng.relist()                                               # objet 1 à 500 : le tien
+    st["screens"], st["mine"] = [scr({1: 500})], [520, None]
+    eng.relist()                                               # objet 2 : 500 est un concurrent
+    assert calls == [("paste", 499), "modify"]
+
+
+def test_sell_does_not_undercut_own_listing(engine, monkeypatch):
+    eng, calls, screen = engine
+    monkeypatch.setattr(core, "grab_name", lambda c: _name(3))
+    screen({1: R(60, 95), 10: R(590, 95)}, 1)
+    eng.sell()                                                 # mis en vente à 59
+    screen({1: R(59, 95), 10: R(590, 95)}, 1)
+    res = core.PriceEngine(eng.cfg).sell()                     # nouvelle session, même objet
+    assert calls[-1] == (59, True, True) and "ton prix" in res.message
+
+
+def test_relist_all_reports_each_row(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    seen = []
+    eng.progress = seen.append
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step = True, [100, 100], 20
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(eng, "_page_rows", lambda shift, base: [(100, 0), (120, 1)])
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    monkeypatch.setattr(core, "_same_row", lambda a, b: False)
+    st["screens"] = [scr({1: 774}), scr({1: 800})]
+    st["mine"] = [774, 800]
+    eng.relist_all()
+    assert len(seen) == 2 and all("déjà le moins cher" in r.message for r in seen)
 
 
 def test_relist_logs_observation_when_cheapest(relist_engine, monkeypatch):
@@ -990,25 +1035,6 @@ def test_relist_logs_observation_when_cheapest(relist_engine, monkeypatch):
     st["mine"] = [774]
     eng.relist()
     assert logged == ["observe"]
-
-
-def test_dashboard_items(tmp_path):
-    import dofus_dashboard as dash
-    h = tmp_path / "dofus_price_history.csv"
-    lines = [",".join(core.HISTORY_HEADER)]
-    for i, (act, read, new, st, item) in enumerate([
-            ("sell", 80, 79, "saisi + mis en vente", "Cuivre"),
-            ("observe", 79, 79, "cheapest", "Cuivre"),
-            ("relist", 75, 74, "modified", "Cuivrc"),            # variante de lecture
-            ("relist", 400, 399, "modified", "Nageoire de Compétition")]):
-        lines.append(f"{1794603900 + i * 60},2026-11-13 22:0{i}:00,{act},1,1,{read},95,{new},{st},fixed,1.0,none,{item}")
-    h.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    items = dash.compute(dash.load_rows(h))["items"]
-    assert list(items) == ["Cuivre", "Nageoire de Compétition"]
-    c = items["Cuivre"]
-    assert c["ventes"] == 1 and c["modifs"] == 1 and [p[1] for p in c["points"]] == [80, 79, 75]
-    assert c["last_low"] == 75 and c["points"][1][2] == 79
-
 
 
 # --- Vérification du prix avant validation

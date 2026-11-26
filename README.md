@@ -29,8 +29,8 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 | Interface | Zones calibrées dans l'HDV |
 |---|---|
 | ![Interface](docs/interface.png) | ![Zones calibrées dans l'HDV](docs/calibrage.png) |
-| **Tableau de bord** | **Onglet Calibration** |
-| ![Tableau de bord](docs/tableau-de-bord.png) | ![Onglet Calibration](docs/assistant.png) |
+| **Onglet Calibration** | |
+| ![Onglet Calibration](docs/assistant.png) | |
 
 ## Fonctionnalités
 
@@ -43,6 +43,7 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Relecture du champ « Prix du lot » avant chaque validation.
 - Prix plancher calculé à partir du prix moyen, pour ne pas suivre un vendeur qui brade.
 - Blocage des lectures douteuses (confiance faible, incohérence entre lots).
+- Reconnaissance de vos propres ventes (par l'image du nom de l'objet) : l'outil ne passe jamais sous votre propre prix, même d'une session à l'autre.
 
 **Performance**
 - Reconnaissance des chiffres du jeu apprise automatiquement, environ 5 ms par lecture, avec Tesseract en secours.
@@ -52,7 +53,8 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Assistant de calibration pas à pas, avec vérification finale.
 - Zones qui suivent la fenêtre de l'HDV lorsqu'elle est déplacée.
 - Bandeau de résultat au-dessus de l'HDV et fenêtre toujours au premier plan.
-- Tableau de bord intégré : activité, historique et évolution du prix par objet.
+- Raccourcis modifiables dans l'onglet **Raccourcis** (bouton « Changer », puis la touche voulue).
+- Ctrl+F3 affiche chaque ligne traitée dans le journal, pendant le parcours.
 
 ## Installation
 
@@ -60,7 +62,7 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 
 - Windows 10 ou 11
 - Python 3.10 ou plus récent
-- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki), avec la langue française (recommandée pour la lecture du nom des objets)
+- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki)
 - Dofus en mode fenêtré ou plein écran fenêtré
 
 ### Étapes
@@ -122,7 +124,7 @@ Au premier lancement, l'assistant de calibration s'ouvre automatiquement (sinon 
 | `Ctrl+Alt+P` | Pause et reprise, arrêt des boucles |
 | `Ctrl+Alt+V` | Afficher les zones calibrées |
 
-Les raccourcis de calibration (`Ctrl+Alt+F1` à `Ctrl+Alt+F11`) sont listés dans l'onglet **Calibration**.
+Les raccourcis de calibration (`Ctrl+Alt+F1` à `Ctrl+Alt+F11`) sont listés dans l'onglet **Calibration**. Tous les raccourcis se changent dans l'onglet **Raccourcis**.
 
 ## Sécurité des prix
 
@@ -132,6 +134,7 @@ Les raccourcis de calibration (`Ctrl+Alt+F1` à `Ctrl+Alt+F11`) sont listés dan
 | Champ « Prix du lot » différent du prix calculé | Aucune validation |
 | Concurrent sous le prix plancher | Vente au plancher, conservation du prix actuel ou arrêt (onglet **Prix**) |
 | Votre prix est déjà le plus bas | Aucune baisse |
+| Le moins cher est une autre de vos ventes du même objet | Alignement sur ce prix, pas de baisse |
 | F2 : compteur de lots inchangé après une vente | Arrêt |
 
 ## Configuration
@@ -146,7 +149,7 @@ Les réglages sont modifiables dans l'interface et enregistrés dans `dofus_pric
 | `VERIFY_BEFORE_ENTER` | Relecture du champ avant validation | `true` |
 | `AUTO_VALIDATE` | Mise en vente automatique après saisie | `false` |
 | `RELIST_AUTO` | Autoriser Ctrl+F3 | `false` |
-| `HOTKEYS` | Raccourcis clavier | voir l'exemple |
+| `HOTKEYS` | Raccourcis clavier (modifiables dans l'onglet **Raccourcis**) | voir l'exemple |
 
 ## Structure du projet
 
@@ -156,13 +159,11 @@ Auto-Dofus-Price-Update/
 ├── dofus_price_helperV2.py     Version ligne de commande
 ├── dofus_core.py               Moteur : lecture, calcul des prix, saisie, contrôles
 ├── dofus_digits.py             Reconnaissance rapide des chiffres
-├── dofus_items.py              Lecture du nom des objets
-├── dofus_dashboard.py          Calculs du tableau de bord
 ├── docs/                       Captures d'écran
 └── tests/                      Tests unitaires et tests OCR sur captures réelles
 ```
 
-Fichiers générés localement et non versionnés : `dofus_price_helper_config.json`, `dofus_price_history.csv`, `digit_templates.npz`, `hdv_anchor.png`.
+Fichiers générés localement et non versionnés : `dofus_price_helper_config.json`, `dofus_price_history.csv`, `digit_templates.npz`, `hdv_anchor.png`, `dofus_my_prices.json` (prix de vos ventes, gardés 2 jours).
 
 ## Tests
 

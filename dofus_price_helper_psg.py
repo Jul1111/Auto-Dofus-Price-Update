@@ -60,24 +60,49 @@ CARD = "#202227"
 MUTED = "#9aa0a6"
 BTN2 = "#3a3f47"
 ORANGE = "#e67e22"
-# Tableau de bord : une couleur par graphique (une seule série chacun), palette sombre validée
-DASH_COLORS = {"ventes": "#3987e5", "kamas": "#199e70", "modifs": "#d95926", "heures": "#3987e5",
-               "lots": "#3987e5"}
+HOTKEY_LABELS = {
+    "sell": "Vendre (objet de l'inventaire) OU mettre à jour (une de tes ventes)",
+    "sell_all": "Tout vendre : répète la mise en vente (Entrée) tant que c'est sûr",
+    "optimize": "Meilleur lot (prix par objet le plus haut)",
+    "relist": "Remettre la vente sélectionnée sous le moins cher",
+    "relist_all": "Toute la liste (interrupteur dans « Mes ventes »)",
+    "pause": "Pause / reprise (arrête aussi les boucles)",
+    "show_zones": "Afficher les zones calibrées",
+    "calibrate_anchor": "Repère : titre « Hôtel de vente » (×2)",
+    "calibrate_table": "Tableau « Actuellement en vente » (×2)",
+    "calibrate_qty": "Menu « Quantité » (×2)",
+    "calibrate_field": "Champ « Prix du lot »",
+    "calibrate_avg": "Prix moyen (×2)",
+    "calibrate_count": "Compteur « x/100 lots » (×2)",
+    "calibrate_modify": "Bouton « Modifier »",
+    "calibrate_rows": "Lignes de « mes ventes » (×2)",
+    "calibrate_button": "Bouton « Mettre en vente »",
+    "calibrate_name": "Nom de l'objet (×2)",
+    "calibrate_mine": "Ton prix (secours) (×2)",
+}
+CALIB_HOTKEYS = [k for k in HOTKEY_LABELS if k.startswith("calibrate_")]
+# Touches seules autorisées (sans Ctrl/Alt/Maj) : elles ne servent pas à écrire dans le chat du jeu.
+_SOLO_KEYS = {f"f{i}" for i in range(1, 25)} | {"insert", "home", "page up", "page down",
+                                                 "pause", "scroll lock"}
 
 
-def _fmt_num(n) -> str:
-    return f"{n:,}".replace(",", " ")
+def hotkey_problem(name: str, combo: str, hotkeys: dict) -> Optional[str]:
+    """Pourquoi `combo` ne peut pas devenir le raccourci `name` (None = accepté)."""
+    if not combo or combo.startswith("!"):
+        return "lecture du clavier impossible" + (f" ({combo[1:]})" if combo else "")
+    if combo == "esc":
+        return None
+    parts = combo.split("+")
+    if parts[-1] in ("enter", "backspace", "esc", "end") or combo in ("ctrl+v", "ctrl+a"):
+        return "touche utilisée par l'outil pour saisir les prix (Entrée, Fin, Retour arrière, Ctrl+V)"
+    if len(parts) == 1 and combo not in _SOLO_KEYS:
+        return "touche seule trop courante (elle se déclencherait en écrivant) : ajoute Ctrl, Alt ou Maj"
+    for other, value in hotkeys.items():
+        if other != name and value == combo:
+            return f"déjà utilisé par « {HOTKEY_LABELS.get(other, other)} »"
+    return None
 
 
-def _nice_step(vmax: int) -> int:
-    if vmax <= 5:
-        return 1
-    raw = vmax / 4
-    mag = 10 ** (len(str(int(raw))) - 1)
-    for m in (1, 2, 5, 10):
-        if raw <= m * mag:
-            return int(m * mag)
-    return int(10 * mag)
 POINT_COLORS = {"price_field": "#e74c3c", "sell_button": "#2ecc71", "modify_button": "#3498db"}
 POINT_LABELS = {"price_field": "Champ « Prix du lot »", "sell_button": "Bouton « Mettre en vente »",
                 "modify_button": "Bouton « Modifier »"}
@@ -98,9 +123,14 @@ class App(ctk.CTk):
 
         self.cfg = core.Config.load()
         self.engine = core.PriceEngine(self.cfg)
+        self.engine.progress = lambda r: self.ui_events.put(
+            ("log", ("   " + r.message, {"warn": "WARN", "error": "ERROR"}.get(r.level, "OK"))))
         self.jobs: "queue.Queue[tuple]" = queue.Queue()
         self.ui_events: "queue.Queue[tuple]" = queue.Queue()
         self._save_after: Optional[str] = None
+        self.hk_labels: dict = {}      # raccourci -> [(libellé, suffixe)]
+        self.hk_buttons: dict = {}     # raccourci -> bouton « Changer »
+        self._capturing: Optional[str] = None
 
         self._build_vars()
         self._build_ui()
@@ -141,7 +171,6 @@ class App(ctk.CTk):
             "relist_auto": ctk.BooleanVar(value=c.relist_auto),
             "relist_confirm_enter": ctk.BooleanVar(value=c.relist_confirm_enter),
             "fast_digits": ctk.BooleanVar(value=c.fast_digits),
-            "read_item_names": ctk.BooleanVar(value=c.read_item_names),
             "banner": ctk.BooleanVar(value=c.banner),
             "verify_before_enter": ctk.BooleanVar(value=c.verify_before_enter),
             "smart_f1": ctk.BooleanVar(value=c.smart_f1),
@@ -202,9 +231,6 @@ class App(ctk.CTk):
                      ).pack(side="left", padx=16)
         ctk.CTkButton(head, text="Voir zones", width=90, fg_color=BTN2,
                       command=self._show_zones).pack(side="right", padx=(4, 12))
-        ctk.CTkButton(head, text="📊 Tableau de bord", width=140, fg_color=BTN2,
-                      command=lambda: (self.tabs.set("Tableau de bord"), self._on_tab())
-                      ).pack(side="right", padx=4)
         ctk.CTkButton(head, text="Lire (test)", width=90, fg_color=BTN2,
                       command=lambda: self.jobs.put(("read", None))).pack(side="right", padx=4)
         ctk.CTkCheckBox(head, text="📌", variable=self.v["always_on_top"], width=44
@@ -213,13 +239,11 @@ class App(ctk.CTk):
         self.pause_btn.pack(side="right", padx=4)
 
         # ---------------- onglets
-        tabs = ctk.CTkTabview(self, anchor="nw", segmented_button_selected_color="#1f6aa5",
-                              command=self._on_tab)
+        tabs = ctk.CTkTabview(self, anchor="nw", segmented_button_selected_color="#1f6aa5")
         tabs.grid(row=1, column=0, sticky="nsew", padx=(10, 5), pady=(6, 4))
         self.tabs = tabs
-        for name in ("Raccourcis", "Tableau de bord", "Prix", "Mes ventes", "Calibration", "Options"):
+        for name in ("Raccourcis", "Prix", "Mes ventes", "Calibration", "Options"):
             tabs.add(name)
-        self._tab_dashboard(ctk.CTkScrollableFrame(tabs.tab("Tableau de bord"), fg_color="transparent"))
         self._tab_shortcuts(ctk.CTkScrollableFrame(tabs.tab("Raccourcis"), fg_color="transparent"), hk)
         self._tab_prices(ctk.CTkScrollableFrame(tabs.tab("Prix"), fg_color="transparent"))
         self._tab_relist(ctk.CTkScrollableFrame(tabs.tab("Mes ventes"), fg_color="transparent"), hk)
@@ -278,18 +302,22 @@ class App(ctk.CTk):
     # ---- onglets
     def _tab_shortcuts(self, page, hk):
         page.pack(fill="both", expand=True)
-        b = self._section(page, "Vendre (onglet Vente de l'HDV)")
-        for key, txt in ((hk["sell"], "Vendre (objet de l'inventaire) OU mettre à jour (une de tes ventes)"),
-                         (hk["sell_all"], "Tout vendre : répète la mise en vente (Entrée) tant que c'est sûr"),
-                         (hk["optimize"], "Meilleur lot (prix par objet le plus haut)")):
-            self._hotkey_line(b, key, txt)
+        b = self._section(page, "Vendre (onglet Vente de l'HDV)",
+                          "« Changer » puis appuie sur la nouvelle touche ou combinaison (Échap = annuler).")
+        for name in ("sell", "sell_all", "optimize"):
+            self._hotkey_line(b, name, HOTKEY_LABELS[name])
         b = self._section(page, "Mes ventes (liste de tes ventes en cours)")
-        self._hotkey_line(b, hk["relist"], "Remettre la vente sélectionnée sous le moins cher")
-        self._hotkey_line(b, hk["relist_all"], "Toute la liste (interrupteur dans « Mes ventes »)")
+        for name in ("relist", "relist_all"):
+            self._hotkey_line(b, name, HOTKEY_LABELS[name])
         b = self._section(page, "Divers")
-        self._hotkey_line(b, "même touche ×2", "Forcer une lecture jugée suspecte")
-        self._hotkey_line(b, hk["pause"], "Pause / reprise (arrête aussi les boucles)")
-        self._hotkey_line(b, hk["show_zones"], "Afficher les zones calibrées")
+        self._hotkey_line(b, None, "Forcer une lecture jugée suspecte", literal="même touche ×2")
+        for name in ("pause", "show_zones"):
+            self._hotkey_line(b, name, HOTKEY_LABELS[name])
+        b = self._section(page, "Raccourcis de calibration", "Utilisés dans le jeu, souris sur la zone.")
+        for name in CALIB_HOTKEYS:
+            self._hotkey_line(b, name, HOTKEY_LABELS[name])
+        ctk.CTkButton(b, text="Rétablir les raccourcis par défaut", width=230, fg_color=BTN2,
+                      command=self._reset_hotkeys).pack(anchor="w", pady=(8, 2))
         b = self._section(page, "Vente rapide", "Ce que fait F1 après avoir calculé le prix.")
         ctk.CTkSwitch(b, text="Coller le prix automatiquement", variable=self.v["auto_paste"]).pack(anchor="w", pady=2)
         ctk.CTkSwitch(b, text="Cliquer sur « Prix du lot » avant de coller", variable=self.v["click_field"]
@@ -297,11 +325,78 @@ class App(ctk.CTk):
         ctk.CTkSwitch(b, text="Mettre en vente automatiquement (Entrée) ⚠️", variable=self.v["auto_validate"],
                       progress_color=ORANGE).pack(anchor="w", pady=2)
 
-    def _hotkey_line(self, parent, key: str, text: str):
+    def _hk_label(self, parent, name: str, suffix: str = "", **kw):
+        """Libellé d'un raccourci, mis à jour quand on le change (_refresh_hotkey_labels)."""
+        lbl = ctk.CTkLabel(parent, text=self.cfg.hotkeys[name].upper() + suffix, **kw)
+        self.hk_labels.setdefault(name, []).append((lbl, suffix))
+        return lbl
+
+    def _refresh_hotkey_labels(self):
+        for name, lbls in self.hk_labels.items():
+            for lbl, suffix in lbls:
+                lbl.configure(text=self.cfg.hotkeys[name].upper() + suffix)
+
+    def _hotkey_line(self, parent, name: Optional[str], text: str, literal: str = ""):
         r = self._row(parent)
-        ctk.CTkLabel(r, text=key.upper(), width=120, corner_radius=6, fg_color="#2b2f36",
-                     font=ctk.CTkFont(family="Consolas", weight="bold")).pack(side="left", padx=(2, 10))
+        style = dict(width=120, corner_radius=6, fg_color="#2b2f36",
+                     font=ctk.CTkFont(family="Consolas", weight="bold"))
+        if name:
+            self._hk_label(r, name, **style).pack(side="left", padx=(2, 10))
+            btn = ctk.CTkButton(r, text="Changer", width=80, height=24, fg_color=BTN2,
+                                command=lambda n=name: self._capture_hotkey(n))
+            btn.pack(side="right", padx=4)
+            self.hk_buttons[name] = btn
+        else:
+            ctk.CTkLabel(r, text=literal.upper(), **style).pack(side="left", padx=(2, 10))
         ctk.CTkLabel(r, text=text, anchor="w").pack(side="left")
+
+    # ---- changement de raccourci
+    def _capture_hotkey(self, name: str):
+        if not KEYBOARD_AVAILABLE:
+            self._log("[Hotkeys] Module 'keyboard' indisponible : raccourcis non modifiables.", "ERROR")
+            return
+        if self._capturing:
+            return
+        self._capturing = name
+        self.hk_buttons[name].configure(text="Appuie…", fg_color=ORANGE)
+        self._log(f"[Hotkeys] « {HOTKEY_LABELS[name]} » : appuie sur la nouvelle touche ou combinaison "
+                  "(Échap = annuler).", "CAL")
+        try:
+            keyboard.unhook_all_hotkeys()   # sinon la touche choisie déclencherait son action actuelle
+        except Exception:
+            pass
+
+        def read():
+            try:
+                combo = keyboard.read_hotkey(suppress=False)
+            except Exception as e:
+                combo = f"!{e}"
+            self.ui_events.put(("hotkey", (name, combo)))
+        threading.Thread(target=read, daemon=True).start()
+
+    def _on_hotkey_captured(self, name: str, combo: str):
+        self._capturing = None
+        self.hk_buttons[name].configure(text="Changer", fg_color=BTN2)
+        err = hotkey_problem(name, combo, self.cfg.hotkeys)
+        if combo == "esc":
+            self._log("[Hotkeys] Changement annulé.", "INFO")
+        elif err:
+            self._log(f"[Hotkeys] {combo.upper()} refusé : {err}.", "ERROR")
+        else:
+            self.cfg.hotkeys[name] = combo
+            self.cfg.save()
+            self._log(f"[Hotkeys] « {HOTKEY_LABELS[name]} » = {combo.upper()}.", "OK")
+            self._refresh_hotkey_labels()
+        self._register_hotkeys()
+
+    def _reset_hotkeys(self):
+        if self._capturing:
+            return
+        self.cfg.hotkeys = dict(core.DEFAULT_HOTKEYS)
+        self.cfg.save()
+        self._refresh_hotkey_labels()
+        self._register_hotkeys()
+        self._log("[Hotkeys] Raccourcis par défaut rétablis.", "WARN")
 
     def _tab_prices(self, page):
         page.pack(fill="both", expand=True)
@@ -330,7 +425,7 @@ class App(ctk.CTk):
 
     def _tab_relist(self, page, hk):
         page.pack(fill="both", expand=True)
-        b = self._section(page, f"Toute la liste ({hk['relist_all'].upper()})",
+        b = self._section(page, "Toute la liste",
                           "Clique chaque ligne, met à jour, défile et continue. Départ à la ligne sous la "
                           "souris. Le mode le plus risqué vis-à-vis des CGU d'Ankama.")
         ctk.CTkSwitch(b, text="Activer le parcours de toute la liste ⚠️", variable=self.v["relist_auto"],
@@ -366,30 +461,29 @@ class App(ctk.CTk):
         b = self._section(page, "Zones et points",
                           f"Bouton = compte à rebours de {self.cfg.calib_countdown}s pour placer la souris "
                           "(zones : coin haut-gauche puis bas-droit). Ou utilise le raccourci en jeu.")
-        hk = self.cfg.hotkeys
         self.calib_labels = {}
         items = [
             ("anchor", "Repère : titre « Hôtel de vente » (suivi)",
-             hk["calibrate_anchor"] + " ×2", False, lambda: self._calib_rect_ui("anchor", "titre de l'HDV")),
-            ("table", "Tableau « Actuellement en vente »", hk["calibrate_table"] + " ×2", True,
+             ("calibrate_anchor", " ×2"), False, lambda: self._calib_rect_ui("anchor", "titre de l'HDV")),
+            ("table", "Tableau « Actuellement en vente »", ("calibrate_table", " ×2"), True,
              lambda: self._calib_rect_ui("table", "tableau")),
-            ("qty", "Menu « Quantité »", hk["calibrate_qty"] + " ×2", True,
+            ("qty", "Menu « Quantité »", ("calibrate_qty", " ×2"), True,
              lambda: self._calib_rect_ui("qty", "quantité")),
-            ("price_field", "Champ « Prix du lot » (sert aussi à lire ton prix)", hk["calibrate_field"], True,
+            ("price_field", "Champ « Prix du lot » (sert aussi à lire ton prix)", ("calibrate_field", ""), True,
              lambda: self._countdown("champ Prix du lot", lambda: self._calib_point("price_field"))),
-            ("avg", "Prix moyen (plancher, garde-fou)", hk["calibrate_avg"] + " ×2", False,
+            ("avg", "Prix moyen (plancher, garde-fou)", ("calibrate_avg", " ×2"), False,
              lambda: self._calib_rect_ui("avg", "prix moyen")),
-            ("count", "Compteur « x/100 lots » (F2 vérifié)", hk["calibrate_count"] + " ×2", False,
+            ("count", "Compteur « x/100 lots » (F2 vérifié)", ("calibrate_count", " ×2"), False,
              lambda: self._calib_rect_ui("count", "compteur")),
-            ("modify_button", "Bouton « Modifier » (sinon Entrée)", hk["calibrate_modify"], False,
+            ("modify_button", "Bouton « Modifier » (sinon Entrée)", ("calibrate_modify", ""), False,
              lambda: self._countdown("bouton Modifier", lambda: self._calib_point("modify_button"))),
-            ("rows", "Lignes de « mes ventes » (1re puis 2e)", hk["calibrate_rows"] + " ×2", False,
+            ("rows", "Lignes de « mes ventes » (1re puis 2e)", ("calibrate_rows", " ×2"), False,
              self._calib_rows_ui),
-            ("sell_button", "Bouton « Mettre en vente » (si validation au clic)", hk["calibrate_button"], False,
+            ("sell_button", "Bouton « Mettre en vente » (si validation au clic)", ("calibrate_button", ""), False,
              lambda: self._countdown("bouton Mettre en vente", lambda: self._calib_point("sell_button"))),
-            ("name", "Nom de l'objet (optionnel, déduit sinon)", hk["calibrate_name"] + " ×2", False,
+            ("name", "Nom de l'objet (reconnaître tes ventes, déduit sinon)", ("calibrate_name", " ×2"), False,
              lambda: self._calib_rect_ui("name", "nom de l'objet")),
-            ("mine", "Ton prix (secours) : le champ « Prix du lot »", hk["calibrate_mine"] + " ×2", False,
+            ("mine", "Ton prix (secours) : le champ « Prix du lot »", ("calibrate_mine", " ×2"), False,
              lambda: self._calib_rect_ui("mine", "ton prix")),
         ]
         for key, label, hot, required, cmd in items:
@@ -397,8 +491,8 @@ class App(ctk.CTk):
             st = ctk.CTkLabel(r, text="", width=26)
             st.pack(side="left")
             ctk.CTkLabel(r, text=label, anchor="w", width=300).pack(side="left")
-            ctk.CTkLabel(r, text=hot.upper(), text_color=MUTED, width=120, anchor="w",
-                         font=ctk.CTkFont(family="Consolas")).pack(side="left")
+            self._hk_label(r, *hot, text_color=MUTED, width=120, anchor="w",
+                           font=ctk.CTkFont(family="Consolas")).pack(side="left")
             if not required:
                 ctk.CTkButton(r, text="✕", width=28, height=26, fg_color=BTN2,
                               command=lambda k=key: self._clear_zone(k)).pack(side="right", padx=(0, 4))
@@ -427,263 +521,6 @@ class App(ctk.CTk):
         ctk.CTkSwitch(b, text="Utiliser la lecture rapide", variable=self.v["fast_digits"]).pack(anchor="w", pady=2)
         ctk.CTkButton(b, text="Réapprendre les chiffres", width=180, fg_color=BTN2,
                       command=self._reset_digits).pack(anchor="w", pady=4)
-        b = self._section(page, "Nom des objets",
-                          "Lu en arrière-plan après chaque action (ne ralentit pas la vente) pour "
-                          "l'historique et le tableau de bord. Meilleur avec le français de Tesseract.")
-        ctk.CTkSwitch(b, text="Lire le nom des objets", variable=self.v["read_item_names"]).pack(anchor="w", pady=2)
-
-    def _on_tab(self):
-        if self.tabs.get() == "Tableau de bord":
-            self._refresh_dashboard()
-
-    # ---- tableau de bord (intégré)
-    def _tab_dashboard(self, page):
-        page.pack(fill="both", expand=True)
-        top = ctk.CTkFrame(page, fg_color="transparent")
-        top.pack(fill="x", padx=6, pady=(4, 0))
-        self.dash_sub = ctk.CTkLabel(top, text="", text_color=MUTED, anchor="w")
-        self.dash_sub.pack(side="left")
-        ctk.CTkButton(top, text="↻ Actualiser", width=100, height=26, fg_color=BTN2,
-                      command=self._refresh_dashboard).pack(side="right")
-        tiles = ctk.CTkFrame(page, fg_color="transparent")
-        tiles.pack(fill="x", padx=2, pady=4)
-        self.dash_tiles = {}
-        for i, (key, label) in enumerate((("ventes", "Lots en vente"), ("kamas", "Kamas affichés"),
-                                          ("modifs", "Prix modifiés"), ("baisse", "Baisse moy."),
-                                          ("suspects", "Suspects"))):
-            t = ctk.CTkFrame(tiles, fg_color=CARD)
-            t.grid(row=0, column=i, sticky="nsew", padx=3, pady=4)
-            tiles.grid_columnconfigure(i, weight=1, uniform="tile")
-            ctk.CTkLabel(t, text=label, text_color=MUTED, anchor="w", font=ctk.CTkFont(size=11),
-                         wraplength=110, justify="left").pack(anchor="w", padx=8, pady=(6, 0))
-            v = ctk.CTkLabel(t, text="—", font=ctk.CTkFont(size=19, weight="bold"), anchor="w")
-            v.pack(anchor="w", padx=10)
-            s = ctk.CTkLabel(t, text="", text_color=MUTED, font=ctk.CTkFont(size=10), anchor="w",
-                             wraplength=110, justify="left")
-            s.pack(anchor="w", padx=8, pady=(0, 6))
-            self.dash_tiles[key] = (v, s)
-        # ---- prix par objet
-        b = self._section(page, "Prix par objet", "Prix par objet dans le temps : le moins cher lu à l'HDV "
-                                                  "et ton prix. Survole la courbe pour le détail.")
-        r = self._row(b)
-        self.item_var = ctk.StringVar(value="")
-        self.item_menu = ctk.CTkOptionMenu(r, values=["—"], variable=self.item_var, width=320,
-                                           dynamic_resizing=False, command=lambda _v: self._draw_item_chart())
-        self.item_menu.pack(side="left")
-        self.item_info = ctk.CTkLabel(r, text="", text_color=MUTED)
-        self.item_info.pack(side="left", padx=10)
-        self.item_cv = tk.Canvas(b, height=200, bg=CARD, highlightthickness=0)
-        self.item_cv.pack(fill="x", expand=True, pady=(4, 0))
-        self.item_cv.bind("<Configure>", lambda _e: self._draw_item_chart())
-        self.item_cv.bind("<Motion>", self._item_hover)
-        self.item_cv.bind("<Leave>", lambda _e: self.item_cv.delete("hover"))
-        b = self._section(page, "Objets", "Les plus actifs en premier.")
-        self.items_text = tk.Text(b, height=8, bg="#1a1c20", fg="#EDEDED", relief="flat",
-                                  font=("Consolas", 9), highlightthickness=0, wrap="none")
-        self.items_text.pack(fill="x")
-        self.items_text.configure(state="disabled")
-        self.dash_items = {}
-        self._item_pts = []
-
-        self.dash_charts = {}
-        for key, title, note in (("ventes", "Lots mis en vente par jour", "F1 / F2 avec mise en vente"),
-                                 ("kamas", "Kamas mis en vente par jour", "Somme des prix affichés"),
-                                 ("modifs", "Prix modifiés par jour", "F3 / Ctrl+F3"),
-                                 ("heures", "Activité par heure", "Ventes + modifications"),
-                                 ("lots", "Mises en vente par taille de lot", "")):
-            b = self._section(page, title, note)
-            cv = tk.Canvas(b, height=170, bg=CARD, highlightthickness=0)
-            cv.pack(fill="x", expand=True)
-            cv.bind("<Configure>", lambda _e, k=key: self._redraw_chart(k))
-            self.dash_charts[key] = (cv, [], [], "")
-        b = self._section(page, "Dernières actions")
-        self.dash_recent = tk.Text(b, height=12, bg="#1a1c20", fg="#EDEDED", relief="flat",
-                                   font=("Consolas", 9), highlightthickness=0, wrap="none")
-        self.dash_recent.pack(fill="x")
-        self.dash_recent.configure(state="disabled")
-
-    def _refresh_dashboard(self):
-        import dofus_dashboard as dash
-        try:
-            data = dash.compute(dash.load_rows())
-        except Exception as e:
-            self.dash_sub.configure(text=f"Historique illisible : {e}")
-            return
-        c = data["count"]
-        f = dash.fmt
-        period = (f"Historique du {data['first']:%d/%m/%Y} au {data['last']:%d/%m/%Y} · "
-                  f"{f(len(data['rows']))} lignes" if data["first"] else "Pas encore d'historique.")
-        self.dash_sub.configure(text=period)
-        vals = {
-            "ventes": (f(c["vente"]), ""),
-            "kamas": (f(data["kamas"]), "prix affichés, pas des ventes conclues"),
-            "modifs": (f(c["modif"]), "F3 / Ctrl+F3"),
-            "baisse": ((f(data["drop"]) + " %") if data["drop"] is not None else "—", "sous le moins cher lu"),
-            "suspects": (f(c["suspect"]), (f(data["suspect_rate"]) + " % des actions")
-                         if data["suspect_rate"] is not None else ""),
-        }
-        for k, (v, s) in vals.items():
-            self.dash_tiles[k][0].configure(text=v)
-            self.dash_tiles[k][1].configure(text=s)
-        days = data["days"]
-        dl = [d[8:10] + "/" + d[5:7] for d in days]
-        lots = sorted(data["lots"])
-        series = {
-            "ventes": (dl, [v["ventes"] for v in days.values()], "lots"),
-            "kamas": (dl, [v["kamas"] for v in days.values()], "kamas"),
-            "modifs": (dl, [v["modifs"] for v in days.values()], "modifications"),
-            "heures": ([f"{h}h" for h in range(24)], [data["hours"].get(h, 0) for h in range(24)], "actions"),
-            "lots": ([f"lot {l}" for l in lots], [data["lots"][l] for l in lots], "lots"),
-        }
-        for k, (labels, values, unit) in series.items():
-            cv = self.dash_charts[k][0]
-            self.dash_charts[k] = (cv, labels, values, unit)
-            self._redraw_chart(k)
-        # objets
-        self.dash_items = data["items"]
-        names = list(self.dash_items) or ["—"]
-        self.item_menu.configure(values=names)
-        if self.item_var.get() not in self.dash_items:
-            self.item_var.set(names[0])
-        self._draw_item_chart()
-        lines = [f"{'Objet':32} {'Ventes':>6} {'Modifs':>6} {'Moins cher (dernier, /u)':>25}"]
-        for n, it in list(self.dash_items.items())[:40]:
-            low = it["last_low"]
-            lines.append(f"{n[:32]:32} {it['ventes']:>6} {it['modifs']:>6} "
-                         f"{(f'{low:,.1f}'.replace(',', ' ') if low else '—'):>25}")
-        if not self.dash_items:
-            lines.append("Aucun nom d'objet encore lu (les prochaines actions le noteront).")
-        self.items_text.configure(state="normal")
-        self.items_text.delete("1.0", "end")
-        self.items_text.insert("end", "\n".join(lines))
-        self.items_text.configure(state="disabled")
-
-        rows = [r for r in data["rows"] if dash.kind(r) != "vu"][-60:][::-1]
-        lines = [f"{'Date':19}  {'Action':14} {'Objet':24} {'Lot':>4} {'Prix lu':>9} {'Nouveau':>9}  Statut"]
-        for r in rows:
-            lines.append(f"{r['datetime']:19}  {dash.LABELS[dash.kind(r)]:14} {r.get('item', '')[:24]:24} "
-                         f"{r.get('lot', ''):>4} "
-                         f"{f(dash._int(r.get('read_price'))):>9} {f(dash._int(r.get('new_price'))):>9}  "
-                         f"{r.get('status', '')}")
-        self.dash_recent.configure(state="normal")
-        self.dash_recent.delete("1.0", "end")
-        self.dash_recent.insert("end", "\n".join(lines))
-        self.dash_recent.configure(state="disabled")
-
-    def _draw_item_chart(self):
-        cv = self.item_cv
-        cv.delete("all")
-        self._item_pts = []
-        it = self.dash_items.get(self.item_var.get())
-        w, h = max(240, cv.winfo_width()), int(cv.cget("height"))
-        if not it or len(it["points"]) < 1:
-            cv.create_text(12, h / 2, text="Pas encore de prix pour cet objet.", fill=MUTED, anchor="w")
-            self.item_info.configure(text="")
-            return
-        pts = it["points"]
-        self.item_info.configure(text=f"{len(pts)} relevés · {it['ventes']} ventes · {it['modifs']} modifs")
-        vals = [p[1] for p in pts] + [p[2] for p in pts if p[2]]
-        lo, hi = min(vals), max(vals)
-        pad = (hi - lo) * 0.1 or max(1.0, hi * 0.05)
-        lo, hi = max(0.0, lo - pad), hi + pad
-        left, right, top, bottom = 60, 120, 24, 24
-        pw, ph = w - left - right, h - top - bottom
-        t0, t1 = pts[0][0], pts[-1][0]
-        span = max(1, t1 - t0)
-        X = (lambda t: left + pw * (t - t0) / span) if len(pts) > 1 else (lambda t: left + pw / 2)
-        Y = lambda v: top + ph - ph * (v - lo) / (hi - lo)
-        for i in range(5):
-            v = lo + (hi - lo) * i / 4
-            cv.create_line(left, Y(v), left + pw, Y(v), fill="#33332f")
-            cv.create_text(left - 6, Y(v), text=f"{v:,.0f}".replace(",", " "), fill=MUTED, anchor="e",
-                           font=("Segoe UI", 8))
-        from datetime import datetime as _dt
-        for t in (t0, t1) if len(pts) > 1 else (t0,):
-            cv.create_text(X(t), h - 8, text=_dt.fromtimestamp(t).strftime("%d/%m %Hh"), fill=MUTED,
-                           font=("Segoe UI", 8))
-        series = (("Moins cher lu", "#3987e5", [(p[0], p[1]) for p in pts]),
-                  ("Ton prix", "#d95926", [(p[0], p[2]) for p in pts if p[2]]))
-        # légende (2 séries)
-        lx = left
-        for label, color, _ser in series:
-            cv.create_oval(lx, 6, lx + 10, 16, fill=color, outline="")
-            cv.create_text(lx + 14, 11, text=label, fill="#c3c2b7", anchor="w", font=("Segoe UI", 9))
-            lx += 120
-        ends = []
-        dots = len(pts) <= 60
-        for label, color, ser in series:
-            if not ser:
-                continue
-            xy = [(X(t), Y(v)) for t, v in ser]
-            if len(xy) > 1:
-                cv.create_line(*[c for p in xy for c in p], fill=color, width=2)
-            if dots or len(xy) == 1:
-                for x, y in xy:
-                    cv.create_oval(x - 4, y - 4, x + 4, y + 4, fill=color, outline=CARD, width=2)
-            ends.append([xy[-1][1], f"{label} {ser[-1][1]:,.0f}".replace(",", " ")])
-        # libellés directs en bout de courbe, écartés s'ils se chevauchent
-        ends.sort()
-        for i in range(1, len(ends)):
-            if ends[i][0] - ends[i - 1][0] < 14:
-                ends[i][0] = ends[i - 1][0] + 14
-        for y, text in ends:
-            cv.create_text(left + pw + 8, y, text=text, fill="#c3c2b7", anchor="w", font=("Segoe UI", 9))
-        self._item_pts = [(X(p[0]), p) for p in pts]
-
-    def _item_hover(self, e):
-        cv = self.item_cv
-        cv.delete("hover")
-        if not self._item_pts:
-            return
-        x, p = min(self._item_pts, key=lambda q: abs(q[0] - e.x))
-        if abs(x - e.x) > 30:
-            return
-        from datetime import datetime as _dt
-        h = int(cv.cget("height"))
-        cv.create_line(x, 24, x, h - 24, fill="#8f8e86", dash=(2, 2), tags="hover")
-        txt = (f"{_dt.fromtimestamp(p[0]):%d/%m %H:%M} · moins cher {p[1]:,.1f}/u"
-               + (f" · toi {p[2]:,.1f}/u" if p[2] else "")).replace(",", " ")
-        cv.create_text(min(x + 8, cv.winfo_width() - 8), 26, text=txt, fill="#f0efec",
-                       anchor="nw" if x + 8 < cv.winfo_width() - 260 else "ne", font=("Segoe UI", 9, "bold"),
-                       tags="hover")
-
-    def _redraw_chart(self, key: str):
-        cv, labels, values, unit = self.dash_charts[key]
-        color = DASH_COLORS.get(key, "#3987e5")
-        cv.delete("all")
-        w, h = max(200, cv.winfo_width()), int(cv.cget("height"))
-        if not values or max(values) == 0:
-            cv.create_text(12, h / 2, text="Pas encore de données.", fill=MUTED, anchor="w")
-            return
-        left, right, top, bottom = 56, 10, 22, 22
-        pw, ph = w - left - right, h - top - bottom
-        vmax = max(values)
-        step = _nice_step(vmax)
-        vmax = step * ((vmax + step - 1) // step)
-        for v in range(0, vmax + 1, step):
-            y = top + ph - ph * v / vmax
-            cv.create_line(left, y, w - right, y, fill="#33332f")
-            cv.create_text(left - 6, y, text=_fmt_num(v), fill=MUTED, anchor="e", font=("Segoe UI", 8))
-        n = len(values)
-        slot = pw / n
-        bw = max(3, min(34, slot - 2))
-        every = max(1, n // 8)
-        tip = cv.create_text(w - right, 4, text="", fill="#f0efec", anchor="ne", font=("Segoe UI", 9, "bold"))
-        for i, (lab, v) in enumerate(zip(labels, values)):
-            x = left + i * slot + (slot - bw) / 2
-            bh = ph * v / vmax
-            text = f"{lab} : {_fmt_num(v)} {unit}"
-            hit = cv.create_rectangle(left + i * slot, top, left + (i + 1) * slot, top + ph,
-                                      fill="", outline="")
-            bar = cv.create_rectangle(x, top + ph - bh, x + bw, top + ph, fill=color, outline="") if bh > 0 else None
-            for item in (hit, bar):
-                if item:
-                    cv.tag_bind(item, "<Enter>", lambda _e, t=text: cv.itemconfigure(tip, text=t))
-                    cv.tag_bind(item, "<Leave>", lambda _e: cv.itemconfigure(tip, text=""))
-            if i % every == 0:
-                cv.create_text(x + bw / 2, h - 8, text=lab, fill=MUTED, font=("Segoe UI", 8))
-        cv.create_line(left, top + ph, w - right, top + ph, fill="#8f8e86")
-
     CLEAR_FIELDS = {"anchor": ("anchor_region",), "avg": ("avg_region",), "count": ("count_region",),
                     "modify_button": ("modify_button",), "rows": ("relist_row",), "sell_button": ("sell_button",),
                     "mine": ("mine_region",), "name": ("name_region",)}
@@ -724,10 +561,10 @@ class App(ctk.CTk):
                 mode = core.detect_panel(c)
                 out.append("✓ Panneau : " + {"relist": "une de tes ventes (F1 = mise à jour)",
                                               "sell": "objet de l'inventaire (F1 = vente)"}.get(mode, "vide"))
-            if c.read_item_names:
-                img = core.grab_name(c)
-                name = core.name_reader().read(img) if img is not None else ""
-                out.append(f"{'✓' if name else '–'} Nom de l'objet : {name or 'non lu'}")
+            if core.name_region_for(c):
+                known = core.item_key(core.grab_name(c)) is not None
+                out.append(f"{'✓' if known else '–'} Objet reconnu (pour ne pas passer sous tes propres "
+                           f"ventes) : {'oui' if known else 'non, rien de lisible dans la zone du nom'}")
             out.append(f"• Chiffres appris : {len(core.digit_reader().known())}/10 "
                        "(se complète tout seul en vendant)")
         except Exception as e:
@@ -795,7 +632,7 @@ class App(ctk.CTk):
         c.floor_mode = {lbl: k for k, lbl in FLOOR_LABELS.items()}.get(v["floor_mode"].get(), "floor")
         was_auto = c.relist_auto
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
-                     "relist_auto", "relist_confirm_enter", "fast_digits", "read_item_names",
+                     "relist_auto", "relist_confirm_enter", "fast_digits",
                      "banner", "verify_before_enter", "smart_f1", "always_on_top"):
             setattr(c, name, bool(v[name].get()))
         self._apply_topmost()
@@ -829,6 +666,10 @@ class App(ctk.CTk):
             return
         hk = self.cfg.hotkeys
         last_warn = [0.0]
+        try:
+            keyboard.unhook_all_hotkeys()   # ré-enregistrement après un changement
+        except Exception:
+            pass
 
         def game_job(job):
             def cb():
@@ -950,6 +791,8 @@ class App(ctk.CTk):
                     self._refresh_status()
                 elif name == "wizard_test":
                     self._wiz_report_show(arg)
+                elif name == "hotkey":
+                    self._on_hotkey_captured(*arg)
         except queue.Empty:
             pass
         self.after(30, self._poll_ui)
@@ -990,8 +833,6 @@ class App(ctk.CTk):
         elif m.startswith("[MAJ]") and "| modifié" in m:
             self.stats["modifs"] += 1
         self._refresh_status()
-        if getattr(self, "tabs", None) and self.tabs.get() == "Tableau de bord":
-            self._refresh_dashboard()
 
     def _show_screen(self, sr: core.ScreenRead):
         if not sr.prices and sr.selected is None:
@@ -1159,8 +1000,9 @@ class App(ctk.CTk):
          "Clique « Calibrer », puis pose la souris au milieu du bouton « METTRE EN VENTE ». "
          "Utilisé seulement si VALIDATE_METHOD = « click » dans la config."),
         ("name", "rect", "Nom de l'objet", True, "calibrate_name",
-         "Objet sélectionné. À faire SEULEMENT si les noms sont mal lus dans le tableau de bord : "
-         "sinon la zone est déduite du champ « Prix du lot ».",
+         "Objet sélectionné. À faire SEULEMENT si la vérification finale dit « Objet reconnu : non » : "
+         "sinon la zone est déduite du champ « Prix du lot ». Le nom sert à reconnaître tes propres "
+         "ventes (ne pas passer dessous).",
          "1. Coin HAUT-GAUCHE : juste au-dessus et à gauche de la 1re lettre du nom (à droite de l'icône).\n"
          "2. Coin BAS-DROIT : sous la 2e ligne du nom (les noms longs tiennent sur 2 lignes), "
          "à droite du panneau, SANS la ligne « NIV. 26 »."),
@@ -1391,7 +1233,6 @@ class App(ctk.CTk):
 
     def _on_close(self):
         self._apply_settings()
-        core.flush_history(3.0)  # noms d'objets en cours de lecture : on les écrit avant de quitter
         if KEYBOARD_AVAILABLE:
             try:
                 keyboard.unhook_all()

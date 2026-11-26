@@ -16,6 +16,12 @@ def fresh_digits(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_my_prices_file(monkeypatch, tmp_path):
+    """« Tes prix » écrits dans un dossier temporaire, jamais à côté du projet."""
+    monkeypatch.setattr(core, "MY_PRICES_PATH", tmp_path / "my_prices.json")
+
+
+@pytest.fixture(autouse=True)
 def debug_dir_in_tmp(monkeypatch, tmp_path):
     """Captures de diagnostic (champ refusé) écrites dans un dossier temporaire."""
     monkeypatch.setattr(core, "DEBUG_DIR", tmp_path / "captures")
