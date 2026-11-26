@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" width="128" alt="Logo : pièce d'or avec une étiquette de prix"></p>
+
 # Dofus Price Helper
 
 Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR, calcule un prix juste sous le moins cher, le saisit dans « Prix du lot », le vérifie, puis valide.
@@ -59,16 +61,22 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Raccourcis modifiables dans l'onglet **Raccourcis** (bouton « Changer », puis la touche voulue).
 - Ctrl+F3 affiche chaque ligne traitée dans le journal, pendant le parcours, puis un résumé : prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et lignes à revoir. Les 10 derniers résumés restent consultables dans l'onglet **Mes ventes**.
 - Barre d'état en haut : pastilles pour la pause, le profil, la calibration (OK ou à faire) et l'HDV (vu ou introuvable). Un clic sur une pastille mène à l'endroit utile.
-- Journal filtrable (**Tout** / **Ventes** / **Problèmes**), bouton **Copier**, et chaque Ctrl+F3 regroupé dans un bloc qu'un clic déplie ou replie.
+- Journal filtrable (**Tout** / **Ventes** / **Problèmes**), bouton **Copier**, une icône par type de ligne (vente, mise à jour, alerte, erreur), et chaque Ctrl+F3 ou F2 regroupé dans un bloc qu'un clic déplie ou replie. Un clic sur une ligne qui contient un prix le copie.
 - Aperçu en direct dans l'onglet **Prix** : « Moins cher 1 000 → ton prix 999 (plancher 700) », recalculé à chaque réglage.
 - **Mode compact** (bouton 🗗 Compact) : petite fenêtre toujours au premier plan pendant le jeu, avec la dernière action, l'état et la pause.
 - Onglet **Accueil** au démarrage : premiers pas qui se cochent tout seuls (calibrer, tester une lecture, première vente), les touches principales et le bilan de la session.
 - Panneau **Activité** : les dernières actions (ancien → nouveau prix, statut en couleur) et la dernière lecture.
 - Progression de **Tout vendre** et **Toute la liste** en haut et en mode compact (« Ligne 34 / 87 · 12 modifiées », total connu si le compteur « x/100 lots » est calibré), avec un bouton **Arrêter** qui ne met pas l'outil en pause.
-- Aide-mémoire des touches par-dessus le jeu (`Ctrl+Alt+H`) et notification Windows à la fin d'un long parcours quand vous êtes dans une autre fenêtre (désactivable dans **Options**).
+- Aide-mémoire des touches par-dessus le jeu (`Ctrl+Alt+H`), déplaçable (il reste alors affiché à cet endroit jusqu'au ✕), et notification Windows à la fin d'un long parcours quand vous êtes dans une autre fenêtre (désactivable dans **Options**).
 - Popups, bandeau et boîtes de confirmation au même style que l'interface.
 - Aide au survol sur les options, taille du texte réglable (onglet **Options**), taille et position de la fenêtre mémorisées.
-- Style **Verre** (onglet **Options** › Apparence) : le jeu derrière l'outil apparaît flouté, comme une vitre teintée, même pendant que vous jouez ; teinte réglable. Windows 10 (1803+) ou 11. Le style **Classique** reste opaque.
+- Style **Verre** (onglet **Options** › Apparence) : le jeu derrière l'outil apparaît flouté, comme une vitre teintée, même pendant que vous jouez ; teinte réglable. Windows 10 (1803+) ou 11, thème sombre. Le style **Classique** reste opaque.
+- Thème **Sombre**, **Clair** ou **Comme Windows**, et six couleurs d'accent, avec un aperçu avant d'appliquer (l'outil redémarre en quelques secondes). Fondus des popups et progression douce, désactivables.
+- Icône dans la zone de notification (près de l'horloge) : clic pour ouvrir l'outil, clic droit pour la pause, le mode compact, l'aide-mémoire ou quitter. Sa pastille montre l'état (vert actif, orange pause, bleu parcours en cours, rouge calibration à faire). En option, réduire la fenêtre la cache à cet endroit.
+- Sons doux (succès, avertissement, erreur, fin de parcours) avec un volume réglable et un bouton **Tester**.
+- Raccourcis dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (marche aussi en AZERTY), `Ctrl+L` pour vider le journal, `Échap` pour fermer les popups.
+- Au démarrage, un bandeau prévient si la calibration semble décalée (fenêtre du jeu redimensionnée, ou bougée sans repère « Hôtel de vente », zones hors de l'écran) avec un bouton **Recalibrer**.
+- Assistant de calibration pas à pas : la liste des étapes avec leur état, une capture de ce que l'outil voit dans chaque zone et ce qu'il y lit (✓ ou ✗), **Refaire cette zone**, **Tout placer automatiquement**, et la vérification finale lancée toute seule.
 - Profils de calibration (onglet **Calibration**) : un par HDV ou par personnage, on passe de l'un à l'autre en un clic. « Nouveau » copie le profil actuel ; il ne reste qu'à recalibrer ce qui change.
 
 ## Installation
@@ -192,6 +200,8 @@ Auto-Dofus-Price-Update/
 ├── dofus_price_helperV2.py     Version ligne de commande
 ├── dofus_core.py               Moteur : lecture, calcul des prix, saisie, contrôles
 ├── dofus_digits.py             Reconnaissance rapide des chiffres
+├── dofus_style.py              Thèmes, couleurs d'accent, effet verre, fondus
+├── dofus_logo.py               Logo (dessiné par le code) et icônes
 ├── packaging/build.py          Construction de la version Windows (zip)
 ├── .github/workflows/          Construction automatique et publication des versions
 ├── docs/                       Captures d'écran

@@ -37,8 +37,11 @@ import dofus_update  # noqa: E402
 
 import customtkinter as ctk
 
+import dofus_logo
 import dofus_style as style
 from dofus_style import P
+
+style.configure(*style.saved_look(core.CONFIG_PATH))   # thème et accent : avant les couleurs ci-dessous
 
 try:
     import keyboard
@@ -46,8 +49,14 @@ try:
 except Exception:  # pas installé / pas les droits
     KEYBOARD_AVAILABLE = False
 
+try:
+    import pystray
+    TRAY_AVAILABLE = True
+except Exception:  # pas installé : pas d'icône dans la zone de notification
+    TRAY_AVAILABLE = False
+
 TAG_COLORS = {
-    "TIME": "#5f6670", "INFO": "#b8bec7", "ERROR": P["red"], "WARN": P["orange"],
+    "TIME": P["log_time"], "INFO": P["log_info"], "ERROR": P["red"], "WARN": P["orange"],
     "OK": P["green"], "OPT": P["violet"], "CAL": P["cyan"],
 }
 STALE_JOB_S = 1.5   # s : un raccourci de jeu qui a attendu plus longtemps dans la file est ignoré
@@ -176,6 +185,25 @@ def log_visible(category: str, flt: str, in_block: bool = False) -> bool:
     return category == "sale" or in_block
 
 
+LOG_ICONS = {"sale": "◆", "update": "✎", "warn": "▲", "error": "✖", "cal": "◎", "ok": "✓", "info": "·"}
+
+
+def log_kind(msg: str, tag: str) -> str:
+    """Type d'une ligne du journal, pour son icône : vente, mise à jour, alerte, erreur…"""
+    m = msg.lstrip()
+    if tag == "ERROR":
+        return "error"
+    if tag == "WARN":
+        return "warn"
+    if m.startswith(("[MAJ TOUT]", "[MAJ]")):
+        return "update"
+    if m.startswith(("[VENTE]", "[TOUT]", "[OPT]")):
+        return "sale"
+    if tag == "CAL":
+        return "cal"
+    return "ok" if tag in ("OK", "OPT") else "info"
+
+
 # ---------------------------------------------------------------- historique des Ctrl+F3
 RUNS_PATH = core.BASE_DIR / "dofus_relist_runs.json"
 MAX_RUNS = 10
@@ -247,6 +275,7 @@ def geometry_on_screen(geom: str, bounds) -> bool:
 
 # ---------------------------------------------------------------- fenêtres flottantes au style de l'outil
 POPUP_KEY = "#010203"   # couleur rendue transparente : coins arrondis des fenêtres flottantes
+ANIMATE = {"on": True}  # fondus et progression douce (option « Animations »)
 
 
 def rounded_popup(master, radius: int = 12, alpha: float = 0.97, border: str = None):
@@ -261,13 +290,67 @@ def rounded_popup(master, radius: int = 12, alpha: float = 0.97, border: str = N
     except tk.TclError:
         t.configure(bg=P["card"])
     try:
-        t.attributes("-alpha", alpha)
+        t.attributes("-alpha", 0.0 if ANIMATE["on"] else alpha)
     except tk.TclError:
         pass
+    if ANIMATE["on"]:
+        style.fade(t, 0.0, alpha, 130)      # apparition en fondu
     card = ctk.CTkFrame(t, fg_color=P["card"], corner_radius=radius, border_width=1,
                         border_color=border or P["border"])
     card.pack()
     return t, card
+
+
+def make_draggable(window, on_drop=None) -> None:
+    """Fenêtre sans bord déplaçable en la tirant (clic gauche maintenu n'importe où dessus,
+    sauf les boutons). on_drop(x, y) : appelé à la fin d'un déplacement."""
+    state = {}
+
+    def press(e):
+        state.update(x=e.x_root, y=e.y_root, wx=window.winfo_x(), wy=window.winfo_y(), moved=False)
+
+    def drag(e):
+        if "x" not in state:
+            return
+        dx, dy = e.x_root - state["x"], e.y_root - state["y"]
+        if abs(dx) + abs(dy) > 2:
+            state.update(moved=True, nx=state["wx"] + dx, ny=state["wy"] + dy)
+            window.geometry(f"+{state['nx']}+{state['ny']}")
+
+    def release(_e):
+        if state.get("moved") and on_drop is not None:
+            on_drop(state["nx"], state["ny"])
+        state.clear()
+
+    def bind_all(w):
+        if isinstance(w, ctk.CTkButton):
+            return
+        for seq, fn in (("<ButtonPress-1>", press), ("<B1-Motion>", drag), ("<ButtonRelease-1>", release)):
+            try:
+                w.bind(seq, fn, add="+")
+            except (NotImplementedError, ValueError, tk.TclError):
+                pass
+        for c in w.winfo_children():
+            bind_all(c)
+    bind_all(window)
+    try:
+        window.configure(cursor="fleur")
+    except tk.TclError:
+        pass
+
+
+def close_popup(t) -> None:
+    """Ferme une fenêtre flottante (en fondu si les animations sont actives)."""
+    try:
+        if not t.winfo_exists():
+            return
+        if not ANIMATE["on"]:
+            t.destroy()
+            return
+        start = float(t.attributes("-alpha"))
+    except tk.TclError:
+        return
+    style.fade(t, start, 0.0, 160, then=lambda: t.winfo_exists() and t.destroy())
 
 
 # ---------------------------------------------------------------- panneau « Activité »
@@ -337,6 +420,124 @@ def windows_notify(title: str, body: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------- raccourcis dans la fenêtre de l'outil
+TAB_NAMES = ("Accueil", "Prix", "Mes ventes", "Calibration", "Raccourcis", "Options")
+
+
+def tab_index_for_key(keycode: int, keysym: str) -> Optional[int]:
+    """Ctrl+1 … Ctrl+6 -> onglet 0 … 5. Par le code de la touche : marche aussi en AZERTY,
+    où la rangée du haut donne & é " ' ( - sans Maj."""
+    if 49 <= keycode <= 54:          # rangée du haut (VK_1 … VK_6)
+        return keycode - 49
+    if 97 <= keycode <= 102:         # pavé numérique
+        return keycode - 97
+    if len(keysym) == 1 and keysym in "123456":
+        return int(keysym) - 1
+    return None
+
+
+# ---------------------------------------------------------------- zone de notification (près de l'horloge)
+TRAY_STATES = {"ok": ("#3ecf8e", "Actif"), "pause": ("#f0a03c", "En pause"),
+               "loop": ("#5ccfe6", "Parcours en cours"), "calib": ("#f0616d", "Calibration à faire")}
+
+
+def tray_image(color: str, size: int = 64):
+    """Icône : la pièce du logo, pastille de couleur = état de l'outil."""
+    return dofus_logo.logo_with_dot(color, size)
+
+
+_ICO_PATH = None
+
+
+def logo_ico() -> Optional[str]:
+    """Chemin d'un .ico du logo (créé une fois dans le dossier temporaire), ou None."""
+    global _ICO_PATH
+    if _ICO_PATH is None:
+        import tempfile
+        from pathlib import Path
+        path = Path(tempfile.gettempdir()) / f"dofus_price_helper_{core.app_version()}.ico"
+        try:
+            if not path.exists():
+                dofus_logo.write_ico(path)
+            _ICO_PATH = str(path)
+        except Exception:
+            _ICO_PATH = ""
+    return _ICO_PATH or None
+
+
+def brand(window) -> None:
+    """Met le logo comme icône de la fenêtre (barre de titre, barre des tâches)."""
+    ico = logo_ico()
+    if ico:
+        try:
+            window.iconbitmap(ico)     # avant le délai de CustomTkinter : il ne remet pas son icône
+        except tk.TclError:
+            pass
+
+
+class Tray:
+    """Icône dans la zone de notification : clic = ouvrir, clic droit = menu (pystray)."""
+
+    def __init__(self, app):
+        self.app, self.icon, self._last = app, None, None
+        self.told = False      # bulle « l'outil continue ici » déjà montrée
+
+    def start(self):
+        if self.icon is not None or not TRAY_AVAILABLE:
+            return
+        put = self.app.ui_events.put
+        item = pystray.MenuItem
+        menu = pystray.Menu(
+            item("Ouvrir l'outil", lambda: put(("tray", "open")), default=True),
+            item("Mode compact", lambda: put(("tray", "compact"))),
+            item(lambda _i: "▶ Reprendre" if self.app.engine.paused else "⏸ Pause", lambda: put(("tray", "pause"))),
+            item("Aide-mémoire en jeu", lambda: put(("tray", "cheatsheet"))),
+            pystray.Menu.SEPARATOR,
+            item("Quitter", lambda: put(("tray", "quit"))))
+        color, text = self._last or TRAY_STATES["ok"]
+        try:
+            self.icon = pystray.Icon("DofusPriceHelper", tray_image(color), f"Dofus Price Helper · {text}", menu)
+            self.icon.run_detached()
+        except Exception as e:
+            self.icon = None
+            self.app._log(f"[Zone de notification] Icône impossible : {e}", "WARN")
+
+    def update(self, state: str):
+        color, text = TRAY_STATES.get(state, TRAY_STATES["ok"])
+        if (color, text) == self._last:
+            return
+        self._last = (color, text)
+        if self.icon is not None:
+            try:
+                self.icon.icon = tray_image(color)
+                self.icon.title = f"Dofus Price Helper · {text}"
+            except Exception:
+                pass
+
+    def notify(self, text: str):
+        if self.icon is not None:
+            try:
+                self.icon.notify(text, "Dofus Price Helper")
+            except Exception:
+                pass
+
+    def stop(self):
+        icon, self.icon = self.icon, None
+        if icon is not None:
+            try:
+                icon.stop()
+            except Exception:
+                pass
+
+
+def relaunch_command() -> list:
+    """Commande qui relance l'outil (après un changement de thème)."""
+    import sys
+    if getattr(sys, "frozen", False):          # version .exe
+        return [sys.executable] + sys.argv[1:]
+    return [sys.executable] + sys.argv
+
+
 # ---------------------------------------------------------------- accueil : premiers pas
 FIRST_STEPS = (("calib", "Calibrer l'HDV"), ("read", "Tester une lecture"), ("sell", "Première vente"))
 
@@ -397,6 +598,7 @@ class App(ctk.CTk):
         style.apply_theme(ctk)
         self.configure(fg_color=P["bg"])
         self.title(f"Dofus Price Helper {core.app_version()}")
+        brand(self)
         ctk.set_widget_scaling(self.cfg.ui_scale if 0.5 <= self.cfg.ui_scale <= 2 else 1.0)
         self.geometry("1120x800")
         self.minsize(980, 680)
@@ -404,7 +606,7 @@ class App(ctk.CTk):
 
         self.engine = core.PriceEngine(self.cfg)
         self.engine.progress = lambda r: self.ui_events.put(
-            ("log", ("   " + r.message, {"warn": "WARN", "error": "ERROR"}.get(r.level, "OK"))))
+            ("log", ("   " + r.message, {"warn": "WARN", "error": "ERROR"}.get(r.level, "OK"), r.new_price)))
         self.engine.on_loop_progress = lambda d: self.ui_events.put(("loop_progress", d))
         self.jobs: "queue.Queue[tuple]" = queue.Queue()
         self.ui_events: "queue.Queue[tuple]" = queue.Queue()
@@ -424,6 +626,11 @@ class App(ctk.CTk):
         self._loop: Optional[dict] = None   # boucle en cours (F2 / Ctrl+F3) : type, début
         self.activity: list = []             # panneau Activité : dernières actions (récentes d'abord)
         self._cheat = None                   # aide-mémoire affiché par-dessus le jeu
+        self._toasts: list = []              # popups ouvertes (Échap les ferme)
+        self._log_seq = 0
+        self.tray = Tray(self)
+        self.restart_requested = False
+        ANIMATE["on"] = bool(self.cfg.animations)
 
         self._build_vars()
         self._build_ui()
@@ -447,6 +654,13 @@ class App(ctk.CTk):
         self.after(300, self._apply_style)   # après la mise en place de la barre de titre par CTk
         if not self._calibrated():
             self.after(800, self._first_launch)   # 1er lancement : calibration automatique proposée
+        else:
+            self.after(2500, self._check_calibration)   # fenêtre du jeu / écran changés depuis ?
+        if self.cfg.tray:
+            self.tray.start()
+        self.bind("<Control-KeyPress>", self._on_ctrl_key)
+        self.bind("<Escape>", self._on_escape)
+        self.bind("<Unmap>", self._on_unmap)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _calibrated(self) -> bool:
@@ -468,6 +682,7 @@ class App(ctk.CTk):
     def _first_launch(self):
         """Pas encore calibré : propose la calibration automatique (l'assistant reste possible)."""
         w = ctk.CTkToplevel(self)
+        brand(w)
         w.title("Bienvenue")
         w.geometry("520x260")
         w.attributes("-topmost", True)
@@ -494,8 +709,8 @@ class App(ctk.CTk):
                       command=auto).pack(fill="x", padx=18, pady=(18, 6))
         bar = ctk.CTkFrame(w, fg_color="transparent")
         bar.pack(fill="x", padx=18)
-        ctk.CTkButton(bar, text="Assistant pas à pas", fg_color=BTN2, hover_color=BTN2_HOVER, command=wizard).pack(side="left")
-        ctk.CTkButton(bar, text="Plus tard", fg_color=BTN2, hover_color=BTN2_HOVER, width=90, command=w.destroy).pack(side="right")
+        ctk.CTkButton(bar, text="Assistant pas à pas", fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=wizard).pack(side="left")
+        ctk.CTkButton(bar, text="Plus tard", fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, width=90, command=w.destroy).pack(side="right")
 
     # ------------------------------------------------------------------ UI
     def _build_vars(self):
@@ -527,6 +742,9 @@ class App(ctk.CTk):
             "always_on_top": ctk.BooleanVar(value=c.always_on_top),
             "check_updates": ctk.BooleanVar(value=c.check_updates),
             "notify": ctk.BooleanVar(value=c.notify),
+            "animations": ctk.BooleanVar(value=c.animations),
+            "tray": ctk.BooleanVar(value=c.tray),
+            "tray_minimize": ctk.BooleanVar(value=c.tray_minimize),
         }
         for var in self.v.values():
             var.trace_add("write", lambda *_: self._schedule_save())
@@ -621,8 +839,9 @@ class App(ctk.CTk):
         wrap.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         head = ctk.CTkFrame(wrap, fg_color="transparent")
         head.pack(fill="x")
-        ctk.CTkLabel(head, text="◆", text_color=P["gold"], font=ctk.CTkFont(size=20)
-                     ).pack(side="left", padx=(16, 6), pady=10)
+        self._logo_img = ctk.CTkImage(light_image=dofus_logo.logo_image(64), dark_image=dofus_logo.logo_image(64),
+                                      size=(28, 28))
+        ctk.CTkLabel(head, text="", image=self._logo_img).pack(side="left", padx=(14, 8), pady=8)
         ctk.CTkLabel(head, text="Dofus Price Helper", font=ctk.CTkFont(size=19, weight="bold")
                      ).pack(side="left")
         ctk.CTkLabel(head, text=core.app_version(), text_color=MUTED, font=ctk.CTkFont(size=12)
@@ -655,10 +874,26 @@ class App(ctk.CTk):
         self.loop_pb = ctk.CTkProgressBar(self.loop_bar, width=140, height=8, progress_color=P["accent"])
         self.loop_pb.pack(side="left", padx=4)
         self.loop_stop = ctk.CTkButton(self.loop_bar, text="■ Arrêter", width=84, height=24,
-                                       fg_color=style.CHIP["red"][0], hover_color="#5a2730",
-                                       text_color=P["red"], command=self._stop_loop)
+                                       fg_color=style.CHIP["red"][0], hover_color=P["red_hover"],
+                                       text_color=style.CHIP["red"][1], command=self._stop_loop)
         self.loop_stop.pack(side="left", padx=(8, 4), pady=3)
-        self._tip(ctk.CTkButton(head, text="🗗 Compact", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._open_compact),
+        # calibration décalée (fenêtre du jeu redimensionnée, écran changé) : affiché au besoin
+        ob, of = style.CHIP["orange"]
+        self.drift_bar = ctk.CTkFrame(wrap, fg_color=ob, corner_radius=10)
+        self.drift_lbl = ctk.CTkLabel(self.drift_bar, text="", text_color=of, anchor="w", justify="left",
+                                      wraplength=620, font=ctk.CTkFont(size=12, weight="bold"))
+        self.drift_lbl.pack(side="left", fill="x", expand=True, padx=12, pady=6)
+        ctk.CTkButton(self.drift_bar, text="Ignorer", width=80, height=26, fg_color=BTN2, hover_color=BTN2_HOVER,
+                      text_color=P["text"], command=self._ignore_drift).pack(side="right", padx=(4, 8), pady=6)
+        ctk.CTkButton(self.drift_bar, text="Voir zones", width=90, height=26, fg_color=BTN2,
+                      hover_color=BTN2_HOVER, text_color=P["text"], command=self._show_zones
+                      ).pack(side="right", padx=4, pady=6)
+        self._tip(ctk.CTkButton(self.drift_bar, text="✨ Recalibrer", width=110, height=26,
+                                command=lambda: (self.tabs.set("Calibration"),
+                                                 self._countdown("automatique", self._calib_auto_ui))),
+                  "Calibration automatique : affiche l'HDV (onglet Vente) pendant le compte à rebours."
+                  ).pack(side="right", padx=4, pady=6)
+        self._tip(ctk.CTkButton(head, text="🗗 Compact", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._open_compact),
                   "Petite fenêtre toujours au premier plan pendant que tu joues : dernière action, état, "
                   "pause.").pack(side="right", padx=(4, 12))
         self._tip(ctk.CTkCheckBox(head, text="📌", variable=self.v["always_on_top"], width=44),
@@ -666,7 +901,7 @@ class App(ctk.CTk):
         self.pause_btn = ctk.CTkButton(head, text="⏸ Pause", width=90, command=self._toggle_pause)
         self.pause_btn.pack(side="right", padx=4)
         self.update_btn = ctk.CTkButton(head, text="", width=150, fg_color=style.CHIP["green"][0],
-                                        hover_color="#1c4535", text_color=P["green"])   # affiché si une version plus récente existe
+                                        hover_color=P["green_hover"], text_color=style.CHIP["green"][1])   # affiché si une version plus récente existe
 
         # ---------------- onglets
         tabs = ctk.CTkTabview(self, anchor="nw", fg_color="transparent", corner_radius=12)
@@ -737,13 +972,16 @@ class App(ctk.CTk):
         ctk.CTkLabel(top, text="Journal", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=4)
         ctk.CTkSegmentedButton(top, values=list(LOG_FILTERS), variable=self.log_filter, height=24,
                                command=lambda _v: self._render_log()).pack(side="left", padx=10)
-        ctk.CTkButton(top, text="Effacer", width=70, height=24, fg_color=BTN2, hover_color=BTN2_HOVER,
+        ctk.CTkButton(top, text="Effacer", width=70, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._clear_log).pack(side="right")
-        self.copy_btn = self._tip(ctk.CTkButton(top, text="Copier", width=70, height=24, fg_color=BTN2, hover_color=BTN2_HOVER,
+        self.copy_btn = self._tip(ctk.CTkButton(top, text="Copier", width=70, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                                                 command=self._copy_log),
                                   "Copie les lignes affichées (selon le filtre) : à coller dans un message "
                                   "quand tu signales un problème.")
         self.copy_btn.pack(side="right", padx=6)
+        self.log_hint = ctk.CTkLabel(top, text="Clic sur une ligne avec un prix = le copier", text_color=MUTED,
+                                     font=ctk.CTkFont(size=11))
+        self.log_hint.pack(side="right", padx=8)
         body = ctk.CTkFrame(lf, fg_color="transparent")
         body.pack(fill="both", expand=True)
         self.log_text = tk.Text(body, wrap="word", bg=P["log_bg"], fg=P["text"], relief="flat",
@@ -815,9 +1053,9 @@ class App(ctk.CTk):
                     font=ctk.CTkFont(size=12), command=lambda: self.tabs.set("Mes ventes"))
             ctk.CTkFrame(card, fg_color="transparent", height=6).pack(side="bottom")
         r = self._row(kb)
-        ctk.CTkButton(r, text="Tous les raccourcis", width=150, fg_color=BTN2, hover_color=BTN2_HOVER,
+        ctk.CTkButton(r, text="Tous les raccourcis", width=150, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=lambda: self.tabs.set("Raccourcis")).pack(side="left", pady=(4, 0))
-        self._tip(ctk.CTkButton(r, text="Aide-mémoire en jeu", width=170, fg_color=BTN2,
+        self._tip(ctk.CTkButton(r, text="Aide-mémoire en jeu", width=170, fg_color=BTN2, text_color=P["text"],
                                 hover_color=BTN2_HOVER, command=self._toggle_cheatsheet),
                   "Affiche les touches par-dessus le jeu, au-dessus de l'HDV. En jeu : "
                   f"{hk['cheatsheet'].upper()}.").pack(side="left", padx=8, pady=(4, 0))
@@ -859,7 +1097,8 @@ class App(ctk.CTk):
             mark.configure(text="✓" if done else "○", text_color=P["green"] if done else MUTED)
             if btn is not None:
                 btn.configure(fg_color=BTN2 if done else P["accent"],
-                              hover_color=BTN2_HOVER if done else P["accent_hover"])
+                              hover_color=BTN2_HOVER if done else P["accent_hover"],
+                              text_color=P["text"] if done else P["on_accent"])
         if all_done:
             self.steps_outer.pack_forget()
         for key, lbl in self.tiles.items():
@@ -907,13 +1146,18 @@ class App(ctk.CTk):
         self._hotkey_line(b, None, "Forcer une lecture jugée suspecte", literal="même touche ×2")
         for name in ("pause", "show_zones", "cheatsheet"):
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
+        b = self._section(page, "Dans la fenêtre de l'outil", "Quand c'est l'outil qui a le focus (pas le jeu).")
+        self._hotkey_line(b, None, "Changer d'onglet : Accueil, Prix, Mes ventes, Calibration, Raccourcis, "
+                                   "Options", literal="Ctrl+1 … 6")
+        self._hotkey_line(b, None, "Vider le journal", literal="Ctrl+L")
+        self._hotkey_line(b, None, "Fermer les popups, le bandeau, l'aide-mémoire et le résumé", literal="Échap")
         adv = self._collapsible(page, "Avancé : raccourcis de calibration",
                                 "Rarement utiles : la calibration automatique place tout.")
         b = self._section(adv, "Raccourcis de calibration", "Utilisés dans le jeu, souris sur la zone.")
         for name in CALIB_HOTKEYS:
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
         b = self._section(page, "Tous les raccourcis")
-        ctk.CTkButton(b, text="Rétablir les raccourcis par défaut", width=230, fg_color=BTN2, hover_color=BTN2_HOVER,
+        ctk.CTkButton(b, text="Rétablir les raccourcis par défaut", width=230, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._reset_hotkeys).pack(anchor="w", pady=(2, 2))
         b = self._section(page, "Vente rapide", "Ce que fait la touche de vente après avoir calculé le prix.")
         self._switch(b, "Coller le prix automatiquement", "auto_paste",
@@ -941,7 +1185,7 @@ class App(ctk.CTk):
                      font=ctk.CTkFont(family="Consolas", weight="bold"))
         if name:
             self._hk_label(r, name, **kstyle).pack(side="left", padx=(2, 10))
-            btn = ctk.CTkButton(r, text="Changer", width=80, height=24, fg_color=BTN2, hover_color=BTN2_HOVER,
+            btn = ctk.CTkButton(r, text="Changer", width=80, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                                 command=lambda n=name: self._capture_hotkey(n))
             btn.pack(side="right", padx=4)
             self.hk_buttons[name] = btn
@@ -958,7 +1202,7 @@ class App(ctk.CTk):
         if self._capturing:
             return
         self._capturing = name
-        self.hk_buttons[name].configure(text="Appuie…", fg_color=ORANGE)
+        self.hk_buttons[name].configure(text="Appuie…", fg_color=ORANGE, text_color=P["on_accent"])
         self._log(f"[Hotkeys] « {HOTKEY_LABELS[name]} » : appuie sur la nouvelle touche ou combinaison "
                   "(Échap = annuler).", "CAL")
         try:
@@ -976,7 +1220,7 @@ class App(ctk.CTk):
 
     def _on_hotkey_captured(self, name: str, combo: str):
         self._capturing = None
-        self.hk_buttons[name].configure(text="Changer", fg_color=BTN2)
+        self.hk_buttons[name].configure(text="Changer", fg_color=BTN2, text_color=P["text"])
         err = hotkey_problem(name, combo, self.cfg.hotkeys)
         if combo == "esc":
             self._log("[Hotkeys] Changement annulé.", "INFO")
@@ -1102,7 +1346,7 @@ class App(ctk.CTk):
             ctk.CTkButton(box, text=run_title(run), anchor="w", height=26, fg_color=BTN2, hover_color=BTN2_HOVER,
                           text_color=P["orange"] if bad else P["text"],
                           command=lambda r=run: self._summary_window(r)).pack(fill="x", pady=1)
-        ctk.CTkButton(box, text="Effacer l'historique", width=150, height=24, fg_color="transparent",
+        ctk.CTkButton(box, text="Effacer l'historique", width=150, height=24, fg_color="transparent", text_color=P["text"],
                       border_width=1, border_color=BTN2, command=self._clear_runs).pack(anchor="e", pady=(6, 0))
 
     def _clear_runs(self):
@@ -1135,12 +1379,13 @@ class App(ctk.CTk):
                       ).pack(side="left", pady=4)
         self._hk_label(r, "calibrate_auto", text_color=MUTED,
                        font=ctk.CTkFont(family="Consolas")).pack(side="left", padx=12)
-        self._tip(ctk.CTkButton(r, text="Voir zones", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._show_zones),
-                  "Vérifie où les zones ont été placées.").pack(side="right", padx=4)
-        self._tip(ctk.CTkButton(r, text="Lire (test)", width=90, fg_color=BTN2, hover_color=BTN2_HOVER,
+        r = self._row(ab)
+        self._tip(ctk.CTkButton(r, text="Voir zones", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._show_zones),
+                  "Vérifie où les zones ont été placées.").pack(side="left", padx=(0, 8))
+        self._tip(ctk.CTkButton(r, text="Lire (test)", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                                 command=lambda: self.jobs.put(("read", None))),
                   "Lit l'HDV une fois sans rien vendre : résultat dans le journal et le panneau "
-                  "Activité.").pack(side="right", padx=4)
+                  "Activité.").pack(side="left")
         self._switch(ab, "Recalibrer tout seul si la taille de l'HDV change", "auto_recalibrate",
                      tip="Échelle de l'interface ou résolution changée : l'HDV n'est plus retrouvé à sa "
                          "taille calibrée. L'outil refait alors la calibration automatique (~1 s) avant "
@@ -1152,9 +1397,9 @@ class App(ctk.CTk):
         self.profile_menu = ctk.CTkOptionMenu(r, values=self.cfg.profile_names(), variable=self.profile_var,
                                               width=220, dynamic_resizing=False, command=self._switch_profile)
         self.profile_menu.pack(side="left")
-        ctk.CTkButton(r, text="Nouveau", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._new_profile
+        ctk.CTkButton(r, text="Nouveau", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._new_profile
                       ).pack(side="left", padx=(8, 4))
-        ctk.CTkButton(r, text="Supprimer", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._delete_profile
+        ctk.CTkButton(r, text="Supprimer", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._delete_profile
                       ).pack(side="left", padx=4)
         adv = self._collapsible(page, "Avancé : assistant et zones manuelles",
                                 "Seulement si la calibration automatique échoue ou place mal une zone.")
@@ -1199,7 +1444,7 @@ class App(ctk.CTk):
             self._hk_label(r, *hot, text_color=MUTED, width=120, anchor="w",
                            font=ctk.CTkFont(family="Consolas")).pack(side="left")
             if not required:
-                ctk.CTkButton(r, text="✕", width=28, height=26, fg_color=BTN2, hover_color=BTN2_HOVER,
+                ctk.CTkButton(r, text="✕", width=28, height=26, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                               command=lambda k=key: self._clear_zone(k)).pack(side="right", padx=(0, 4))
             ctk.CTkButton(r, text="Calibrer", width=80, height=26, command=cmd).pack(side="right", padx=4)
             self.calib_labels[key] = (st, required)
@@ -1210,7 +1455,19 @@ class App(ctk.CTk):
         self._switch(b, "Raccourcis actifs seulement quand Dofus a le focus", "require_focus",
                      tip="Évite de déclencher une vente en tapant ailleurs. Désactive seulement si l'outil "
                          "ne reconnaît pas la fenêtre du jeu (message [Focus] dans le journal).")
-        self._switch(b, "Sons", "sound", tip="Un bip différent pour un succès, un avertissement, une erreur.")
+        self._switch(b, "Sons", "sound", tip="Un son doux différent pour un succès, un avertissement, une "
+                                             "erreur, et la fin d'un long parcours.")
+        r = self._row(b)
+        ctk.CTkLabel(r, text="Volume", width=120, anchor="w").pack(side="left", padx=(42, 0))
+        self.vol_slider = ctk.CTkSlider(r, from_=0.05, to=1.0, number_of_steps=19, width=180,
+                                        command=self._set_volume)
+        self.vol_slider.set(min(1.0, max(0.05, self.cfg.sound_volume)))
+        self.vol_slider.pack(side="left")
+        self.vol_lbl = ctk.CTkLabel(r, text=f"{self.cfg.sound_volume:.0%}", text_color=MUTED, width=44)
+        self.vol_lbl.pack(side="left", padx=6)
+        self.sound_test = [0]
+        ctk.CTkButton(r, text="▶ Tester", width=80, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      command=self._test_sound).pack(side="left", padx=4)
         self._switch(b, "Afficher le résultat de chaque action", "toast",
                      tip="Petit message à l'écran : lot et prix choisis, ou la raison d'un arrêt.")
         self._switch(b, "… dans un bandeau fixe au-dessus de l'HDV", "banner",
@@ -1220,7 +1477,42 @@ class App(ctk.CTk):
                          "quand c'est fini, si tu es dans une autre fenêtre que le jeu et l'outil.")
         self._switch(b, "Fenêtre de l'outil toujours au-dessus du jeu", "always_on_top",
                      tip="Même chose que 📌 en haut. Le jeu doit être en fenêtré ou plein écran fenêtré.")
+        tr = self._switch(b, "Icône dans la zone de notification (près de l'horloge)", "tray",
+                          tip="Clic = ouvrir l'outil. Clic droit : pause, mode compact, aide-mémoire, quitter. "
+                              "La pastille montre l'état : vert actif, orange pause, bleu parcours en cours, "
+                              "rouge calibration à faire.")
+        tm = self._switch(b, "… réduire la fenêtre l'y cache (plus rien dans la barre des tâches)",
+                          "tray_minimize", tip="Le bouton « réduire » de la fenêtre cache l'outil près de "
+                                               "l'horloge. Clic sur l'icône pour le retrouver.")
+        if not TRAY_AVAILABLE:
+            tr.configure(state="disabled")
+            tm.configure(state="disabled")
         b = self._section(page, "Apparence")
+        self._look = {"theme": self.cfg.theme if self.cfg.theme in style.THEMES else "dark",
+                      "accent": self.cfg.accent if self.cfg.accent in style.ACCENTS else "blue"}
+        r = self._row(b)
+        self._tip(ctk.CTkLabel(r, text="Thème", width=120, anchor="w"),
+                  "Comme Windows : suit le mode clair / sombre de Windows (Paramètres › Couleurs).").pack(side="left")
+        self.theme_seg = ctk.CTkSegmentedButton(r, values=list(style.THEMES.values()), command=self._pick_theme)
+        self.theme_seg.set(style.THEMES[self._look["theme"]])
+        self.theme_seg.pack(side="left")
+        r = self._row(b)
+        ctk.CTkLabel(r, text="Couleur", width=120, anchor="w").pack(side="left")
+        self.accent_btns = {}
+        for key, (label, color, hover) in style.ACCENTS.items():
+            sw = ctk.CTkButton(r, text="", width=28, height=28, corner_radius=14, fg_color=color,
+                               hover_color=hover, border_width=3, command=lambda k=key: self._pick_accent(k))
+            sw.pack(side="left", padx=3)
+            self._tip(sw, label)
+            self.accent_btns[key] = sw
+        self.look_preview = ctk.CTkFrame(b, fg_color="transparent")
+        self.look_preview.pack(fill="x", pady=(6, 2))
+        self.look_apply = ctk.CTkFrame(b, fg_color="transparent")
+        ctk.CTkButton(self.look_apply, text="Appliquer (redémarre l'outil)", width=220,
+                      command=self._apply_look).pack(side="left")
+        ctk.CTkLabel(self.look_apply, text="Quelques secondes ; tes réglages sont gardés.", text_color=MUTED,
+                     font=ctk.CTkFont(size=11)).pack(side="left", padx=10)
+        self._refresh_look()
         r = self._row(b)
         self._tip(ctk.CTkLabel(r, text="Style", width=120, anchor="w"),
                   "Verre : le jeu derrière l'outil apparaît flouté, comme une vitre teintée. Reste flouté "
@@ -1229,9 +1521,10 @@ class App(ctk.CTk):
         self.style_seg = seg
         seg.set("Verre" if self._glass_on() else "Classique")
         seg.pack(side="left")
-        if not style.glass_supported():
+        if not style.glass_supported() or not style.is_dark():
             seg.configure(state="disabled")
-            ctk.CTkLabel(r, text="(verre : Windows 10 1803+ requis)", text_color=MUTED).pack(side="left", padx=8)
+            ctk.CTkLabel(r, text="(verre : Windows 10 1803+ requis)" if not style.glass_supported()
+                         else "(verre : thème sombre seulement)", text_color=MUTED).pack(side="left", padx=8)
         r = self._row(b)
         self._tip(ctk.CTkLabel(r, text="Teinte du verre", width=120, anchor="w"),
                   "Plus la teinte est forte, plus le texte est lisible ; plus elle est faible, plus on voit "
@@ -1248,6 +1541,8 @@ class App(ctk.CTk):
                   "Agrandit ou réduit tout le texte et les boutons de l'outil.").pack(side="left")
         ctk.CTkSegmentedButton(r, values=list(UI_SCALES), variable=self.scale_var,
                                command=self._set_ui_scale).pack(side="left")
+        self._switch(b, "Animations (fondus des popups, progression douce)", "animations",
+                     tip="Désactive si ton PC est lent ou si tu préfères un affichage instantané.")
         ctk.CTkLabel(b, text="La taille et la position de la fenêtre sont gardées d'un lancement à l'autre.",
                      text_color=MUTED, font=ctk.CTkFont(size=11)).pack(anchor="w", pady=(4, 0))
         b = self._section(page, "Sécurité et rapidité")
@@ -1261,16 +1556,16 @@ class App(ctk.CTk):
                               "résolution ou de taille d'interface du jeu.")
         self._switch(b, "Utiliser la lecture rapide", "fast_digits",
                      tip="Beaucoup plus rapide que Tesseract, qui reste utilisé en secours.")
-        ctk.CTkButton(b, text="Réapprendre les chiffres", width=180, fg_color=BTN2, hover_color=BTN2_HOVER,
+        ctk.CTkButton(b, text="Réapprendre les chiffres", width=180, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._reset_digits).pack(anchor="w", pady=4)
         b = self._section(page, "Mises à jour et journal", f"Version {core.app_version()}.",
                           tip="Le journal (fichier) garde l'historique des messages et des erreurs : à "
                               "joindre quand tu signales un problème.")
         self._switch(b, "Vérifier au démarrage si une nouvelle version est publiée (GitHub)", "check_updates")
         r = self._row(b)
-        ctk.CTkButton(r, text="Ouvrir le dossier du journal", width=200, fg_color=BTN2, hover_color=BTN2_HOVER,
+        ctk.CTkButton(r, text="Ouvrir le dossier du journal", width=200, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._open_log_dir).pack(side="left")
-        ctk.CTkButton(r, text="Page des versions", width=150, fg_color=BTN2, hover_color=BTN2_HOVER,
+        ctk.CTkButton(r, text="Page des versions", width=150, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=lambda: self._open_url(core.RELEASES_URL)).pack(side="left", padx=8)
         r = self._row(b)
         self._tip(ctk.CTkButton(r, text="📦 Rapport de problème", width=200,
@@ -1278,8 +1573,91 @@ class App(ctk.CTk):
                   "Crée un zip à envoyer quand quelque chose ne marche pas : journal, réglages, captures "
                   "de diagnostic et une image de l'HDV (affiche-le pendant le compte à rebours). Rien "
                   "n'est envoyé tout seul ; ton historique de ventes n'est pas inclus.").pack(side="left")
-        ctk.CTkButton(r, text="Signaler sur GitHub", width=150, fg_color=BTN2, hover_color=BTN2_HOVER,
+        ctk.CTkButton(r, text="Signaler sur GitHub", width=150, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=lambda: self._open_url(dofus_update.ISSUES_URL)).pack(side="left", padx=8)
+
+    # ---- apparence : thème, couleur d'accent (appliqués au redémarrage, avec un aperçu)
+    def _pick_theme(self, label: str):
+        self._look["theme"] = next((k for k, v in style.THEMES.items() if v == label), "dark")
+        self._refresh_look()
+
+    def _pick_accent(self, key: str):
+        self._look["accent"] = key
+        self._refresh_look()
+
+    def _refresh_look(self):
+        for key, sw in self.accent_btns.items():
+            sw.configure(border_color=P["text"] if key == self._look["accent"] else P["card"])
+        self._render_look_preview()
+        pending = (self._look["theme"], self._look["accent"]) != (self.cfg.theme, self.cfg.accent)
+        if pending and not self.look_apply.winfo_ismapped():
+            self.look_apply.pack(fill="x", pady=(4, 2), after=self.look_preview)
+        elif not pending:
+            self.look_apply.pack_forget()
+
+    def _render_look_preview(self):
+        """Aperçu du thème et de la couleur choisis, avec leurs vraies couleurs."""
+        box = self.look_preview
+        for w in box.winfo_children():
+            w.destroy()
+        pal = style.palette(**self._look)
+        chip = style.chips(self._look["theme"])
+        outer = ctk.CTkFrame(box, fg_color=pal["bg"], corner_radius=12, border_width=1, border_color=pal["border"])
+        outer.pack(fill="x")
+        card = ctk.CTkFrame(outer, fg_color=pal["card"], corner_radius=10, border_width=1,
+                            border_color=pal["border"])
+        card.pack(fill="x", padx=10, pady=10)
+        r1 = ctk.CTkFrame(card, fg_color="transparent")
+        r1.pack(fill="x", padx=12, pady=(10, 2))
+        ctk.CTkLabel(r1, text="◆", text_color=pal["gold"], font=ctk.CTkFont(size=16)).pack(side="left")
+        ctk.CTkLabel(r1, text=" Aperçu", text_color=pal["text"], font=ctk.CTkFont(size=14, weight="bold")
+                     ).pack(side="left")
+        ctk.CTkLabel(r1, text="● Actif", fg_color=chip["green"][0], text_color=chip["green"][1], corner_radius=11,
+                     height=22, font=ctk.CTkFont(size=11, weight="bold")).pack(side="right", ipadx=8)
+        r2 = ctk.CTkFrame(card, fg_color="transparent")
+        r2.pack(fill="x", padx=12)
+        ctk.CTkLabel(r2, text="Lot 10 → 9 499", text_color=pal["gold"], font=ctk.CTkFont(size=13, weight="bold")
+                     ).pack(side="left")
+        ctk.CTkLabel(r2, text="  Mis en vente", text_color=pal["green"]).pack(side="left")
+        ctk.CTkLabel(r2, text="12:41", text_color=pal["muted"]).pack(side="right")
+        r3 = ctk.CTkFrame(card, fg_color="transparent")
+        r3.pack(fill="x", padx=12, pady=(6, 12))
+        ctk.CTkButton(r3, text="Vendre", width=80, height=26, fg_color=pal["accent"], hover_color=pal["accent_hover"],
+                      text_color=pal["on_accent"]).pack(side="left")
+        ctk.CTkButton(r3, text="Annuler", width=80, height=26, fg_color=pal["btn2"], hover_color=pal["btn2_hover"],
+                      text_color=pal["text"]).pack(side="left", padx=6)
+        sw = ctk.CTkSwitch(r3, text="Option", fg_color=pal["track"], progress_color=pal["accent"],
+                           button_color=pal["knob"], button_hover_color=pal["knob_hover"], text_color=pal["text"])
+        sw.select()
+        sw.pack(side="left", padx=6)
+        pb = ctk.CTkProgressBar(r3, width=110, height=8, fg_color=pal["track"], progress_color=pal["accent"])
+        pb.set(0.6)
+        pb.pack(side="left", padx=6)
+
+    def _apply_look(self):
+        if self.engine._lock.locked() or self._loop is not None:
+            self._log("[Apparence] Une action est en cours : applique le thème quand elle est finie.", "WARN")
+            return
+        self.cfg.theme, self.cfg.accent = self._look["theme"], self._look["accent"]
+        self._save_cfg()
+        self.restart_requested = True
+        self._on_close()
+
+    # ---- sons
+    def _set_volume(self, value: float):
+        self.cfg.sound_volume = round(float(value), 2)
+        self.vol_lbl.configure(text=f"{self.cfg.sound_volume:.0%}")
+        if getattr(self, "_vol_save", None):
+            self.after_cancel(self._vol_save)
+        self._vol_save = self.after(500, self._save_cfg)
+
+    def _test_sound(self):
+        kinds = ("ok", "warn", "error", "done")
+        kind = kinds[self.sound_test[0] % len(kinds)]
+        self.sound_test[0] += 1
+        core.beep(kind, self.cfg, force=True)
+        names = {"ok": "succès", "warn": "avertissement", "error": "erreur", "done": "fin de parcours"}
+        self._log(f"[Sons] Son « {names[kind]} » (re-clique pour le suivant).", "INFO")
 
     def _set_ui_scale(self, label: str):
         s = UI_SCALES.get(label, 1.0)
@@ -1442,15 +1820,44 @@ class App(ctk.CTk):
         self.copy_btn.configure(text="Copié ✓")
         self.after(1500, lambda: self.copy_btn.configure(text="Copier"))
 
-    def _setup_log_tags(self):
-        for tag, color in TAG_COLORS.items():
-            self.log_text.tag_configure(tag, foreground=color)
-        self.log_text.tag_configure("HDR", foreground=P["cyan"], font=(style.MONO, self._log_font_size(), "bold"))
+    ICON_COLORS = {"sale": "gold", "update": "cyan", "warn": "orange", "error": "red", "cal": "cyan",
+                   "ok": "green", "info": "log_time"}
 
-    def _log(self, msg: str, tag: str = "INFO"):
+    def _setup_log_tags(self):
+        t = self.log_text
+        for tag, color in TAG_COLORS.items():
+            t.tag_configure(tag, foreground=color)
+        for kind, color in self.ICON_COLORS.items():
+            t.tag_configure(f"I_{kind}", foreground=P[color])
+        t.tag_configure("HDR", foreground=P["cyan"], font=(style.MONO, self._log_font_size(), "bold"))
+        t.tag_bind("PRICE", "<Button-1>", self._on_log_click)
+        t.tag_bind("PRICE", "<Enter>", lambda _e: t.configure(cursor="hand2"))
+        t.tag_bind("PRICE", "<Leave>", lambda _e: t.configure(cursor=""))
+
+    def _on_log_click(self, e):
+        """Clic sur une ligne qui contient un prix : le prix est copié (à coller dans le jeu)."""
+        t = self.log_text
+        ids = [n for n in t.tag_names(t.index(f"@{e.x},{e.y}")) if n[:1] == "e" and n[1:].isdigit()]
+        if not ids:
+            return
+        k = int(ids[0][1:])
+        entry = next((x for x in reversed(self.log_entries) if x.get("id") == k), None)
+        if entry is None or entry.get("price") is None:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(str(entry["price"]))
+        self.log_hint.configure(text=f"{fmt(entry['price'])} copié ✓", text_color=P["green"])
+        if getattr(self, "_hint_after", None):
+            self.after_cancel(self._hint_after)
+        self._hint_after = self.after(1800, lambda: self.log_hint.configure(
+            text="Clic sur une ligne avec un prix = le copier", text_color=MUTED))
+
+    def _log(self, msg: str, tag: str = "INFO", price: Optional[int] = None):
         core.log_line(msg, tag)
+        self._log_seq += 1
         e = {"t": time.strftime("%H:%M:%S"), "msg": msg, "tag": tag, "cat": log_category(msg, tag),
-             "block": self._block, "header": False}
+             "block": self._block, "header": False, "id": self._log_seq, "price": price,
+             "kind": log_kind(msg, tag)}
         self.log_entries.append(e)
         if self._block is not None and e["cat"] == "problem":
             self.log_blocks[self._block]["problems"] += 1
@@ -1484,7 +1891,10 @@ class App(ctk.CTk):
                 t.tag_bind(htag, "<Leave>", lambda _e: t.configure(cursor=""))
                 continue
             t.insert("end", e["t"] + "  ", ("TIME",))
-            t.insert("end", ("   " if e["block"] is not None else "") + e["msg"] + "\n", (e["tag"],))
+            kind = e.get("kind", "info")
+            t.insert("end", ("   " if e["block"] is not None else "") + LOG_ICONS[kind] + " ", (f"I_{kind}",))
+            tags = (e["tag"],) + (("PRICE", f"e{e['id']}") if e.get("price") is not None else ())
+            t.insert("end", e["msg"].lstrip() + "\n", tags)
         t.see("end")
         t.configure(state="disabled")
 
@@ -1503,12 +1913,14 @@ class App(ctk.CTk):
             self._render_log()
             self.log_text.yview_moveto(y)
 
-    def _block_start(self):
-        """Début d'un Ctrl+F3 : ses lignes vont dans un bloc repliable du journal."""
+    def _block_start(self, kind: str = "relist_all"):
+        """Début d'un parcours (Ctrl+F3, F2) : ses lignes vont dans un bloc repliable du journal."""
         self._block_seq += 1
         self._block = self._block_seq
-        self.log_blocks[self._block] = {"title": f"Ctrl+F3 · {time.strftime('%H:%M:%S')} · en cours…",
-                                        "collapsed": False, "problems": 0}
+        key = self.cfg.hotkeys.get(kind, "").upper()
+        self.log_blocks[self._block] = {
+            "title": f"{key} · {self.LOOP_NAMES.get(kind, 'Parcours')} · {time.strftime('%H:%M:%S')} · en cours…",
+            "collapsed": False, "problems": 0}
         e = {"t": "", "msg": "", "tag": "INFO", "cat": "sale", "block": self._block, "header": True}
         self.log_entries.append(e)
         self._insert_entries([e])
@@ -1560,8 +1972,11 @@ class App(ctk.CTk):
         was_auto = c.relist_auto
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
                      "relist_auto", "relist_confirm_enter", "relist_summary", "fast_digits", "auto_recalibrate",
-                     "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates", "notify"):
+                     "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates", "notify",
+                     "animations", "tray", "tray_minimize"):
             setattr(c, name, bool(v[name].get()))
+        ANIMATE["on"] = c.animations
+        self._apply_tray()
         self._apply_topmost()
         self._refresh_home()
         if c.relist_auto and not was_auto:
@@ -1664,17 +2079,19 @@ class App(ctk.CTk):
                     res = self.engine.sell(optimize=True) if arg else self.engine.smart()
                     self.ui_events.put(("result", res))
                 elif name == "sell_all":
+                    self.ui_events.put(("block_start", "sell_all"))
                     self.ui_events.put(("loop_start", "sell_all"))
                     res = None
                     try:
                         res = self.engine.sell_all()
                         self.ui_events.put(("result", res))
                     finally:
+                        self.ui_events.put(("block_end", res))
                         self.ui_events.put(("loop_end", res))
                 elif name == "relist":
                     self.ui_events.put(("result", self.engine.relist()))
                 elif name == "relist_all":
-                    self.ui_events.put(("block_start", None))
+                    self.ui_events.put(("block_start", "relist_all"))
                     self.ui_events.put(("loop_start", "relist_all"))
                     self.ui_events.put(("log", ("[MAJ TOUT] Parcours de la liste… « Arrêter » ou "
                                                 f"{self.cfg.hotkeys['pause'].upper()} pour arrêter.", "CAL")))
@@ -1691,6 +2108,8 @@ class App(ctk.CTk):
                     self.ui_events.put(("screen", self.engine.read_only()))
                 elif name == "wizard_test":
                     self.ui_events.put(("wizard_test", self._wizard_checks()))
+                elif name == "wiz_zone":
+                    self.ui_events.put(("wiz_zone", self._zone_check(arg)))
                 elif name == "calib_rect":
                     self.ui_events.put(("calib_rect", (arg, self.engine.calibrate_rect(arg))))
                 elif name == "calib_point":
@@ -1729,7 +2148,7 @@ class App(ctk.CTk):
                 if name == "result":
                     self._on_result(arg)
                 elif name == "block_start":
-                    self._block_start()
+                    self._block_start(arg or "relist_all")
                 elif name == "block_end":
                     self._block_end(arg)
                 elif name == "loop_start":
@@ -1780,6 +2199,10 @@ class App(ctk.CTk):
                     self._refresh_status()
                 elif name == "wizard_test":
                     self._wiz_report_show(arg)
+                elif name == "wiz_zone":
+                    self._wiz_zone_show(arg)
+                elif name == "tray":
+                    self._on_tray(arg)
                 elif name == "update":
                     self._on_update(arg)
                 elif name == "update_progress":
@@ -1800,10 +2223,11 @@ class App(ctk.CTk):
         self._count_stats(res)
         tag = {"warn": "WARN", "error": "ERROR"}.get(res.level) or (
             "OPT" if res.message.startswith("[OPT]") else "OK")
-        self._log(res.message, tag)
+        self._log(res.message, tag, res.new_price)
         if res.message.startswith("[MAJ TOUT]"):
             self._relist_summary(res)
-        core.beep(res.level, self.cfg)
+        if self._loop is None or res.level != "ok":
+            core.beep(res.level, self.cfg)       # fin d'une boucle réussie : son « fin de parcours »
         head = (f"Lot {res.lot} → {fmt(res.new_price)}" if res.new_price is not None
                 else "Liste mise à jour" if res.message.startswith("[MAJ TOUT]") else "Pas de prix")
         self.last_action = (head, res.hint or res.level, LEVEL_COLORS[res.level])
@@ -1823,7 +2247,7 @@ class App(ctk.CTk):
         """Journal : une ligne par prix modifié / ligne à revoir. Historique (onglet Mes ventes) et
         fenêtre : la même chose avec l'image du nom de chaque objet (le nom n'est pas lu en texte)."""
         for c in res.changes:
-            self._log("   " + c.text(), "OK" if c.modified else "WARN")
+            self._log("   " + c.text(), "OK" if c.modified else "WARN", c.new if c.modified else None)
         if not res.changes:
             return
         run = {"time": time.time(), "changes": list(res.changes)}
@@ -1844,6 +2268,7 @@ class App(ctk.CTk):
         if w is not None and w.winfo_exists():
             w.destroy()
         w = ctk.CTkToplevel(self)
+        brand(w)
         self._summary_win = w
         w.title("Résumé de la mise à jour (Ctrl+F3) · "
                 + time.strftime("%d/%m %H:%M", time.localtime(run["time"])))
@@ -1876,6 +2301,7 @@ class App(ctk.CTk):
                          wraplength=300).pack(side="left", padx=6)
             ctk.CTkLabel(r, text=f"ligne {c.row}", text_color=MUTED).pack(side="right", padx=8)
         ctk.CTkButton(w, text="Fermer", width=100, command=w.destroy).pack(pady=(4, 12))
+        w.bind("<Escape>", lambda _e: w.destroy())
 
     @staticmethod
     def _name_thumb(img):
@@ -1947,7 +2373,7 @@ class App(ctk.CTk):
         row.pack(padx=(12, 16), pady=9)
         dot = ctk.CTkFrame(row, width=10, height=10, corner_radius=5, fg_color=color)
         dot.pack(side="left", padx=(0, 10))
-        head_l = ctk.CTkLabel(row, text=head, text_color="#ffffff", font=ctk.CTkFont(size=15, weight="bold"))
+        head_l = ctk.CTkLabel(row, text=head, text_color=P["popup_head"], font=ctk.CTkFont(size=15, weight="bold"))
         head_l.pack(side="left")
         sub_l = ctk.CTkLabel(row, text=sub, text_color=color, font=ctk.CTkFont(size=13))
         sub_l.pack(side="left", padx=(10, 0))
@@ -1962,7 +2388,8 @@ class App(ctk.CTk):
         t, card = rounded_popup(self, alpha=0.96)
         self._popup_content(card, head, sub, color)
         t.geometry(f"+{x + 18}+{y + 18}")
-        t.after(ms, lambda: t.winfo_exists() and t.destroy())
+        self._toasts = [w for w in self._toasts if w.winfo_exists()] + [t]
+        t.after(ms, lambda: close_popup(t))
 
     def _overlay(self, x, y, w, h, color, alpha, ms, label=""):
         t = tk.Toplevel(self)
@@ -2011,7 +2438,7 @@ class App(ctk.CTk):
         b.geometry(f"+{max(0, int(x))}+{max(0, int(y))}")
         if getattr(self, "_banner_after", None):
             self.after_cancel(self._banner_after)
-        self._banner_after = self.after(ms, lambda: b.winfo_exists() and b.destroy())
+        self._banner_after = self.after(ms, lambda: close_popup(b))
 
     # ------------------------------------------------------------------ assistant
     # (clé, type, titre, optionnel, raccourci, préparation dans le jeu, comment faire)
@@ -2085,39 +2512,77 @@ class App(ctk.CTk):
          "Ne prends PAS la liste de droite."),
     ]
 
+    RECT_KEYS = ("anchor", "table", "qty", "avg", "count", "name", "mine")
+
     def _open_wizard(self):
         w = getattr(self, "_wiz", None)
         if w is not None and w.winfo_exists():
             w.lift()
             return
         w = ctk.CTkToplevel(self)
+        brand(w)
         w.title("Assistant de calibration")
-        w.geometry("640x560")
+        w.geometry("940x660")
+        w.minsize(860, 600)
         w.attributes("-topmost", True)
         self._wiz, self._wiz_i = w, 0
-        self._wiz_title = ctk.CTkLabel(w, text="", font=ctk.CTkFont(size=16, weight="bold"), anchor="w")
-        self._wiz_title.pack(fill="x", padx=16, pady=(14, 4))
-        self._wiz_prep = ctk.CTkLabel(w, text="", wraplength=520, justify="left", anchor="w",
+        self._wiz_seen = dict(self._wiz_values())   # pour voir quand une zone vient d'être calibrée
+        self._wiz_img = None
+        # à gauche : toutes les étapes, cliquables, avec leur état
+        side = ctk.CTkFrame(w, fg_color=CARD, corner_radius=12, border_width=1, border_color=P["border"], width=270)
+        side.pack(side="left", fill="y", padx=(12, 6), pady=12)
+        side.pack_propagate(False)
+        ctk.CTkLabel(side, text="Étapes", font=ctk.CTkFont(size=14, weight="bold"), anchor="w"
+                     ).pack(fill="x", padx=12, pady=(10, 4))
+        self._wiz_steps = []
+        for i in range(len(self.WIZ_STEPS) + 1):
+            sb = ctk.CTkButton(side, text="", anchor="w", height=26, fg_color="transparent",
+                               hover_color=P["btn2_hover"], text_color=P["text"], font=ctk.CTkFont(size=12),
+                               command=lambda k=i: self._wiz_jump(k))
+            sb.pack(fill="x", padx=6, pady=1)
+            self._wiz_steps.append(sb)
+        auto = ctk.CTkButton(side, text="✨ Tout placer automatiquement", height=34,
+                             command=lambda: self._countdown("automatique", self._calib_auto_ui))
+        auto.pack(side="bottom", fill="x", padx=10, pady=10)
+        self._tip(auto, "HDV ouvert sur l'onglet « Vente » : l'outil place toutes les zones, puis tu "
+                        "vérifies chaque étape ici (capture + lecture).")
+        main = ctk.CTkFrame(w, fg_color="transparent")
+        main.pack(side="left", fill="both", expand=True, padx=(6, 12), pady=12)
+        self._wiz_title = ctk.CTkLabel(main, text="", font=ctk.CTkFont(size=16, weight="bold"), anchor="w")
+        self._wiz_title.pack(fill="x", pady=(2, 4))
+        self._wiz_prep = ctk.CTkLabel(main, text="", wraplength=600, justify="left", anchor="w",
                                       text_color=P["cyan"])
-        self._wiz_prep.pack(fill="x", padx=16)
-        self._wiz_text = ctk.CTkLabel(w, text="", wraplength=520, justify="left", anchor="w")
-        self._wiz_text.pack(fill="x", padx=16, pady=(8, 0))
-        self._wiz_state = ctk.CTkLabel(w, text="", anchor="w", font=ctk.CTkFont(weight="bold"))
-        self._wiz_state.pack(fill="x", padx=16, pady=(10, 0))
-        self._wiz_msg = ctk.CTkLabel(w, text="", anchor="w", text_color=P["gold"], wraplength=520,
+        self._wiz_prep.pack(fill="x")
+        self._wiz_text = ctk.CTkLabel(main, text="", wraplength=600, justify="left", anchor="w")
+        self._wiz_text.pack(fill="x", pady=(8, 0))
+        # ce que l'outil voit dans la zone : capture + verdict, refait après chaque calibration
+        self._wiz_check = ctk.CTkFrame(main, fg_color=CARD, corner_radius=12, border_width=1,
+                                       border_color=P["border"])
+        hr = ctk.CTkFrame(self._wiz_check, fg_color="transparent")
+        hr.pack(fill="x", padx=12, pady=(8, 2))
+        ctk.CTkLabel(hr, text="Ce que l'outil voit", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
+        self._wiz_state = ctk.CTkLabel(hr, text="", font=ctk.CTkFont(weight="bold"))
+        self._wiz_state.pack(side="right")
+        ctk.CTkButton(hr, text="↻ Relire", width=70, height=22, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      command=self._wiz_zone_check).pack(side="right", padx=8)
+        self._wiz_cap = ctk.CTkLabel(self._wiz_check, text="")
+        self._wiz_cap.pack(padx=12, pady=4)
+        self._wiz_verdict = ctk.CTkLabel(self._wiz_check, text="", anchor="w", justify="left", wraplength=580)
+        self._wiz_verdict.pack(fill="x", padx=12, pady=(0, 10))
+        self._wiz_msg = ctk.CTkLabel(main, text="", anchor="w", text_color=P["gold"], wraplength=600,
                                      justify="left")
-        self._wiz_msg.pack(fill="x", padx=16, pady=(4, 0))
-        self._wiz_report = ctk.CTkTextbox(w, height=150, font=("Consolas", 11))
-        bar = ctk.CTkFrame(w, fg_color="transparent")
-        bar.pack(side="bottom", fill="x", padx=16, pady=12)
-        self._wiz_back = ctk.CTkButton(bar, text="← Retour", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=lambda: self._wiz_go(-1))
+        self._wiz_report = ctk.CTkTextbox(main, height=150, font=(style.MONO, 11))
+        bar = ctk.CTkFrame(main, fg_color="transparent")
+        bar.pack(side="bottom", fill="x", pady=(8, 0))
+        self._wiz_back = ctk.CTkButton(bar, text="← Retour", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                                       command=lambda: self._wiz_go(-1))
         self._wiz_back.pack(side="left")
+        ctk.CTkButton(bar, text="Voir zones", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      command=self._show_zones).pack(side="left", padx=8)
         self._wiz_next = ctk.CTkButton(bar, text="Suivant →", width=110, command=lambda: self._wiz_go(1))
         self._wiz_next.pack(side="right")
-        self._wiz_do = ctk.CTkButton(bar, text="Calibrer", width=130, command=self._wiz_calibrate)
+        self._wiz_do = ctk.CTkButton(bar, text="Calibrer", width=150, command=self._wiz_calibrate)
         self._wiz_do.pack(side="right", padx=8)
-        ctk.CTkButton(bar, text="Voir zones", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._show_zones
-                      ).pack(side="left", padx=8)
         self._wiz_show()
         self._wiz_tick()
 
@@ -2128,21 +2593,44 @@ class App(ctk.CTk):
                 "modify_button": c.modify_button, "rows": c.relist_row, "sell_button": c.sell_button,
                 "name": c.name_region, "mine": c.mine_region}
 
+    def _wiz_refresh_steps(self):
+        vals = self._wiz_values()
+        for i, sb in enumerate(self._wiz_steps):
+            if i < len(self.WIZ_STEPS):
+                key, _k, title, optional = self.WIZ_STEPS[i][:4]
+                done = bool(vals.get(key))
+                mark, col = ("✓", P["green"]) if done else (("–", MUTED) if optional else ("✗", P["red"]))
+                text = f"{mark}  {i + 1}. {title}"
+            else:
+                text, col = f"▶  {i + 1}. Vérification finale", P["text"]
+            sb.configure(text=text if len(text) < 38 else text[:36] + "…", text_color=col,
+                         fg_color=P["btn2"] if i == self._wiz_i else "transparent")
+
+    def _wiz_jump(self, i: int):
+        self._wiz_i = i
+        self._wiz_show()
+
     def _wiz_show(self):
         n = len(self.WIZ_STEPS)
         self._wiz_msg.configure(text="")
+        self._wiz_refresh_steps()
+        self._wiz_back.configure(state="normal" if self._wiz_i > 0 else "disabled")
         if self._wiz_i >= n:
             self._wiz_prep.configure(text="")
-            self._wiz_title.configure(text=f"Vérification ({n + 1}/{n + 1})")
-            self._wiz_text.configure(text="Sélectionne un objet de ton inventaire (ou une de tes ventes) "
-                                          "dans l'HDV, puis clique « Tester ». L'outil lit tout une fois et "
-                                          "dit ce qui va et ce qui ne va pas.")
-            self._wiz_state.configure(text="")
-            self._wiz_do.configure(text="Tester", command=self._wiz_test)
+            self._wiz_title.configure(text=f"Vérification finale ({n + 1}/{n + 1})")
+            self._wiz_text.configure(text="L'outil lit tout une fois et dit ce qui va et ce qui ne va pas. "
+                                          "Sélectionne un objet de ton inventaire (ou une de tes ventes) "
+                                          "dans l'HDV ; « Relancer » refait la lecture.")
+            self._wiz_check.pack_forget()
+            self._wiz_msg.pack_forget()
+            self._wiz_do.configure(text="Relancer le test", command=self._wiz_test)
             self._wiz_next.configure(text="Terminer", command=self._wiz.destroy)
-            self._wiz_report.pack(fill="both", expand=True, padx=16, pady=(8, 0))
+            self._wiz_report.pack(fill="both", expand=True, pady=(8, 0))
+            self._wiz_test()                     # lancée toute seule en arrivant ici
             return
         self._wiz_report.pack_forget()
+        self._wiz_check.pack(fill="x", pady=(10, 0))
+        self._wiz_msg.pack(fill="x", pady=(6, 0))
         key, kind, title, optional, hot, prep, text = self.WIZ_STEPS[self._wiz_i]
         self._wiz_title.configure(text=f"Étape {self._wiz_i + 1}/{n + 1} : {title}"
                                        + ("  (optionnel)" if optional else ""))
@@ -2153,28 +2641,45 @@ class App(ctk.CTk):
         self._wiz_text.configure(
             text=text + f"\n\n{how} Après « Calibrer », un compte à rebours de "
                         f"{self.cfg.calib_countdown} s te laisse placer la souris dans le jeu "
-                        f"(sans cliquer). Raccourci équivalent en jeu : "
-                        f"{self.cfg.hotkeys[hot].upper()}. Vérifie ensuite avec « Voir zones ».")
-        self._wiz_do.configure(text="Calibrer", command=self._wiz_calibrate)
+                        f"(sans cliquer). Raccourci en jeu : {self.cfg.hotkeys[hot].upper()}.")
         self._wiz_next.configure(text="Suivant →" if not optional else "Suivant / passer →",
                                  command=lambda: self._wiz_go(1))
-        self._wiz_back.configure(state="normal" if self._wiz_i > 0 else "disabled")
-        self._wiz_tick(once=True)
+        self._wiz_update_state()
+        if self._wiz_values().get(key):
+            self._wiz_zone_check()
+        else:
+            self._wiz_cap.configure(image=None, text="")
+            self._wiz_img = None
+            self._wiz_verdict.configure(text="Pas encore calibré : clique « Calibrer »"
+                                             + (" ou passe cette étape." if optional else "."),
+                                        text_color=MUTED)
 
-    def _wiz_tick(self, once: bool = False):
+    def _wiz_update_state(self):
+        if self._wiz_i >= len(self.WIZ_STEPS):
+            return
+        ok = bool(self._wiz_values().get(self.WIZ_STEPS[self._wiz_i][0]))
+        self._wiz_state.configure(text="✓ Calibré" if ok else "✗ Pas encore calibré",
+                                  text_color=P["green"] if ok else P["red"])
+        self._wiz_do.configure(text="↺ Refaire cette zone" if ok else "Calibrer", command=self._wiz_calibrate)
+
+    def _wiz_tick(self):
         w = getattr(self, "_wiz", None)
         if w is None or not w.winfo_exists():
             return
+        vals = self._wiz_values()
+        if vals != self._wiz_seen:               # une zone vient d'être (re)calibrée
+            changed = {k for k in vals if vals[k] != self._wiz_seen.get(k)}
+            self._wiz_seen = dict(vals)
+            self._wiz_refresh_steps()
+            if self._wiz_i < len(self.WIZ_STEPS):
+                self._wiz_update_state()
+                key = self.WIZ_STEPS[self._wiz_i][0]
+                if key in changed and vals.get(key):
+                    self._wiz_zone_check()
+        msg = self.status_var.get()
         if self._wiz_i < len(self.WIZ_STEPS):
-            key = self.WIZ_STEPS[self._wiz_i][0]
-            ok = bool(self._wiz_values().get(key))
-            self._wiz_state.configure(text="✓ Calibré" if ok else "✗ Pas encore calibré",
-                                      text_color=P["green"] if ok else P["red"])
-            msg = self.status_var.get()
-            if msg.startswith("Calibration"):
-                self._wiz_msg.configure(text=msg)
-        if not once:
-            self.after(400, self._wiz_tick)
+            self._wiz_msg.configure(text=msg if msg.startswith("Calibration") else "")
+        self.after(400, self._wiz_tick)
 
     def _wiz_go(self, d: int):
         self._wiz_i = max(0, min(len(self.WIZ_STEPS), self._wiz_i + d))
@@ -2188,6 +2693,115 @@ class App(ctk.CTk):
             self._countdown(title, lambda: self._calib_point(key))
         else:
             self._calib_rows_ui()
+
+    def _wiz_zone_check(self):
+        if self._wiz_i >= len(self.WIZ_STEPS):
+            return
+        self._wiz_verdict.configure(text="Lecture…", text_color=MUTED)
+        self.jobs.put(("wiz_zone", self.WIZ_STEPS[self._wiz_i][0]))
+
+    def _zone_check(self, key: str) -> dict:
+        """(thread de travail) Capture de la zone + ce que l'outil y lit, pour l'assistant."""
+        val = self._wiz_values().get(key)
+        out = {"key": key, "img": None, "ok": None, "lines": ["Pas encore calibré."]}
+        if not val:
+            return out
+        try:
+            from PIL import Image, ImageDraw
+            bx, by, bw, bh = core.screen_bounds()
+            mark = None
+            if key in self.RECT_KEYS:
+                x, y, w, h = val
+            else:                                  # point : la zone autour, avec une cible
+                px, py = val[0], val[1]
+                hw, hh = (160, max(14, int(self.cfg.relist_step or 30))) if key == "rows" else (110, 35)
+                x, y, w, h = px - hw, py - hh, 2 * hw, 2 * hh + (hh if key == "rows" else 0)
+                mark = (px, py)
+            x0, y0 = max(bx, x), max(by, y)
+            x1, y1 = min(bx + bw, x + w), min(by + bh, y + h)
+            if x1 - x0 < 2 or y1 - y0 < 2:
+                return {"key": key, "img": None, "ok": False, "lines": ["✗ Zone hors de l'écran : refais-la."]}
+            pil = Image.fromarray(core.grab_screen((x0, y0, x1 - x0, y1 - y0))[:, :, ::-1].copy())
+            if mark:
+                d = ImageDraw.Draw(pil)
+                mx, my = mark[0] - x0, mark[1] - y0
+                d.ellipse((mx - 9, my - 9, mx + 9, my + 9), outline="#ff3b5c", width=2)
+                d.line((mx - 14, my, mx + 14, my), fill="#ff3b5c", width=1)
+                d.line((mx, my - 14, mx, my + 14), fill="#ff3b5c", width=1)
+            out["img"] = pil
+            out["ok"], out["lines"] = self._zone_verdict(key)
+        except Exception as e:
+            out["ok"], out["lines"] = False, [f"✗ Erreur : {e}"]
+        return out
+
+    def _zone_verdict(self, key: str) -> tuple:
+        """(ok : True / False / None = impossible à vérifier maintenant, lignes)."""
+        c = self.cfg
+        warn = []
+        if key in core.CUT_CHECK_ZONES and core.cut_text_hint(key, getattr(c, f"{key}_region")):
+            warn = ["⚠ Le texte touche le bord de la zone (chiffre coupé ?) : refais-la avec 3-4 px de "
+                    "marge en haut et en bas."]
+        if key == "anchor":
+            tpl = core.load_anchor(core.anchor_path(c))
+            if tpl is None:
+                return False, ["✗ Image du repère absente : refais la zone."]
+            score = core.anchor_score(core.grab_screen(tuple(c.anchor_region)), tpl)
+            if score >= core.ANCHOR_FOUND:
+                return True, [f"✓ Titre « Hôtel de vente » reconnu ({score:.0%})."]
+            return False, [f"✗ Titre pas reconnu ici ({score:.0%}) : HDV fermé ou déplacé, ou zone mal placée."]
+        if key == "rows":
+            return True, [f"✓ 1re ligne enregistrée (la cible), hauteur d'une ligne : {c.relist_step} px."]
+        if key == "sell_button":
+            return True, ["✓ Position enregistrée : la cible montre où l'outil cliquera."]
+        if key == "modify_button":
+            if core.detect_panel(c) == "relist":
+                return True, ["✓ Bouton « Modifier » vu sous la cible."]
+            return None, ["– Bouton pas visible maintenant : sélectionne une de TES ventes, puis « Relire »."]
+        if key == "name":
+            if core.item_key(core.grab_name(c)) is not None:
+                return True, ["✓ Nom de l'objet lisible."]
+            return False, ["✗ Rien de lisible dans la zone du nom (objet sélectionné ?)."]
+        sr = self.engine.read_only()
+        if key == "table":
+            got = [(l, r.value) for l, r in sorted(sr.prices.items()) if r and r.value is not None]
+            if got:
+                return True, [f"✓ {len(got)} prix lus : " + ", ".join(f"lot {l} = {fmt(v)}" for l, v in got)] + warn
+            return False, ["✗ Aucun prix lu : sélectionne un objet de ton inventaire, ou refais la zone."]
+        if key == "qty":
+            if sr.selected:
+                return True, [f"✓ Quantité lue : {sr.selected}."] + warn
+            return False, ["✗ Quantité illisible : objet sélectionné ? Sinon refais la zone."] + warn
+        if key == "avg":
+            if sr.avg:
+                return True, [f"✓ Prix moyen lu : {fmt(sr.avg)} par objet."] + warn
+            return False, ["✗ Prix moyen illisible : objet sélectionné ? Sinon refais la zone."] + warn
+        if key == "count":
+            if sr.listed:
+                return True, [f"✓ Compteur lu : {sr.listed[0]}/{sr.listed[1]} lots en vente."] + warn
+            return False, ["✗ Compteur illisible : refais la zone (toute la ligne, avec de la marge)."] + warn
+        if key in ("price_field", "mine"):
+            if sr.mine:
+                return True, [f"✓ Prix du lot lu : {fmt(sr.mine)}."]
+            return None, ["– Champ vide ou illisible pour l'instant (normal sans objet sélectionné). "
+                          "Sélectionne une de tes ventes, puis « Relire »."]
+        return None, ["Position enregistrée."]
+
+    def _wiz_zone_show(self, res: dict):
+        w = getattr(self, "_wiz", None)
+        if w is None or not w.winfo_exists() or self._wiz_i >= len(self.WIZ_STEPS) \
+                or self.WIZ_STEPS[self._wiz_i][0] != res["key"]:
+            return
+        img = res.get("img")
+        if img is not None:
+            scale = min(3.0, 580 / img.width, 170 / img.height)    # petites zones agrandies
+            size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+            self._wiz_img = ctk.CTkImage(light_image=img, dark_image=img, size=size)
+            self._wiz_cap.configure(image=self._wiz_img, text="")
+        else:
+            self._wiz_img = None
+            self._wiz_cap.configure(image=None, text="")
+        col = {True: P["green"], False: P["red"]}.get(res["ok"], P["orange"])
+        self._wiz_verdict.configure(text="\n".join(res["lines"]), text_color=col)
 
     def _wiz_test(self):
         self._wiz_report.delete("1.0", "end")
@@ -2232,6 +2846,7 @@ class App(ctk.CTk):
                       "et appuie à nouveau.", "CAL")
         else:
             self._log(f"[Calib] {label} = {val}", "CAL")
+            self._remember_game_window()
             hint = core.zone_hint(name, val) or core.cut_text_hint(name, val)
             if hint:
                 self._log(f"[Calib] {label} : {hint}. Recalibre si la lecture échoue.", "WARN")
@@ -2276,6 +2891,7 @@ class App(ctk.CTk):
         for line in checks:
             self._log("   " + line, "OK" if line.startswith("✓") else
                       "WARN" if line[:1] in "⚠–•" else "ERROR")
+        self._remember_game_window()
         self._log("[Calib auto] Vérifie avec « Voir zones » ; une zone mal placée se recalibre "
                   "individuellement (onglet Calibration › Avancé).", "CAL")
         self._sync_vars_from_cfg()
@@ -2288,6 +2904,7 @@ class App(ctk.CTk):
     def _on_calib_point(self, name: str, p):
         label = POINT_LABELS[name]
         self._log(f"[Calib] {label} = {p}", "CAL")
+        self._remember_game_window()
         self._sync_vars_from_cfg()
         self._refresh_status()
 
@@ -2302,6 +2919,8 @@ class App(ctk.CTk):
     def _set_hdv(self, state: Optional[str]):
         if state != self.hdv_state:
             self.hdv_state = state
+            if state == "ok":
+                self._remember_game_window()     # la calibration marche avec cette fenêtre du jeu
             self._refresh_status()
 
     def _chip_values(self) -> dict:
@@ -2357,10 +2976,11 @@ class App(ctk.CTk):
         self.status_var.set(("À calibrer : " + ", ".join(missing) + " (onglet Calibration)")
                             if missing else "")
         self._refresh_home()
+        self._tray_update()
 
     # ---- style : classique ou verre
     def _glass_on(self) -> bool:
-        return self.cfg.ui_style == "glass" and style.glass_supported()
+        return self.cfg.ui_style == "glass" and style.glass_supported() and style.is_dark()
 
     def _apply_style(self):
         """Classique (fond opaque) ou verre (le jeu flouté derrière l'outil), en direct."""
@@ -2434,6 +3054,7 @@ class App(ctk.CTk):
                       "text": "Démarrage…" if kind == "relist_all" else "en cours…"}
         self.loop_stop.configure(text="■ Arrêter", state="normal")
         self._loop_show()
+        self._tray_update()
 
     def _loop_progress(self, d: dict):
         if self._loop is None or d.get("finished"):
@@ -2455,10 +3076,34 @@ class App(ctk.CTk):
             if self.loop_pb.cget("mode") != "determinate":
                 self.loop_pb.stop()
                 self.loop_pb.configure(mode="determinate")
-            self.loop_pb.set(lp["frac"])
+                self.loop_pb.set(0)
+            self._pb_set(self.loop_pb, lp["frac"])
         if not self.loop_bar.winfo_ismapped():
             self.loop_bar.pack(side="right", padx=(8, 0))
         self._refresh_compact()
+
+    def _pb_set(self, pb, frac: float):
+        """Barre de progression : glisse vers la nouvelle valeur au lieu de sauter."""
+        if not ANIMATE["on"]:
+            pb.set(frac)
+            return
+        pb._dph_target = frac
+        if getattr(pb, "_dph_anim", None):
+            return
+
+        def step():
+            try:
+                cur, tgt = pb.get(), pb._dph_target
+                nxt = cur + (tgt - cur) * 0.25
+                if abs(tgt - nxt) < 0.004:
+                    pb.set(tgt)
+                    pb._dph_anim = None
+                    return
+                pb.set(nxt)
+                pb._dph_anim = pb.after(16, step)
+            except (tk.TclError, AttributeError):
+                pb._dph_anim = None
+        pb._dph_anim = pb.after(16, step)
 
     def _stop_loop(self):
         if self._loop is not None:
@@ -2472,6 +3117,9 @@ class App(ctk.CTk):
         self.loop_pb.stop()
         self.loop_bar.pack_forget()
         self._refresh_compact()
+        self._tray_update()
+        if lp is not None and res is not None and res.level == "ok":
+            core.beep("done", self.cfg)
         if lp is None or not self.cfg.notify or time.time() - lp["t0"] < LONG_LOOP_S:
             return
         try:
@@ -2505,8 +3153,14 @@ class App(ctk.CTk):
             self._cheat = None
             return
         t, card = rounded_popup(self)
-        ctk.CTkLabel(card, text="◆  Raccourcis", text_color=P["gold"], anchor="w",
-                     font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", padx=14, pady=(10, 4))
+        head = ctk.CTkFrame(card, fg_color="transparent")
+        head.pack(fill="x", padx=(14, 8), pady=(8, 4))
+        ctk.CTkLabel(head, text="◆  Raccourcis", text_color=P["gold"], anchor="w",
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        ctk.CTkButton(head, text="✕", width=24, height=22, fg_color="transparent", hover_color=P["btn2_hover"],
+                      text_color=MUTED, command=lambda: self._cheat_close(t)).pack(side="right")
+        ctk.CTkLabel(head, text="⠿ déplacer", text_color=MUTED, font=ctk.CTkFont(size=11)
+                     ).pack(side="right", padx=6)
         g = ctk.CTkFrame(card, fg_color="transparent")
         g.pack(padx=12, pady=(0, 10))
         for i, name in enumerate(self.CHEAT_KEYS):
@@ -2519,10 +3173,28 @@ class App(ctk.CTk):
             ctk.CTkLabel(g, text=txt, anchor="w", font=ctk.CTkFont(size=13),
                          text_color=MUTED if txt.endswith("(désactivé)") else P["text"]
                          ).grid(row=i, column=1, sticky="w", padx=(10, 4))
-        x, y = self._overlay_anchor()
+        pos = self.cfg.cheatsheet_pos
+        try:
+            ok = bool(pos) and geometry_on_screen(f"300x200+{pos[0]}+{pos[1]}", core.screen_bounds())
+        except Exception:
+            ok = False
+        x, y = (pos[0], pos[1]) if ok else self._overlay_anchor()   # là où tu l'as laissé la dernière fois
         t.geometry(f"+{max(0, int(x))}+{max(0, int(y))}")
         self._cheat = t
-        t.after(ms, lambda: t.winfo_exists() and t.destroy())
+        timer = {"id": t.after(ms, lambda: close_popup(t))}
+
+        def moved(nx, ny):
+            # déplacé : reste affiché jusqu'au ✕ (ou la touche), à cet endroit les prochaines fois
+            if timer["id"]:
+                t.after_cancel(timer["id"])
+                timer["id"] = None
+            self.cfg.cheatsheet_pos = [nx, ny]
+            self._save_cfg()
+        make_draggable(t, moved)
+
+    def _cheat_close(self, t):
+        close_popup(t)
+        self._cheat = None
 
     def _overlay_anchor(self):
         """Où afficher bandeau et aide-mémoire : au-dessus de l'HDV si on sait où il est."""
@@ -2542,6 +3214,7 @@ class App(ctk.CTk):
     # ---- confirmation au style de l'outil (au lieu de la boîte Windows)
     def _confirm(self, title: str, text: str, ok: str = "Oui", danger: bool = False) -> bool:
         d = ctk.CTkToplevel(self)
+        brand(d)
         d.title(title)
         d.resizable(False, False)
         d.attributes("-topmost", True)
@@ -2556,9 +3229,10 @@ class App(ctk.CTk):
         def done(v):
             res["ok"] = v
             d.destroy()
-        kw = dict(fg_color=style.CHIP["red"][0], hover_color="#5a2730", text_color=P["red"]) if danger else {}
+        kw = dict(fg_color=style.CHIP["red"][0], hover_color=P["red_hover"],
+                  text_color=style.CHIP["red"][1]) if danger else {}
         ctk.CTkButton(bar, text=ok, width=110, command=lambda: done(True), **kw).pack(side="right")
-        ctk.CTkButton(bar, text="Annuler", width=100, fg_color=BTN2, hover_color=BTN2_HOVER,
+        ctk.CTkButton(bar, text="Annuler", width=100, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=lambda: done(False)).pack(side="right", padx=8)
         d.protocol("WM_DELETE_WINDOW", lambda: done(False))
         d.bind("<Escape>", lambda _e: done(False))
@@ -2577,6 +3251,7 @@ class App(ctk.CTk):
             w.lift()
             return
         w = ctk.CTkToplevel(self)
+        brand(w)
         self._compact = w
         w.title("Dofus Price Helper")
         w.attributes("-topmost", True)
@@ -2607,7 +3282,7 @@ class App(ctk.CTk):
         bar.pack(fill="x", padx=10, pady=(6, 10), side="bottom")
         self._cmp_pause = ctk.CTkButton(bar, text="", width=120, command=self._toggle_pause)
         self._cmp_pause.pack(side="left")
-        ctk.CTkButton(bar, text="Agrandir ⤢", width=100, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._close_compact
+        ctk.CTkButton(bar, text="Agrandir ⤢", width=100, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._close_compact
                       ).pack(side="right")
         w.protocol("WM_DELETE_WINDOW", self._close_compact)
         self.withdraw()
@@ -2660,13 +3335,14 @@ class App(ctk.CTk):
                 if self._cmp_pb.cget("mode") != "determinate":
                     self._cmp_pb.stop()
                     self._cmp_pb.configure(mode="determinate")
-                self._cmp_pb.set(lp["frac"])
+                    self._cmp_pb.set(0)
+                self._pb_set(self._cmp_pb, lp["frac"])
             if not self._cmp_pb.winfo_ismapped():
                 self._cmp_pb.pack(fill="x", padx=12, pady=(4, 0))
             stopping = self.engine.stop_requested
             self._cmp_pause.configure(text="Arrêt…" if stopping else "■ Arrêter", command=self._stop_loop,
-                                      fg_color=style.CHIP["red"][0], hover_color="#5a2730",
-                                      text_color=P["red"])
+                                      fg_color=style.CHIP["red"][0], hover_color=P["red_hover"],
+                                      text_color=style.CHIP["red"][1])
             return
         self._cmp_pb.stop()
         self._cmp_pb.pack_forget()
@@ -2675,7 +3351,7 @@ class App(ctk.CTk):
         self._cmp_sub.configure(text=sub, text_color=color)
         self._cmp_pause.configure(text="▶ Reprendre" if self.engine.paused else "⏸ Pause",
                                   command=self._toggle_pause, fg_color=P["accent"],
-                                  hover_color=P["accent_hover"], text_color="#ffffff")
+                                  hover_color=P["accent_hover"], text_color=P["on_accent"])
 
     # ---- mises à jour / journal
     def _on_update(self, up):
@@ -2768,7 +3444,152 @@ class App(ctk.CTk):
         core.log_line("Erreur interface :\n" + "".join(traceback.format_exception(exc, val, tb)), "ERROR")
         self._log(f"[Erreur] {val}", "ERROR")
 
+    # ---- calibration décalée (fenêtre du jeu ou écran changés depuis la calibration)
+    OFF_LABELS = dict(ZONE_LABELS, price_field="Prix du lot", sell_button="Mettre en vente",
+                      modify_button="Modifier", relist_row="Lignes de mes ventes")
+
+    def _remember_game_window(self):
+        try:
+            rect = core.game_window_rect(self.cfg)
+        except Exception:
+            rect = None
+        if rect and list(rect) != self.cfg.calib_window:
+            self.cfg.calib_window = list(rect)
+            self._save_cfg()
+        if rect:
+            self._hide_drift()
+
+    def _check_calibration(self, tries: int = 0):
+        """Au démarrage : écran changé (zones hors de l'écran) ou fenêtre du jeu redimensionnée
+        depuis la calibration ? -> bandeau avec « Recalibrer »."""
+        c = self.cfg
+        if not self._calibrated():
+            return
+        try:
+            off = core.zones_off_screen(c, core.screen_bounds())
+        except Exception:
+            off = []
+        if off:
+            names = ", ".join(dict.fromkeys(self.OFF_LABELS.get(z, z) for z in off))
+            self._show_drift(f"Calibration à refaire : des zones sont hors de l'écran ({names}). Écran "
+                             "débranché ou résolution changée ?")
+            return
+        try:
+            rect = core.game_window_rect(c)
+        except Exception:
+            rect = None
+        if rect is None:                       # jeu pas encore lancé (ou réduit) : on réessaie
+            if tries < 120:
+                self.after(5000, lambda: self._check_calibration(tries + 1))
+            return
+        why = core.calib_drift(c.calib_window, rect, bool(c.anchor_region))
+        if why:
+            self._show_drift(f"La calibration semble décalée : {why}.")
+
+    def _show_drift(self, text: str):
+        self.drift_lbl.configure(text="⚠  " + text)
+        if not self.drift_bar.winfo_ismapped():
+            self.drift_bar.pack(fill="x", padx=12, pady=(0, 6))
+            self._log(f"[Calib] {text}", "WARN")
+
+    def _hide_drift(self):
+        if self.drift_bar.winfo_ismapped():
+            self.drift_bar.pack_forget()
+
+    def _ignore_drift(self):
+        try:
+            rect = core.game_window_rect(self.cfg)
+        except Exception:
+            rect = None
+        if rect:
+            self.cfg.calib_window = list(rect)    # nouvelle référence : plus d'alerte pour cette fenêtre
+            self._save_cfg()
+        self._hide_drift()
+
+    # ---- zone de notification
+    def _tray_update(self):
+        if self.engine.paused:
+            state = "pause"
+        elif self._loop is not None:
+            state = "loop"
+        elif not self._calibrated():
+            state = "calib"
+        else:
+            state = "ok"
+        self.tray.update(state)
+
+    def _apply_tray(self):
+        if self.cfg.tray:
+            self.tray.start()
+            self._tray_update()
+        else:
+            self.tray.stop()
+
+    def _show_main(self):
+        if self._compact is not None and self._compact.winfo_exists():
+            self._close_compact()
+        self.deiconify()
+        self.lift()
+        self._apply_topmost()
+        try:
+            self.focus_force()
+        except tk.TclError:
+            pass
+
+    def _on_tray(self, action: str):
+        if action == "open":
+            self._show_main()
+        elif action == "compact":
+            self._open_compact()
+        elif action == "pause":
+            self._toggle_pause()
+        elif action == "cheatsheet":
+            self._toggle_cheatsheet()
+        elif action == "quit":
+            self._on_close()
+
+    def _on_unmap(self, e):
+        """Fenêtre réduite + option « réduire dans la zone de notification » : on la cache."""
+        if e.widget is not self or not self.cfg.tray_minimize or self.tray.icon is None:
+            return
+
+        def hide():
+            try:
+                if self.state() == "iconic":
+                    self.withdraw()
+                    if not self.tray.told:
+                        self.tray.told = True
+                        self.tray.notify("L'outil continue ici. Clic sur l'icône pour le rouvrir.")
+            except tk.TclError:
+                pass
+        self.after(50, hide)
+
+    # ---- raccourcis de la fenêtre de l'outil
+    def _on_ctrl_key(self, e):
+        idx = tab_index_for_key(e.keycode, e.keysym)
+        if idx is not None:
+            self.tabs.set(TAB_NAMES[idx])
+            return "break"
+        if e.keycode == 76 or e.keysym.lower() == "l":      # Ctrl+L
+            self._clear_log()
+            return "break"
+        return None
+
+    def _on_escape(self, _e=None):
+        for t in self._toasts:
+            close_popup(t)
+        self._toasts = []
+        for name in ("_banner_win", "_cheat", "_summary_win"):
+            w = getattr(self, name, None)
+            if w is not None and w.winfo_exists():
+                if name == "_summary_win":
+                    w.destroy()
+                else:
+                    close_popup(w)
+        self._cheat = None
+
     def _on_close(self):
+        self.tray.stop()
         if self._compact is not None and self._compact.winfo_exists():
             self.cfg.compact_geometry = self._compact_geometry()
         try:
@@ -2795,4 +3616,8 @@ if __name__ == "__main__":
         core.setup_file_log()
     except OSError:
         pass   # dossier non accessible : l'outil marche sans fichier journal
-    App().mainloop()
+    app = App()
+    app.mainloop()
+    if app.restart_requested:            # thème / couleur changés : l'outil se relance
+        import subprocess
+        subprocess.Popen(relaunch_command(), close_fds=True)

@@ -160,10 +160,16 @@ def main() -> int:
     check_bundled(tess)
     (BUILD / "version.txt").write_text(version, encoding="utf-8")
 
+    sys.path.insert(0, str(ROOT))
+    import dofus_logo
+    ico = BUILD / "logo.ico"
+    dofus_logo.write_ico(ico)          # icône du .exe : le logo (pièce d'or)
+
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed",
            "--name", NAME, "--distpath", str(dist), "--workpath", str(BUILD / "pyinstaller"),
-           "--specpath", str(BUILD),
+           "--specpath", str(BUILD), "--icon", str(ico),
            "--collect-data", "customtkinter",
+           "--hidden-import", "pystray._win32",      # icône de la zone de notification
            str(ROOT / "dofus_price_helper_psg.py")]
     print(" ".join(cmd))
     subprocess.run(cmd, check=True, cwd=ROOT)
