@@ -1,4 +1,5 @@
-# Version Windows sans Python (zip : DofusPriceHelper.exe + Tesseract inclus)
+# Version Windows sans Python : zip (DofusPriceHelper.exe + Tesseract inclus) et installeur
+# (DofusPriceHelper-Setup-vX.Y.Z.exe, Inno Setup : menu Démarrer, désinstallation)
 # - Pull request vers main : tests + construction ; le zip est téléchargeable dans l'onglet
 #   « Actions » de l'exécution (artefact « DofusPriceHelper », gardé 14 jours) pour l'essayer.
 # - Tag « v* » (ex. git tag v1.0.0 && git push origin v1.0.0) : idem + publication dans Releases.
@@ -44,10 +45,22 @@ jobs:
           if [ "${{ github.ref_type }}" = "tag" ]; then v="${{ github.ref_name }}"; else v="dev-${GITHUB_SHA::7}"; fi
           python packaging/build.py --version "$v" --tesseract-dir "C:/Program Files/Tesseract-OCR"
 
+      - name: Installeur (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}" } else { $v = "dev-" + "${{ github.sha }}".Substring(0, 7) }
+          $n = if ($v -match '^v(\d+\.\d+\.\d+)') { $Matches[1] } else { "0.0.0" }
+          & $iscc "/DAppVersion=$v" "/DNumVersion=$n" packaging\installer.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
       - uses: actions/upload-artifact@v4
         with:
           name: DofusPriceHelper
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*-Setup-*.exe
           retention-days: 14
 
       - name: Publication dans Releases
@@ -56,5 +69,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/*.zip \
+          gh release create "${{ github.ref_name }}" dist/*.zip dist/*-Setup-*.exe \
             --title "Dofus Price Helper ${{ github.ref_name }}" --generate-notes
