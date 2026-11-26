@@ -159,6 +159,8 @@ try {{
         Copy-Item -Destination {_ps(app)} -Recurse -Force
     Remove-Item -LiteralPath {_ps(old)} -Recurse -Force -ErrorAction SilentlyContinue
     Note 'installée'
+    # Exe remplacé au même endroit : l'Explorateur garderait l'ancienne icône en cache.
+    try {{ & ie4uinit.exe -show }} catch {{}}
 }} catch {{
     Note ('échec (' + $stage + ') : ' + $_.Exception.Message)
     $still = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq {_ps(exe)} }})
@@ -178,10 +180,11 @@ Remove-Item -LiteralPath {_ps(work_dir)} -Recurse -Force -ErrorAction SilentlyCo
 _instance_mutex = None
 
 
-def single_instance(name: str = r"Local\DofusPriceHelper-instance") -> bool:
+def single_instance(name: str = r"Local\DofusPriceHelper-instance", wait: float = 0.0) -> bool:
     """True si l'outil n'est pas déjà ouvert. Sinon, ramène la fenêtre existante devant et
     retourne False : deux exemplaires réagiraient tous les deux à Ctrl+F3, et le premier
-    bloque la mise à jour (dossier _internal utilisé)."""
+    bloque la mise à jour (dossier _internal utilisé).
+    wait : relance après un changement de thème -> attend jusque-là que l'ancien se ferme."""
     global _instance_mutex
     if not core.IS_WINDOWS:
         return True
@@ -190,9 +193,16 @@ def single_instance(name: str = r"Local\DofusPriceHelper-instance") -> bool:
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.CreateMutexW.restype = wintypes.HANDLE
     k32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
-    _instance_mutex = k32.CreateMutexW(None, False, name)
-    if ctypes.get_last_error() != 183:          # ERROR_ALREADY_EXISTS
-        return True
+    end = time.time() + wait
+    while True:
+        _instance_mutex = k32.CreateMutexW(None, False, name)
+        if ctypes.get_last_error() != 183:      # ERROR_ALREADY_EXISTS
+            return True
+        if time.time() >= end:
+            break
+        k32.CloseHandle(_instance_mutex)        # sinon notre poignée garde le verrou en vie
+        _instance_mutex = None
+        time.sleep(0.2)
     user32 = ctypes.windll.user32
     found = []
 

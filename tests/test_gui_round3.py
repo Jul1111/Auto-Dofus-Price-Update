@@ -151,7 +151,9 @@ def test_tray_icon_and_logo_images(tmp_path):
 def test_relaunch_command(monkeypatch):
     import sys
     monkeypatch.setattr(sys, "argv", ["dofus_price_helper_psg.py"])
-    assert gui.relaunch_command() == [sys.executable, "dofus_price_helper_psg.py"]
+    assert gui.relaunch_command() == [sys.executable, "dofus_price_helper_psg.py", "--relance"]
+    monkeypatch.setattr(sys, "argv", ["dofus_price_helper_psg.py", "--relance"])   # pas de doublon
+    assert gui.relaunch_command() == [sys.executable, "dofus_price_helper_psg.py", "--relance"]
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "argv", ["DofusPriceHelper.exe"])
-    assert gui.relaunch_command() == [sys.executable]
+    assert gui.relaunch_command() == [sys.executable, "--relance"]
