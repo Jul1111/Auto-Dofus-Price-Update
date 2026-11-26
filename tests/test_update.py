@@ -104,6 +104,20 @@ def test_installer_replaces_files_and_keeps_user_files(tmp_path):
     assert "installée" in log.read_text(encoding="utf-8-sig")
 
 
+@pytest.mark.skipif(sys.platform != "win32" or shutil.which("powershell") is None, reason="Windows seulement")
+def test_spawned_script_really_runs(tmp_path):
+    # v1.3.0 / v1.4.0 : lancé « détaché », PowerShell ne s'exécutait jamais (rien d'installé)
+    import time
+    out = tmp_path / "ok.txt"
+    script = tmp_path / "s.ps1"
+    script.write_text(f"Set-Content -LiteralPath '{out}' -Value 'ok'", encoding="utf-8-sig")
+    du.spawn_script(script)
+    end = time.time() + 20
+    while not out.exists() and time.time() < end:
+        time.sleep(0.2)
+    assert out.exists()
+
+
 # --- Rapport de problème
 def test_report_contains_what_helps_and_no_sales(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LOG_DIR", tmp_path / "journaux")

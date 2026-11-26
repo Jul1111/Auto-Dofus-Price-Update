@@ -173,9 +173,24 @@ def launch_installer(new_dir: Path, work_dir: Path) -> None:
     script = work_dir / "installer.ps1"
     script.write_text(installer_script(new_dir, app_dir, os.getpid(), work_dir,
                                        core.LOG_DIR / "mise-a-jour.log"), encoding="utf-8-sig")
-    flags = 0x00000008 | 0x00000200 | 0x08000000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW
-    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                      "-File", str(script)], creationflags=flags, close_fds=True)
+    spawn_script(script)
+
+
+NEW_PROCESS_GROUP, NO_WINDOW, BREAKAWAY_FROM_JOB = 0x00000200, 0x08000000, 0x01000000
+
+
+def spawn_script(script: Path) -> None:
+    """Lance un script PowerShell qui survit à la fermeture de l'outil, sans fenêtre.
+    PAS de DETACHED_PROCESS : sans console, PowerShell ne s'exécutait pas du tout (v1.3.0 et
+    v1.4.0 : « redémarre » affiché, rien d'installé). Console cachée (NO_WINDOW) à la place ;
+    sortie du « job » Windows si permis (sinon le script peut mourir avec l'outil)."""
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+           "-File", str(script)]
+    kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    try:
+        subprocess.Popen(cmd, creationflags=NEW_PROCESS_GROUP | NO_WINDOW | BREAKAWAY_FROM_JOB, **kw)
+    except OSError:   # job qui interdit d'en sortir
+        subprocess.Popen(cmd, creationflags=NEW_PROCESS_GROUP | NO_WINDOW, **kw)
 
 
 def prepare(up: Update, progress=None) -> Path:
