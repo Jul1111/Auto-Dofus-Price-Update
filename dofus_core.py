@@ -1761,14 +1761,83 @@ def _vk_state_windows(vk: int) -> int:
     return ctypes.windll.user32.GetAsyncKeyState(vk) & 0xFFFF
 
 
+class ModifierHook:
+    """Deuxième source pour Ctrl/Alt/Maj/Windows : un hook clavier bas niveau minimal qui
+    note chaque appui/relâchement PHYSIQUE (il ne bloque rien, ne fait aucun calcul).
+    Vu en jeu : après un Ctrl+F3, Windows peut ne plus voir Ctrl dans l'état du clavier
+    (GetAsyncKeyState = 0) alors qu'il est tenu ; ce hook le voit quand même.
+    Une touche tenue se répète (~30 fois/s) : un « enfoncé » vieux de plus de FRESH s sans
+    répétition est ignoré, au cas où un relâchement aurait été manqué."""
+    FRESH = 1.2
+    VKS = {0x10: "shift", 0xA0: "shift", 0xA1: "shift", 0x11: "ctrl", 0xA2: "ctrl", 0xA3: "ctrl",
+           0x12: "alt", 0xA4: "alt", 0xA5: "alt", 0x5B: "win", 0x5C: "win"}
+
+    def __init__(self):
+        self._last: Dict[int, Tuple[bool, float]] = {}
+        self._thread: Optional[threading.Thread] = None
+        self.ok = False
+
+    def event(self, vk: int, down: bool, t: Optional[float] = None) -> None:
+        if vk in self.VKS:
+            self._last[vk] = (down, time.monotonic() if t is None else t)
+
+    def mods(self, now: Optional[float] = None) -> set:
+        now = time.monotonic() if now is None else now
+        return {self.VKS[vk] for vk, (down, t) in list(self._last.items()) if down and now - t < self.FRESH}
+
+    def start(self) -> None:
+        if IS_WINDOWS and (self._thread is None or not self._thread.is_alive()):
+            self._thread = threading.Thread(target=self._run, daemon=True, name="hook-modificateurs")
+            self._thread.start()
+
+    def _run(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        LRESULT = ctypes.c_ssize_t
+
+        class KBD(ctypes.Structure):
+            _fields_ = [("vkCode", wintypes.DWORD), ("scanCode", wintypes.DWORD), ("flags", wintypes.DWORD),
+                        ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+        HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+        user32.SetWindowsHookExW.argtypes = (ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD)
+        user32.SetWindowsHookExW.restype = wintypes.HHOOK
+        user32.CallNextHookEx.argtypes = (wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+        user32.CallNextHookEx.restype = LRESULT
+        kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+
+        def proc(n, w, l):
+            if n == 0:
+                try:
+                    k = ctypes.cast(l, ctypes.POINTER(KBD)).contents
+                    self.event(k.vkCode, w in (0x100, 0x104))   # WM_KEYDOWN, WM_SYSKEYDOWN
+                except Exception:
+                    pass
+            return user32.CallNextHookEx(None, n, w, l)
+
+        self._proc = HOOKPROC(proc)   # garder une référence : sinon libéré, et plantage
+        hook = user32.SetWindowsHookExW(13, self._proc, kernel32.GetModuleHandleW(None), 0)  # WH_KEYBOARD_LL
+        if not hook:
+            log_line(f"[Hotkeys] Hook des modificateurs impossible (erreur {ctypes.get_last_error()}).", "WARN")
+            return
+        self.ok = True
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+
+
 class HotkeyPoller:
     """Raccourcis globaux : action au moment où la touche principale s'enfonce, avec
     EXACTEMENT les modificateurs demandés (Ctrl+F3 ne déclenche pas F3, ni l'inverse).
     Les actions sont appelées dans le fil de lecture : elles doivent être courtes
     (mettre une tâche en file d'attente), une erreur est notée sans rien arrêter."""
 
-    def __init__(self, state=None, interval: float = HOTKEY_POLL):
+    def __init__(self, state=None, interval: float = HOTKEY_POLL, hook: Optional["ModifierHook"] = None):
         self._state = state or _vk_state_windows
+        self._hook = hook
         self.interval = interval
         self._bindings: List[Tuple[str, frozenset, int, Callable]] = []
         self._down: Dict[str, bool] = {}
@@ -1796,7 +1865,9 @@ class HotkeyPoller:
             bindings = list(self._bindings)
         if not bindings:
             return
-        mods_now = {m for m, vks in _MOD_VKS.items() if any(self._is_down(v) for v in vks)}
+        mods_async = {m for m, vks in _MOD_VKS.items() if any(self._is_down(v) for v in vks)}
+        mods_hook = self._hook.mods() if self._hook is not None else set()
+        mods_now = mods_async | mods_hook
         main_now = {vk: self._is_down(vk) for vk in {b[2] for b in bindings}}
         fire = []
         with self._lock:
@@ -1810,7 +1881,8 @@ class HotkeyPoller:
             if sum(b[2] == vk for b in bindings) > 1:   # ex. F3 / Ctrl+F3 : noter ce qui a été vu
                 raw = " ".join(f"{v:02X}={self._state(v) & 0xFFFF:04X}" for v in (0x11, 0xA2, 0xA3, 0x12, 0x10))
                 log_line(f"[Hotkeys] {combo} (modificateurs vus : {'+'.join(sorted(mods_now)) or 'aucun'} ; "
-                         f"{raw})")
+                         f"état {'+'.join(sorted(mods_async)) or 'aucun'}, hook "
+                         f"{'+'.join(sorted(mods_hook)) or 'aucun'} ; {raw})")
             try:
                 cb()
             except Exception as e:      # une action en erreur ne coupe jamais les raccourcis
@@ -1826,6 +1898,8 @@ class HotkeyPoller:
             time.sleep(self.interval)
 
     def start(self) -> None:
+        if self._hook is not None:
+            self._hook.start()
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(target=self._run, daemon=True, name="raccourcis")
             self._thread.start()
@@ -1853,7 +1927,7 @@ class _KeyboardHotkeys:
         keyboard.wait(combo)
 
 
-HOTKEYS = HotkeyPoller() if IS_WINDOWS else _KeyboardHotkeys()
+HOTKEYS = HotkeyPoller(hook=ModifierHook()) if IS_WINDOWS else _KeyboardHotkeys()
 
 
 def beep(kind: str, cfg: Config) -> None:

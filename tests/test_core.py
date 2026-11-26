@@ -1453,6 +1453,27 @@ def test_poller_survives_errors_and_ignores_keys_held_at_registration():
     assert hits == ["pause"]
 
 
+def test_poller_sees_ctrl_through_hook_when_key_state_misses_it():
+    k = _Keys()
+    hook = core.ModifierHook()
+    hook.start = lambda: None
+    p = core.HotkeyPoller(state=k.state, hook=hook)
+    p.start = lambda: None
+    hits = []
+    p.add("f3", lambda: hits.append("f3"))
+    p.add("ctrl+f3", lambda: hits.append("ctrl+f3"))
+    p.poll_once()
+    hook.event(0xA2, True)                                # Ctrl tenu, absent de l'état Windows
+    k.down = {0x72}; p.poll_once()
+    assert hits == ["ctrl+f3"]
+    k.down = set(); p.poll_once()
+    hook.event(0xA2, False)
+    k.down = {0x72}; p.poll_once()
+    assert hits == ["ctrl+f3", "f3"]
+    hook.event(0xA2, True, t=0.0)                         # relâchement manqué : périmé
+    assert hook.mods(now=core.ModifierHook.FRESH + 1) == set()
+
+
 def test_parse_combo():
     assert core.parse_combo("ctrl+alt+f12") == (frozenset({"ctrl", "alt"}), 0x7B)
     assert core.parse_combo("page up") == (frozenset(), 0x21)
