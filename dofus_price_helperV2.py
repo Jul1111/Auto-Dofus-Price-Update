@@ -137,6 +137,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     def report(res: core.Result):
+        msg, engine.last_anchor_msg = engine.last_anchor_msg, ""
+        if msg:                        # HDV déplacé ou redimensionné (zones recalées)
+            print(f"[Repère] {msg}")
         print(f"[{res.level.upper():5}] {res.message}")
         for c in res.changes:          # Ctrl+F3 : résumé, une ligne par prix modifié / à revoir
             print("   " + c.text())

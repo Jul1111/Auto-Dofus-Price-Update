@@ -51,7 +51,7 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Attente des changements à l'écran plutôt que des pauses fixes.
 
 **Ergonomie**
-- **Calibration automatique** : HDV ouvert, un clic (ou `Ctrl+Alt+F12`) et toutes les zones sont placées, quelles que soient la résolution et l'échelle de l'interface. Fonctionne avec **Dofus 3 en français**, sur la même version du jeu que le modèle de l'outil ; sinon, la calibration manuelle reste disponible.
+- **Calibration automatique** : HDV ouvert, un clic (ou `Ctrl+Alt+F12`) et toutes les zones sont placées, quelles que soient la résolution et l'échelle de l'interface. Fonctionne avec **Dofus 3 en français**, sur la même version du jeu que le modèle de l'outil ; sinon, la calibration manuelle reste disponible. Si tu changes ensuite l'échelle de l'interface ou la résolution, l'outil s'en rend compte et refait la calibration automatique tout seul (option dans l'onglet **Calibration**).
 - Assistant de calibration pas à pas, avec vérification finale.
 - Zones qui suivent la fenêtre de l'HDV lorsqu'elle est déplacée.
 - Bandeau de résultat au-dessus de l'HDV et fenêtre toujours au premier plan.

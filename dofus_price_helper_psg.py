@@ -415,6 +415,7 @@ class App(ctk.CTk):
             "relist_auto": ctk.BooleanVar(value=c.relist_auto),
             "relist_confirm_enter": ctk.BooleanVar(value=c.relist_confirm_enter),
             "relist_summary": ctk.BooleanVar(value=c.relist_summary),
+            "auto_recalibrate": ctk.BooleanVar(value=c.auto_recalibrate),
             "fast_digits": ctk.BooleanVar(value=c.fast_digits),
             "banner": ctk.BooleanVar(value=c.banner),
             "verify_before_enter": ctk.BooleanVar(value=c.verify_before_enter),
@@ -866,6 +867,10 @@ class App(ctk.CTk):
                        font=ctk.CTkFont(family="Consolas")).pack(side="left", padx=12)
         self._tip(ctk.CTkButton(r, text="Voir zones", width=90, fg_color=BTN2, hover_color=BTN2_HOVER, command=self._show_zones),
                   "Vérifie où les zones ont été placées.").pack(side="right", padx=4)
+        self._switch(ab, "Recalibrer tout seul si la taille de l'HDV change", "auto_recalibrate",
+                     tip="Échelle de l'interface ou résolution changée : l'HDV n'est plus retrouvé à sa "
+                         "taille calibrée. L'outil refait alors la calibration automatique (~1 s) avant "
+                         "l'action, et l'écrit dans le journal.")
         pb = self._section(page, "Profil de calibration", "Un profil par HDV ou par personnage.",
                            tip="Un profil garde ses zones, ses points et son repère. « Nouveau » copie le "
                                "profil actuel : recalibre seulement ce qui change.")
@@ -1270,7 +1275,7 @@ class App(ctk.CTk):
         c.floor_mode = {lbl: k for k, lbl in FLOOR_LABELS.items()}.get(v["floor_mode"].get(), "floor")
         was_auto = c.relist_auto
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
-                     "relist_auto", "relist_confirm_enter", "relist_summary", "fast_digits",
+                     "relist_auto", "relist_confirm_enter", "relist_summary", "fast_digits", "auto_recalibrate",
                      "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates"):
             setattr(c, name, bool(v[name].get()))
         self._apply_topmost()

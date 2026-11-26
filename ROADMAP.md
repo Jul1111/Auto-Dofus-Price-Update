@@ -24,6 +24,8 @@ Tout est fait.
 - Un clic (ou Ctrl+Alt+F12), HDV ouvert sur l'onglet Vente : l'outil trouve l'HDV à l'écran à n'importe quelle taille (résolution, échelle de l'interface) et place toutes les zones.
 - Modèle de l'HDV (`modele_hdv/`, généré par `packaging/build_hdv_model.py`) : position de chaque zone par rapport au titre, mesurée sur une capture 2560 x 1440 à 90 %. Vérifié sur 1920 x 1080, 1920 x 1200 et 2560 x 1440 à 80 / 90 / 100 % : l'HDV grandit d'un bloc, à 5 px près ; les textes fixes (« Prix du lot », « PRIX MOYEN »…) rattrapent ces écarts.
 - Limite : Dofus 3 en **français**, même version du jeu que le modèle. Si une mise à jour change l'HDV, refaire une capture de référence et relancer le script.
+- Repère perdu (taille de l'HDV changée) : calibration automatique refaite toute seule avant l'action (option `AUTO_RECALIBRATE`, un essai toutes les 30 s au plus si l'HDV est fermé).
+- Ton prix mal lu quand le jeu est mis à l'échelle de l'écran (texte adouci, « 1 989 » lu « 1909 ») : lecture peu sûre -> 2e avis en niveaux de gris ×4, la plus sûre est gardée.
 
 ---
 
