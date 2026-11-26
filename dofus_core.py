@@ -892,17 +892,25 @@ def _drop_caret(th: np.ndarray) -> np.ndarray:
             if b - a + 1 <= 8:                             # barre fine seulement
                 if out is th:
                     out = th.copy()
-                out[:, max(0, a - 1):b + 2] = 255
+                out[:, a:b + 1] = 255
+                # bords anticrénelés de la barre : effacés seulement HORS de la ligne de texte.
+                # Effacés partout, ils rognaient le chiffre collé au curseur (8 relu 6 : vente
+                # refusée à tort).
+                for c in (a - 1, b + 1):
+                    if 0 <= c < out.shape[1]:
+                        out[:max(0, top - 1), c] = 255
+                        out[bot + 2:, c] = 255
     return out
 
 
-def read_mine(cfg: Config) -> Reading:
-    """Ton prix actuel (champ « Prix du lot » de la vente sélectionnée)."""
+def read_mine(cfg: Config, tesseract_only: bool = False) -> Reading:
+    """Ton prix actuel (champ « Prix du lot » de la vente sélectionnée).
+    tesseract_only : sans la lecture rapide (2e avis quand la relecture ne colle pas)."""
     import pytesseract
     img = mine_field_image(cfg)
     if img is None:
         return Reading(None, -1.0, "")
-    if cfg.fast_digits:
+    if cfg.fast_digits and not tesseract_only:
         fast = digit_reader().read_data(img, [(0, img.shape[0])])
         if fast is not None:
             r = parse_number(fast, (0, img.shape[0]))
@@ -1107,15 +1115,45 @@ def input_price(value: int, cfg: Config, paste: bool = True, validate: bool = Fa
     return done
 
 
-def field_check(cfg: Config, expected: int, tries: int = 2) -> Tuple[bool, Optional[int]]:
-    """Le champ « Prix du lot » affiche-t-il bien `expected` ? (relu jusqu'à 2 fois)."""
+FIELD_TRIES = 5          # relectures du champ, étalées sur ~0,5 s (le curseur clignote)
+FIELD_RETRY_DELAY = 0.12
+DEBUG_DIR = BASE_DIR / "captures"
+
+
+def field_check(cfg: Config, expected: int, tries: int = FIELD_TRIES) -> Tuple[bool, Optional[int]]:
+    """Le champ « Prix du lot » affiche-t-il bien `expected` ?
+    Le curseur de saisie, collé au dernier chiffre, peut fausser une lecture : on relit sur
+    ~0,5 s (il clignote), puis on demande un 2e avis à Tesseract seul. Toujours différent :
+    refus, et l'image du champ est gardée dans captures/ pour comprendre."""
     got = None
-    for _ in range(tries):
+    for i in range(tries):
         got = read_mine(cfg).value
         if got == expected:
             return True, got
-        time.sleep(0.08)
+        if i < tries - 1:
+            time.sleep(FIELD_RETRY_DELAY)
+    if cfg.fast_digits:
+        second = read_mine(cfg, tesseract_only=True)
+        if second.value == expected and second.confidence >= 80:
+            print(f"[Champ] Lecture rapide {got} corrigée par Tesseract : {expected}.")
+            return True, expected
+    save_field_debug(cfg, f"attendu{expected}_lu{got}")
     return False, got
+
+
+def save_field_debug(cfg: Config, tag: str) -> None:
+    """Image du champ « Prix du lot » quand la relecture refuse un prix (diagnostic)."""
+    try:
+        import cv2
+        regions = mine_regions(cfg)
+        if not regions:
+            return
+        DEBUG_DIR.mkdir(exist_ok=True)
+        path = DEBUG_DIR / f"champ_refuse_{int(time.time() * 1000)}_{tag}.png"
+        cv2.imwrite(str(path), grab_screen(regions[0]))
+        print(f"[Champ] Prix refusé : image du champ enregistrée dans {path.name} (dossier captures).")
+    except Exception:
+        pass
 
 
 def can_verify(cfg: Config) -> bool:
