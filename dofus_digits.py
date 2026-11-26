@@ -77,15 +77,49 @@ class DigitReader:
         if not self.path or not self.path.exists():
             return
         try:
-            data = np.load(self.path)
-            for d in range(10):
-                key = f"d{d}"
-                if key in data:
-                    self.samples[d] = [s for s in data[key]][:MAX_SAMPLES]
-            if "noise" in data:
-                self.noise = [s for s in data["noise"]][:4 * MAX_SAMPLES]
+            with np.load(self.path) as data:   # fermé tout de suite : sinon save() échoue (Windows)
+                for d in range(10):
+                    key = f"d{d}"
+                    if key in data:
+                        self.samples[d] = [s for s in data[key]][:MAX_SAMPLES]
+                if "noise" in data:
+                    self.noise = [s for s in data["noise"]][:4 * MAX_SAMPLES]
         except Exception as e:  # fichier abîmé : on réapprend
             print(f"[Chiffres] Modèles illisibles ({e}), réapprentissage.")
+            return
+        if self.purge():
+            self.save()
+
+    # Un modèle mal étiqueté (Tesseract a lu « 8 » un 5 qu'on a appris comme 8) fait lire
+    # TOUS les 5 en 8 : 4725 devient 4728, et Ctrl+F3 croit la modification ratée.
+    def _sims(self, v: np.ndarray, digit: int, skip: Optional[np.ndarray] = None) -> Tuple[float, float]:
+        """(ressemblance max à son chiffre, ressemblance max aux autres chiffres)."""
+        own = max((float((v * s).sum()) for s in self.samples[digit] if s is not skip), default=-1.0)
+        other = max((float((v * s).sum()) for d, lst in self.samples.items() if d != digit for s in lst),
+                    default=-1.0)
+        return own, other
+
+    def purge(self) -> int:
+        """Retire les modèles qui ressemblent plus à un AUTRE chiffre qu'au leur, le pire
+        d'abord (un faux 8 qui est un 5 rend aussi les vrais 5 « suspects » : on recalcule)."""
+        removed = 0
+        with self._lock:
+            while True:
+                worst, gap = None, 0.0
+                for d in range(10):
+                    if len(self.samples[d]) < 2:
+                        continue
+                    for i, s in enumerate(self.samples[d]):
+                        own, other = self._sims(s, d, skip=s)
+                        if other - own > gap:
+                            worst, gap = (d, i), other - own
+                if worst is None:
+                    break
+                self.samples[worst[0]].pop(worst[1])
+                removed += 1
+        if removed:
+            print(f"[Chiffres] {removed} modèle(s) mal appris retiré(s).")
+        return removed
 
     def save(self) -> None:
         if not self.path:
@@ -102,16 +136,53 @@ class DigitReader:
         except OSError as e:
             print(f"[Chiffres] Sauvegarde impossible : {e}")
 
-    def add(self, digit: int, glyph: np.ndarray) -> None:
+    def add(self, digit: int, glyph: np.ndarray, sure: bool = False) -> None:
+        """sure=False (lecture Tesseract) : refusé s'il ressemble plus à un autre chiffre
+        déjà appris (Tesseract s'est sans doute trompé)."""
         v = normalize(glyph)
         with self._lock:
             lst = self.samples[digit]
             if any(float((v * s).sum()) > 0.97 for s in lst):
                 return  # déjà connu
+            if not sure and lst:
+                own, other = self._sims(v, digit)
+                if other >= 0.75 and other > own + 0.02:
+                    return
             lst.append(v)
             if len(lst) > MAX_SAMPLES:
                 lst.pop(0)
             self._dirty += 1
+
+    def correct(self, binary: np.ndarray, text: str) -> int:
+        """Image d'UN nombre dont on connaît la vraie valeur `text` (champ « Prix du lot »
+        qu'on vient de remplir, confirmé par Tesseract) alors que la lecture rapide s'est
+        trompée : retire les modèles d'autres chiffres qui ont gagné, apprend les bons.
+        Retourne le nombre de modèles retirés."""
+        comps = [c for c in components(binary) if c[3] >= 8]
+        if not comps:
+            return 0
+        text_h = float(np.median([c[3] for c in comps]))
+        glyphs = sorted(c for c in comps if 0.8 * text_h <= c[3] <= 1.3 * text_h)
+        if len(glyphs) != len(text) or not text.isdigit():
+            return 0
+        removed = 0
+        for (x, y, w, h), t in zip(glyphs, text):
+            g = binary[y:y + h, x:x + w] < 128
+            v = normalize(g)
+            t = int(t)
+            with self._lock:
+                own = max((float((v * s).sum()) for s in self.samples[t]), default=-1.0)
+                for d in range(10):
+                    if d == t:
+                        continue
+                    keep = [s for s in self.samples[d] if float((v * s).sum()) < max(own, MIN_SCORE)]
+                    removed += len(self.samples[d]) - len(keep)
+                    self.samples[d] = keep
+            self.add(t, g, sure=True)
+        if removed:
+            self._dirty += 1
+            self.save()
+        return removed
 
     # ------------------------------------------------------- apprentissage
     def reset(self) -> None:
