@@ -333,6 +333,14 @@ class Config:
     compact_geometry: str = ""        # position du mode compact
     notify: bool = True               # notification Windows à la fin d'un long F2 / Ctrl+F3 (outil en arrière-plan)
     first_steps: List[str] = field(default_factory=list)   # premiers pas faits : "read", "sell"
+    sound_volume: float = 0.5         # volume des sons (0..1)
+    theme: str = "dark"               # "dark" | "light" | "system" (comme Windows)
+    accent: str = "blue"              # couleur d'accent (dofus_style.ACCENTS)
+    animations: bool = True           # fondus des popups, barre de progression douce
+    tray: bool = True                 # icône dans la zone de notification (près de l'horloge)
+    tray_minimize: bool = False       # réduire la fenêtre = la cacher dans la zone de notification
+    calib_window: Optional[List[int]] = None   # fenêtre du jeu (x, y, l, h) quand la calibration marchait
+    cheatsheet_pos: Optional[List[int]] = None # aide-mémoire : position choisie en le déplaçant
 
     hotkeys: Dict = field(default_factory=lambda: _copy(DEFAULT_HOTKEYS))
 
@@ -451,7 +459,7 @@ ANCHOR_FOUND = 0.80   # score mini pour accepter une nouvelle position
 REGION_FIELDS = ("table_region", "qty_region", "avg_region", "count_region", "mine_region", "anchor_region",
                  "name_region")
 POINT_FIELDS = ("price_field", "sell_button", "modify_button", "relist_row")
-PROFILE_FIELDS = REGION_FIELDS + POINT_FIELDS + ("relist_step",)   # ce que contient un profil
+PROFILE_FIELDS = REGION_FIELDS + POINT_FIELDS + ("relist_step", "calib_window")   # ce que contient un profil
 DEFAULT_PROFILE = "Principal"
 
 
@@ -1344,6 +1352,89 @@ def foreground_info() -> Optional[Tuple[str, str]]:
     return title, exe
 
 
+def _window_exe(hwnd) -> str:
+    import ctypes
+    from ctypes import wintypes
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    h = kernel32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ""
+    try:
+        size = wintypes.DWORD(1024)
+        pbuf = ctypes.create_unicode_buffer(size.value)
+        if kernel32.QueryFullProcessImageNameW(h, 0, pbuf, ctypes.byref(size)):
+            return Path(pbuf.value).name
+    finally:
+        kernel32.CloseHandle(h)
+    return ""
+
+
+def game_window_rect(cfg: Config) -> Optional[Region]:
+    """Rectangle (x, y, l, h) de la fenêtre du jeu, visible et pas réduite ; None si introuvable
+    (jeu fermé, réduit, ou hors Windows). Plusieurs fenêtres : la plus grande."""
+    if not IS_WINDOWS or not (cfg.window_process or cfg.window_title):
+        return None
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _lp):
+        try:
+            if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+                return True
+            n = user32.GetWindowTextLengthW(hwnd)
+            if n <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, buf, n + 1)
+            if is_game_window(buf.value, _window_exe(hwnd), cfg):
+                r = wintypes.RECT()
+                if user32.GetWindowRect(hwnd, ctypes.byref(r)) and r.right > r.left and r.bottom > r.top:
+                    found.append((r.left, r.top, r.right - r.left, r.bottom - r.top))
+        except Exception:
+            pass
+        return True
+    try:
+        user32.EnumWindows(cb, 0)
+    except Exception:
+        return None
+    return max(found, key=lambda r: r[2] * r[3]) if found else None
+
+
+def calib_drift(saved, current, has_anchor: bool, tol: int = 4) -> Optional[str]:
+    """Pourquoi la calibration semble décalée (None = rien à signaler).
+    saved / current : rectangle de la fenêtre du jeu à la calibration / maintenant."""
+    if not saved or not current or len(saved) != 4:
+        return None
+    sx, sy, sw, sh = saved
+    cx, cy, cw, ch = current
+    if abs(sw - cw) > tol or abs(sh - ch) > tol:
+        return f"la fenêtre du jeu a changé de taille ({sw}×{sh} → {cw}×{ch})"
+    if (abs(sx - cx) > tol or abs(sy - cy) > tol) and not has_anchor:
+        return (f"la fenêtre du jeu a bougé de ({cx - sx:+d}, {cy - sy:+d}) px et il n'y a pas de "
+                "repère « Hôtel de vente » pour que les zones suivent")
+    return None
+
+
+def zones_off_screen(cfg: Config, bounds: Region) -> List[str]:
+    """Zones / points calibrés qui sortent de l'écran (écran débranché, résolution changée)."""
+    bx, by, bw, bh = bounds
+    out = []
+    for f in REGION_FIELDS:
+        r = getattr(cfg, f)
+        if r and not (bx <= r[0] and by <= r[1] and r[0] + r[2] <= bx + bw and r[1] + r[3] <= by + bh):
+            out.append(f[:-len("_region")])
+    for f in POINT_FIELDS:
+        pt = getattr(cfg, f)
+        if pt and not (bx <= pt[0] < bx + bw and by <= pt[1] < by + bh):
+            out.append(f)
+    return out
+
+
 def is_game_window(title: str, exe: str, cfg: Config) -> bool:
     """Fenêtre du jeu si le nom de l'exe OU le titre correspond.
     Titre Dofus : « Perso - Classe - version - Release » -> pas de « Dofus » dedans."""
@@ -2008,12 +2099,61 @@ class _KeyboardHotkeys:
 HOTKEYS = HotkeyPoller(hook=ModifierHook()) if IS_WINDOWS else _KeyboardHotkeys()
 
 
-def beep(kind: str, cfg: Config) -> None:
-    if not cfg.sound or not IS_WINDOWS:
+# Sons : notes douces (sinus + harmonique légère, attaque et extinction progressives) au lieu
+# des bips du haut-parleur. (fréquence Hz, durée ms) ; "done" = fin d'un long parcours.
+SOUND_NOTES = {
+    "ok": ((880, 70), (1175, 120)),
+    "warn": ((622, 110), (587, 170)),
+    "error": ((392, 130), (294, 240)),
+    "done": ((659, 90), (880, 90), (1319, 220)),
+}
+_sound_cache: Dict[tuple, bytes] = {}
+
+
+def tone_wav(notes, volume: float = 0.5, rate: int = 22050) -> bytes:
+    """Fichier WAV (16 bits mono, en mémoire) qui joue `notes` à ce volume (0..1)."""
+    import io
+    import math
+    import struct
+    import wave
+    volume = max(0.0, min(1.0, float(volume)))
+    amp = 0.55 * volume * volume * 32767          # volume perçu ~ quadratique
+    frames = []
+    for freq, ms in notes:
+        n = int(rate * ms / 1000)
+        attack = max(1, int(rate * 0.006))
+        for i in range(n):
+            env = min(1.0, i / attack) * math.exp(-3.2 * i / n)
+            t = i / rate
+            v = math.sin(2 * math.pi * freq * t) + 0.18 * math.sin(4 * math.pi * freq * t)
+            frames.append(int(max(-32767, min(32767, amp * env * v / 1.18))))
+        frames.extend([0] * int(rate * 0.012))     # petit silence entre les notes
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(struct.pack(f"<{len(frames)}h", *frames))
+    return buf.getvalue()
+
+
+def sound_data(kind: str, volume: float) -> bytes:
+    key = (kind, round(volume, 2))
+    if key not in _sound_cache:
+        _sound_cache[key] = tone_wav(SOUND_NOTES.get(kind, SOUND_NOTES["ok"]), volume)
+    return _sound_cache[key]
+
+
+def beep(kind: str, cfg: Config, force: bool = False) -> None:
+    """Son d'un résultat ("ok", "warn", "error") ou de fin de parcours ("done").
+    force : joue même si les sons sont coupés (bouton « Tester »)."""
+    if not (cfg.sound or force) or not IS_WINDOWS or cfg.sound_volume <= 0:
         return
     import winsound
-    freq, dur = {"ok": (1200, 60), "warn": (600, 160), "error": (300, 250)}.get(kind, (800, 80))
-    threading.Thread(target=winsound.Beep, args=(freq, dur), daemon=True).start()
+    data = sound_data(kind, cfg.sound_volume)
+    # SND_MEMORY ne marche pas en asynchrone : lecture dans un thread
+    threading.Thread(target=winsound.PlaySound, args=(data, winsound.SND_MEMORY | winsound.SND_NODEFAULT),
+                     daemon=True).start()
 
 
 # --------------------------------------------------------------------------

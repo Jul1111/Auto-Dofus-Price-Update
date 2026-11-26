@@ -7,3 +7,4 @@ numpy>=1.24
 pyperclip>=1.8
 pillow>=10.0
 keyboard>=0.13.5
+pystray>=0.19
