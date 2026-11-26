@@ -144,6 +144,24 @@ def test_installer_waits_while_internal_is_busy(tmp_path):
     assert "installée" in log.read_text(encoding="utf-8-sig")
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows seulement")
+def test_single_instance_waits_for_the_closing_copy():
+    # Changement de thème : l'ancien exemplaire se ferme pendant que le nouveau démarre
+    import threading
+    import time
+    name = rf"Local\DofusPriceHelper-wait-{__import__('os').getpid()}"
+    import ctypes
+    k32 = ctypes.WinDLL("kernel32")
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    old = k32.CreateMutexW(None, False, name)          # « ancien exemplaire »
+    threading.Timer(0.6, lambda: k32.CloseHandle(ctypes.c_void_p(old))).start()
+    t0 = time.time()
+    keep = du._instance_mutex
+    assert du.single_instance(name, wait=5.0)
+    assert 0.4 < time.time() - t0 < 4
+    du._instance_mutex = keep
+
+
 def test_single_instance():
     name = rf"Local\DofusPriceHelper-test-{__import__('os').getpid()}"
     assert du.single_instance(name)

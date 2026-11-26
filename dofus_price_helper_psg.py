@@ -26,7 +26,9 @@ Raccourcis par défaut (modifiables dans la config, clé HOTKEYS) :
 """
 from __future__ import annotations
 
+import os
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -483,7 +485,9 @@ class Tray:
         self.told = False      # bulle « l'outil continue ici » déjà montrée
 
     def start(self):
-        if self.icon is not None or not TRAY_AVAILABLE:
+        # Pas pendant la fermeture : _on_close enregistre les réglages (-> _apply_tray), ce qui
+        # recréait l'icône ; son fil (non « daemon ») gardait alors l'outil actif sans fenêtre.
+        if self.icon is not None or not TRAY_AVAILABLE or self.app.closing:
             return
         put = self.app.ui_events.put
         item = pystray.MenuItem
@@ -493,7 +497,8 @@ class Tray:
             item(lambda _i: "▶ Reprendre" if self.app.engine.paused else "⏸ Pause", lambda: put(("tray", "pause"))),
             item("Aide-mémoire en jeu", lambda: put(("tray", "cheatsheet"))),
             pystray.Menu.SEPARATOR,
-            item("Quitter", lambda: put(("tray", "quit"))))
+            item("Quitter", lambda: put(("tray", "quit"))),
+            item("Forcer l'arrêt", self._kill))
         color, text = self._last or TRAY_STATES["ok"]
         try:
             self.icon = pystray.Icon("DofusPriceHelper", tray_image(color), f"Dofus Price Helper · {text}", menu)
@@ -521,6 +526,16 @@ class Tray:
             except Exception:
                 pass
 
+    def _kill(self, *_):
+        """Arrêt immédiat, appelé directement par l'icône (marche même si la fenêtre est figée)."""
+        core.log_line("Arrêt forcé depuis l'icône de la zone de notification.", "WARN")
+        try:
+            if self.icon is not None:
+                self.icon.visible = False      # sinon une icône « fantôme » reste près de l'horloge
+        except Exception:
+            pass
+        os._exit(1)
+
     def stop(self):
         icon, self.icon = self.icon, None
         if icon is not None:
@@ -530,12 +545,16 @@ class Tray:
                 pass
 
 
+RELAUNCH_FLAG = "--relance"
+
+
 def relaunch_command() -> list:
     """Commande qui relance l'outil (après un changement de thème)."""
     import sys
+    args = [a for a in sys.argv[1:] if a != RELAUNCH_FLAG] + [RELAUNCH_FLAG]
     if getattr(sys, "frozen", False):          # version .exe
-        return [sys.executable] + sys.argv[1:]
-    return [sys.executable] + sys.argv
+        return [sys.executable] + args
+    return [sys.executable, sys.argv[0]] + args
 
 
 # ---------------------------------------------------------------- accueil : premiers pas
@@ -630,6 +649,7 @@ class App(ctk.CTk):
         self._log_seq = 0
         self.tray = Tray(self)
         self.restart_requested = False
+        self.closing = False
         ANIMATE["on"] = bool(self.cfg.animations)
 
         self._build_vars()
@@ -3608,6 +3628,7 @@ class App(ctk.CTk):
         self._cheat = None
 
     def _on_close(self):
+        self.closing = True
         self.tray.stop()
         if self._compact is not None and self._compact.winfo_exists():
             self.cfg.compact_geometry = self._compact_geometry()
@@ -3629,14 +3650,21 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
-    if not dofus_update.single_instance():   # déjà ouvert : sa fenêtre est ramenée devant
-        raise SystemExit(0)
+    # --relance : l'ancien exemplaire (changement de thème) finit de se fermer : on l'attend.
+    if not dofus_update.single_instance(wait=10.0 if RELAUNCH_FLAG in sys.argv else 0.0):
+        raise SystemExit(0)            # déjà ouvert : sa fenêtre est ramenée devant
     try:
         core.setup_file_log()
     except OSError:
         pass   # dossier non accessible : l'outil marche sans fichier journal
     app = App()
     app.mainloop()
+    app.tray.stop()
     if app.restart_requested:            # thème / couleur changés : l'outil se relance
         import subprocess
         subprocess.Popen(relaunch_command(), close_fds=True)
+    import logging
+    logging.shutdown()
+    # Fin garantie : un fil resté actif (icône, bibliothèque) ne doit pas garder l'outil
+    # ouvert sans fenêtre (et bloquer la relance ou une mise à jour).
+    os._exit(0)
