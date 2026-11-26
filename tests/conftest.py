@@ -13,3 +13,9 @@ def fresh_digits(monkeypatch):
     """Chaque test part de modèles de chiffres vides, en mémoire (aucun fichier écrit)."""
     monkeypatch.setattr(core, "_digits", DigitReader(None))
     monkeypatch.setattr(core, "_fast_count", 0)
+
+
+@pytest.fixture(autouse=True)
+def debug_dir_in_tmp(monkeypatch, tmp_path):
+    """Captures de diagnostic (champ refusé) écrites dans un dossier temporaire."""
+    monkeypatch.setattr(core, "DEBUG_DIR", tmp_path / "captures")

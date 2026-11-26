@@ -1,6 +1,5 @@
 """OCR de bout en bout avec le vrai Tesseract sur une capture réelle de l'HDV
 (ignoré si Tesseract n'est pas installé)."""
-import shutil
 import sys
 from pathlib import Path
 
@@ -11,7 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dofus_core as core  # noqa: E402
 
 pytest.importorskip("pytesseract")
-if not shutil.which("tesseract"):
+# même recherche que l'outil : PATH, puis le dossier d'installation par défaut (souvent hors PATH)
+if core.setup_tesseract(core.Config()) is not None:
     pytest.skip("tesseract absent", allow_module_level=True)
 
 from PIL import Image  # noqa: E402
