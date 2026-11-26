@@ -1216,3 +1216,52 @@ def test_release_stuck_keys_real_keyboard():
         with kb._pressed_events_lock:
             kb._pressed_events.clear()
             kb._pressed_events.update(saved)
+
+
+# --- Nouvelle version publiée ?
+@pytest.mark.parametrize("v,parsed", [("v1.2.3", (1, 2, 3)), ("1.10.0", (1, 10, 0)), ("dev", None),
+                                      ("dev-abc1234", None), ("v1.2", None), ("", None)])
+def test_parse_version(v, parsed):
+    assert core.parse_version(v) == parsed
+
+
+def test_newer_release():
+    rel = lambda tag: (lambda timeout: {"tag_name": tag, "html_url": f"https://x/{tag}"})
+    assert core.newer_release("v1.0.0", rel("v1.1.0")) == ("v1.1.0", "https://x/v1.1.0")
+    assert core.newer_release("v1.0.9", rel("v1.0.10")) == ("v1.0.10", "https://x/v1.0.10")  # pas alphabétique
+    assert core.newer_release("v1.1.0", rel("v1.1.0")) is None
+    assert core.newer_release("v1.2.0", rel("v1.1.0")) is None
+    assert core.newer_release("dev", rel("v9.0.0")) is None              # code source : jamais
+    assert core.newer_release("v1.0.0", rel("nightly")) is None
+
+    def offline(timeout):
+        raise OSError("pas de réseau")
+    assert core.newer_release("v1.0.0", offline) is None                  # hors ligne : silencieux
+
+
+# --- Fichier journal
+def test_file_log_and_tee(tmp_path, monkeypatch):
+    import io
+    import logging
+    monkeypatch.setattr(core, "LOG_DIR", tmp_path / "journaux")
+    monkeypatch.setattr(core, "_file_log", None)
+    path = core.setup_file_log(capture_std=False)
+    try:
+        core.log_line("[MAJ] Lot 1 | modifié", "OK")
+        core.log_line("[Erreur] boum", "ERROR")
+        out = io.StringIO()
+        tee = core._TeeStream(out, core._file_log.info)
+        print("[Champ] message du moteur", file=tee)
+        print("début…", end="", file=tee)                 # ligne incomplète : attend la fin
+        print(" fin", file=tee)
+        for h in core._file_log.handlers:
+            h.flush()
+        text = path.read_text(encoding="utf-8")
+        assert "Démarrage Dofus Price Helper" in text and "[MAJ] Lot 1 | modifié" in text
+        assert "[Erreur] boum" in text and "[Champ] message du moteur" in text and "début… fin" in text
+        assert out.getvalue().startswith("[Champ] message du moteur\n")   # la console garde tout
+    finally:
+        lg = logging.getLogger("dofus_price_helper")
+        for h in list(lg.handlers):
+            h.close()
+            lg.removeHandler(h)

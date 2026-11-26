@@ -38,6 +38,11 @@ ou plus récent est déjà installé sur le PC, c'est lui qui est utilisé.
 
 Réglages, calibration et historique : %APPDATA%\\Dofus Price Helper
 Ils sont gardés quand tu passes à une nouvelle version (nouveau zip, nouveau dossier).
+Nouvelle version : l'outil le signale au démarrage (bouton vert en haut).
+
+Un problème ? Joins le fichier journal à ton message :
+%APPDATA%\\Dofus Price Helper\\journaux\\journal.log
+(onglet Options -> « Ouvrir le dossier du journal »).
 
 Windows / antivirus
 -------------------
