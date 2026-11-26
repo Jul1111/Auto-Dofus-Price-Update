@@ -1,0 +1,18 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Une question sur l'installation, la calibration ou un réglage ? Pose-la ici.
+        Pense à jeter un œil au [README](https://github.com/Jul1111/Auto-Dofus-Price-Update#readme) : la réponse y est peut-être déjà.
+        Si l'outil fait quelque chose d'anormal, la catégorie **Bugs** est plus adaptée.
+  - type: textarea
+    id: question
+    attributes:
+      label: Ta question
+    validations:
+      required: true
+  - type: textarea
+    id: contexte
+    attributes:
+      label: Contexte (optionnel)
+      description: Version de l'outil, résolution, ce que tu as déjà essayé…
