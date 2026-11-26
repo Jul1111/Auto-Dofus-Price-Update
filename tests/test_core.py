@@ -262,7 +262,7 @@ def _flush_restore():
 
 
 def test_input_default_clears_then_pastes(fake_io, monkeypatch):
-    monkeypatch.setattr(core, "read_mine", lambda c: core.Reading(689, 95))  # champ relu = bon prix
+    monkeypatch.setattr(core, "read_mine", lambda c, **k: core.Reading(689, 95))  # champ relu = bon prix
     cfg = core.Config(price_field=[100, 205], click_field=True, sell_button=[110, 370])
     assert core.input_price(689, cfg, paste=True, validate=True) == "saisi + mis en vente"
     assert fake_io.log == (["click(100, 205)", "end"] + ["backspace"] * 12
@@ -559,7 +559,7 @@ def relist_engine(monkeypatch):
     monkeypatch.setattr(core, "log_history", lambda *a, **k: None)
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
     monkeypatch.setattr(core, "read_mine",
-                        lambda c: core.Reading(state["mine"].pop(0), 95) if state["mine"] else core.Reading(None, -1))
+                        lambda c, **k: core.Reading(state["mine"].pop(0), 95) if state["mine"] else core.Reading(None, -1))
     monkeypatch.setattr(core, "read_screen", lambda c, d=None, with_mine=False: state["screens"].pop(0))
     monkeypatch.setattr(core, "grab_screen", lambda r: np.zeros((2, 2, 3), np.uint8))
     monkeypatch.setattr(core, "wait_change", lambda *a, **k: None)
@@ -1025,13 +1025,13 @@ def test_input_price_blocks_wrong_paste(monkeypatch):
     monkeypatch.setattr(core, "_take_clipboard", lambda pc, cfg: None)
     monkeypatch.setattr(core, "_schedule_restore", lambda pc, d=1.0: None)
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
-    reads = iter([core.Reading(4, 95), core.Reading(4, 95)])   # le champ montre « 4 » (mauvais collage)
-    monkeypatch.setattr(core, "read_mine", lambda c: next(reads))
+    monkeypatch.setattr(core, "read_mine", lambda c, **k: core.Reading(4, 95))  # le champ montre « 4 »
+    monkeypatch.setattr(core, "save_field_debug", lambda c, tag: None)
     cfg = core.Config(price_field=[10, 10])
     done = core.input_price(69, cfg, paste=True, validate=True)
     assert "PAS validé" in done and "enter" not in sent
     reads2 = iter([core.Reading(69, 95)])
-    monkeypatch.setattr(core, "read_mine", lambda c: next(reads2))
+    monkeypatch.setattr(core, "read_mine", lambda c, **k: next(reads2))
     sent.clear()
     assert core.input_price(69, cfg, paste=True, validate=True) == "saisi + mis en vente" and "enter" in sent
 
@@ -1041,7 +1041,8 @@ def test_press_validate_checks_field(monkeypatch):
     sent = []
     monkeypatch.setitem(sys.modules, "keyboard", types.SimpleNamespace(press_and_release=lambda k: sent.append(k)))
     monkeypatch.setattr(core.time, "sleep", lambda s: None)
-    monkeypatch.setattr(core, "read_mine", lambda c: core.Reading(70, 95))
+    monkeypatch.setattr(core, "read_mine", lambda c, **k: core.Reading(70, 95))
+    monkeypatch.setattr(core, "save_field_debug", lambda c, tag: None)
     cfg = core.Config(price_field=[10, 10])
     assert core.press_validate(cfg, expected=69) is False and sent == []
     assert core.press_validate(cfg, expected=70) is True and sent == ["enter"]
@@ -1067,3 +1068,37 @@ def test_smart_f1_routes_by_panel(monkeypatch):
     eng.cfg.smart_f1 = False
     monkeypatch.setattr(core, "detect_panel", lambda c: "relist")
     assert eng.smart() == "sell"
+
+
+# --- Relecture du champ : curseur collé au dernier chiffre (448 relu 446, vente refusée à tort)
+def test_drop_caret_keeps_glued_digit():
+    th = np.full((40, 40), 255, np.uint8)
+    th[12:28, 10:20] = 0            # chiffre (pavé) : colonnes 10 à 19
+    th[13:27, 12:18] = 255          # … creux, comme un 0 / 8
+    th[6:34, 20:22] = 0             # curseur collé : déborde au-dessus et en dessous
+    out = core._drop_caret(th)
+    assert (out[:, 20:22] == 255).all()                     # curseur effacé
+    assert (out[12:28, 19] == 0).all()                      # bord droit du chiffre intact
+    assert (out[12:28, 10:20] == th[12:28, 10:20]).all()
+
+
+def test_field_check_second_opinion(monkeypatch):
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    saved = []
+    monkeypatch.setattr(core, "save_field_debug", lambda c, tag: saved.append(tag))
+    cfg = core.Config(price_field=[10, 10])
+    # lecture rapide fausse (446), Tesseract sûr de 448 : validé
+    monkeypatch.setattr(core, "read_mine", lambda c, tesseract_only=False:
+                        core.Reading(448, 92) if tesseract_only else core.Reading(446, 95))
+    assert core.field_check(cfg, 448) == (True, 448) and saved == []
+    # Tesseract peu sûr : refus + image du champ gardée
+    monkeypatch.setattr(core, "read_mine", lambda c, tesseract_only=False:
+                        core.Reading(448, 40) if tesseract_only else core.Reading(446, 95))
+    assert core.field_check(cfg, 448) == (False, 446) and saved == ["attendu448_lu446"]
+
+
+def test_field_check_rereads_until_caret_gone(monkeypatch):
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    reads = iter([446, 446, 448])                           # curseur visible, puis éteint
+    monkeypatch.setattr(core, "read_mine", lambda c, **k: core.Reading(next(reads), 95))
+    assert core.field_check(core.Config(price_field=[10, 10]), 448) == (True, 448)
