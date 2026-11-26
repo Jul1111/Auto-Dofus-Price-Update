@@ -551,6 +551,10 @@ class App(ctk.CTk):
             out.append(f"{'✓' if sr.selected else '✗'} Quantité : {sr.selected or 'illisible'}")
             if c.avg_region:
                 out.append(f"{'✓' if sr.avg else '✗'} Prix moyen : {fmt(sr.avg) if sr.avg else 'illisible'}")
+            for zone in core.CUT_CHECK_ZONES:
+                if core.cut_text_hint(zone, getattr(c, f"{zone}_region")):
+                    out.append(f"⚠ Zone {ZONE_LABELS[zone]} : le texte touche son bord (chiffre coupé ?). "
+                               "Recalibre-la avec 3-4 px de marge en haut et en bas.")
             if core.mine_regions(c):
                 out.append(f"{'✓' if sr.mine else '–'} Champ « Prix du lot » : "
                            f"{fmt(sr.mine) if sr.mine else 'vide ou illisible'}")
@@ -1158,7 +1162,7 @@ class App(ctk.CTk):
                       "et appuie à nouveau.", "CAL")
         else:
             self._log(f"[Calib] {label} = {val}", "CAL")
-            hint = core.zone_hint(name, val)
+            hint = core.zone_hint(name, val) or core.cut_text_hint(name, val)
             if hint:
                 self._log(f"[Calib] {label} : {hint}. Recalibre si la lecture échoue.", "WARN")
             self._show_zones()
