@@ -136,11 +136,23 @@ def installer_script(new_dir: Path, app_dir: Path, pid: int, work_dir: Path, log
 $log = {_ps(log)}
 function Note($m) {{ Add-Content -LiteralPath $log -Value ("$(Get-Date -Format s)  [MAJ] " + $m) -Encoding UTF8 }}
 try {{ Wait-Process -Id {int(pid)} -Timeout 60 -ErrorAction SilentlyContinue }} catch {{}}
+# Un 2e exemplaire de l'outil ouvert garde _internal : « accès refusé » (vu en v1.5.1).
+$others = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq {_ps(exe)} }})
+if ($others.Count -gt 0) {{
+    Note ('attente de la fermeture de ' + $others.Count + ' autre(s) fenêtre(s) de l''outil')
+    try {{ $others | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue }} catch {{}}
+}}
 Start-Sleep -Milliseconds 500
 $stage = 'internal'
 try {{
     if (Test-Path -LiteralPath {_ps(old)}) {{ Remove-Item -LiteralPath {_ps(old)} -Recurse -Force }}
-    if (Test-Path -LiteralPath {_ps(internal)}) {{ Rename-Item -LiteralPath {_ps(internal)} -NewName '_internal.old' }}
+    if (Test-Path -LiteralPath {_ps(internal)}) {{
+        # Antivirus ou fichier encore ouvert un instant : on réessaie ~10 s avant d'abandonner.
+        for ($i = 0; $i -lt 20; $i++) {{
+            try {{ Rename-Item -LiteralPath {_ps(internal)} -NewName '_internal.old' -ErrorAction Stop; break }}
+            catch {{ if ($i -eq 19) {{ throw }}; Start-Sleep -Milliseconds 500 }}
+        }}
+    }}
     Copy-Item -LiteralPath {_ps(new / "_internal")} -Destination {_ps(app)} -Recurse -Force
     $stage = 'files'
     Get-ChildItem -LiteralPath {_ps(new)} | Where-Object {{ $_.Name -ne '_internal' }} |
@@ -149,6 +161,8 @@ try {{
     Note 'installée'
 }} catch {{
     Note ('échec (' + $stage + ') : ' + $_.Exception.Message)
+    $still = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq {_ps(exe)} }})
+    if ($still.Count -gt 0) {{ Note ('une fenêtre de l''outil est encore ouverte : ferme-les toutes puis réessaie') }}
     if ($stage -eq 'internal' -and (Test-Path -LiteralPath {_ps(old)})) {{
         Remove-Item -LiteralPath {_ps(internal)} -Recurse -Force -ErrorAction SilentlyContinue
         Rename-Item -LiteralPath {_ps(old)} -NewName '_internal' -ErrorAction SilentlyContinue
@@ -159,6 +173,44 @@ try {{
 {"Start-Process -FilePath " + _ps(exe) if relaunch else ""}
 Remove-Item -LiteralPath {_ps(work_dir)} -Recurse -Force -ErrorAction SilentlyContinue
 """
+
+
+_instance_mutex = None
+
+
+def single_instance(name: str = r"Local\DofusPriceHelper-instance") -> bool:
+    """True si l'outil n'est pas déjà ouvert. Sinon, ramène la fenêtre existante devant et
+    retourne False : deux exemplaires réagiraient tous les deux à Ctrl+F3, et le premier
+    bloque la mise à jour (dossier _internal utilisé)."""
+    global _instance_mutex
+    if not core.IS_WINDOWS:
+        return True
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.restype = wintypes.HANDLE
+    k32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+    _instance_mutex = k32.CreateMutexW(None, False, name)
+    if ctypes.get_last_error() != 183:          # ERROR_ALREADY_EXISTS
+        return True
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _):
+        title, cls = ctypes.create_unicode_buffer(256), ctypes.create_unicode_buffer(64)
+        user32.GetWindowTextW(hwnd, title, 256)
+        user32.GetClassNameW(hwnd, cls, 64)
+        if title.value.startswith("Dofus Price Helper") and cls.value == "TkTopLevel":
+            found.append(hwnd)
+            return False
+        return True
+
+    user32.EnumWindows(each, 0)
+    for hwnd in found:
+        user32.ShowWindow(hwnd, 9)                # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+    return False
 
 
 def work_dir(new_dir: Path) -> Path:
