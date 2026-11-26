@@ -1343,3 +1343,34 @@ def test_reanchor_uses_profile_anchor(tmp_path, monkeypatch):
     cfg.anchor_region = [0, 0, 10, 10]
     core.PriceEngine(cfg)._reanchor()
     assert seen == [core.anchor_path(cfg)] and seen[0] != core.ANCHOR_PATH
+
+
+# --- Ctrl+F3 : chronométrage par étape et attente « liste immobile »
+def test_timing_text():
+    t = {"clic": 2.0, "lecture": 3.0, "saisie": 1.0, "validation": 2.0, "défilement": 0.5}
+    txt = core.timing_text(10.0, 10, t)
+    assert txt.startswith("durée 10,0 s, 1,00 s/ligne (clic 0,20 · lecture 0,30")
+    assert "autre 0,15" in txt
+    assert core.timing_text(75.0, 0, {}) == "durée 1 min 15 s"
+
+
+def test_wait_still_returns_as_soon_as_list_stops(monkeypatch):
+    frames = iter([1, 2, 3, 3, 3, 3])                 # la liste bouge 2 fois puis s'arrête
+    grabs = []
+    monkeypatch.setattr(core, "grab_screen", lambda r: grabs.append(1) or np.full((2, 2), next(frames)))
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    core.wait_still((0, 0, 2, 2), timeout=5.0)
+    assert len(grabs) == 4
+
+
+def test_relist_all_reports_time_per_row(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step = True, [100, 100], 20
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(eng, "_page_rows", lambda shift, base: [(100, 0)])
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    st["screens"] = [scr({1: 800})]
+    st["mine"] = [800]
+    res = eng.relist_all()
+    assert "s/ligne" in res.message and "lecture" in res.message and "clic" in eng.timing
