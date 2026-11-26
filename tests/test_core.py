@@ -1386,3 +1386,77 @@ def test_relist_all_reports_time_per_row(relist_engine, monkeypatch):
     st["mine"] = [800]
     res = eng.relist_all()
     assert "s/ligne" in res.message and "lecture" in res.message and "clic" in eng.timing
+
+
+def test_relist_all_continues_after_many_suspect_rows(relist_engine, monkeypatch):
+    # 4 prix suspects de suite : non modifiés, mais le parcours va jusqu'au bout
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 5
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    n = [0]
+    monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
+                        np.random.default_rng(n[0]).integers(0, 255, (8, 8, 3)).astype(np.uint8))
+    suspect = lambda: scr({1: 199, 10: 11200})          # prix unitaire x0,2 des autres lots
+    st["screens"] = [suspect() for _ in range(8)] + [scr({1: 87})]
+    st["mine"] = [614] * 8 + [87]
+    res = eng.relist_all()
+    assert "fin de la liste" in res.message and "douteuses de suite" not in res.message
+    assert sum(1 for c in res.changes if not c.modified) == 4 and ("paste", 198) not in calls
+
+
+# --- Raccourcis lus dans l'état réel du clavier
+class _Keys:
+    def __init__(self):
+        self.down = set()
+
+    def state(self, vk):
+        return 0x8000 if vk in self.down else 0
+
+
+def _poller():
+    k = _Keys()
+    p = core.HotkeyPoller(state=k.state)
+    p.start = lambda: None                                # pas de fil : on lit à la main
+    return k, p
+
+
+def test_poller_exact_modifiers_and_one_shot():
+    k, p = _poller()
+    hits = []
+    p.add("f3", lambda: hits.append("f3"))
+    p.add("ctrl+f3", lambda: hits.append("ctrl+f3"))
+    p.poll_once()
+    k.down = {0x11}; p.poll_once()                        # Ctrl
+    k.down = {0x11, 0x72}; p.poll_once(); p.poll_once()   # Ctrl+F3 tenu : une seule fois
+    assert hits == ["ctrl+f3"]
+    k.down = set(); p.poll_once()
+    k.down = {0x72}; p.poll_once()                        # F3 seul
+    k.down = {0x11, 0x12, 0x72}; p.poll_once()            # Ctrl+Alt+F3 : rien (pas exact)
+    assert hits == ["ctrl+f3", "f3"]
+
+
+def test_poller_survives_errors_and_ignores_keys_held_at_registration():
+    k, p = _poller()
+    hits = []
+    k.down = {0x11, 0x72}
+    p.add("ctrl+f3", lambda: 1 / 0)                       # action en erreur
+    p.add("ctrl+alt+p", lambda: hits.append("pause"))
+    p.poll_once()                                         # Ctrl+F3 déjà tenu à l'ajout : rien
+    k.down = set(); p.poll_once()
+    k.down = {0x11, 0x72}; p.poll_once()                  # erreur notée, rien ne s'arrête
+    k.down = {0x11, 0x12, 0x50}; p.poll_once()
+    assert hits == ["pause"] and p.errors and "ctrl+f3" in p.errors[0]
+    p.clear()
+    k.down = set(); p.poll_once(); k.down = {0x11, 0x12, 0x50}; p.poll_once()
+    assert hits == ["pause"]
+
+
+def test_parse_combo():
+    assert core.parse_combo("ctrl+alt+f12") == (frozenset({"ctrl", "alt"}), 0x7B)
+    assert core.parse_combo("page up") == (frozenset(), 0x21)
+    with pytest.raises(ValueError):
+        core.parse_combo("ctrl+")
+    with pytest.raises(ValueError):
+        core.parse_combo("f3+f4")

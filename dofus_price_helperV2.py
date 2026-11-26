@@ -113,7 +113,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         args = parse_args(argv)
     except SystemExit as e:
         return int(e.code or 0)
-    import keyboard  # Windows : chargé ici pour que --help et les tests marchent sans
+    import keyboard  # noqa: F401  (saisie des prix ; chargé ici pour que --help marche sans)
 
     debug_dir = core.BASE_DIR / "captures" if args.debug else None
     try:
@@ -219,15 +219,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("[Hotkeys]", "En pause" if engine.paused else "Actifs")
 
     hk = cfg.hotkeys
-    keyboard.add_hotkey(hk["sell"], game_action(False))
-    keyboard.add_hotkey(hk["optimize"], game_action(True))
-    keyboard.add_hotkey(hk["sell_all"], game_action(False, all_=True))
-    keyboard.add_hotkey(hk["calibrate_table"], lambda: calib_rect("table"))
-    keyboard.add_hotkey(hk["calibrate_qty"], lambda: calib_rect("qty"))
-    keyboard.add_hotkey(hk["calibrate_avg"], lambda: calib_rect("avg"))
-    keyboard.add_hotkey(hk["calibrate_count"], lambda: calib_rect("count"))
-    keyboard.add_hotkey(hk["calibrate_field"], lambda: calib_point("price_field"))
-    keyboard.add_hotkey(hk["calibrate_button"], lambda: calib_point("sell_button"))
+    core.HOTKEYS.add(hk["sell"], game_action(False))
+    core.HOTKEYS.add(hk["optimize"], game_action(True))
+    core.HOTKEYS.add(hk["sell_all"], game_action(False, all_=True))
+    core.HOTKEYS.add(hk["calibrate_table"], lambda: calib_rect("table"))
+    core.HOTKEYS.add(hk["calibrate_qty"], lambda: calib_rect("qty"))
+    core.HOTKEYS.add(hk["calibrate_avg"], lambda: calib_rect("avg"))
+    core.HOTKEYS.add(hk["calibrate_count"], lambda: calib_rect("count"))
+    core.HOTKEYS.add(hk["calibrate_field"], lambda: calib_point("price_field"))
+    core.HOTKEYS.add(hk["calibrate_button"], lambda: calib_point("sell_button"))
     def relist_action(all_: bool):
         def cb():
             if engine.paused or not core.game_has_focus(cfg):
@@ -238,21 +238,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     def calib_rows():
         print(f"[Calib] lignes : {engine.calibrate_rows()}")
 
-    keyboard.add_hotkey(hk["relist"], relist_action(False))
-    keyboard.add_hotkey(hk["relist_all"], relist_action(True))
-    keyboard.add_hotkey(hk["calibrate_mine"], lambda: calib_rect("mine"))
-    keyboard.add_hotkey(hk["calibrate_anchor"], lambda: calib_rect("anchor"))
-    keyboard.add_hotkey(hk["calibrate_name"], lambda: calib_rect("name"))
-    keyboard.add_hotkey(hk["calibrate_modify"], lambda: calib_point("modify_button"))
-    keyboard.add_hotkey(hk["calibrate_rows"], calib_rows)
+    core.HOTKEYS.add(hk["relist"], relist_action(False))
+    core.HOTKEYS.add(hk["relist_all"], relist_action(True))
+    core.HOTKEYS.add(hk["calibrate_mine"], lambda: calib_rect("mine"))
+    core.HOTKEYS.add(hk["calibrate_anchor"], lambda: calib_rect("anchor"))
+    core.HOTKEYS.add(hk["calibrate_name"], lambda: calib_rect("name"))
+    core.HOTKEYS.add(hk["calibrate_modify"], lambda: calib_point("modify_button"))
+    core.HOTKEYS.add(hk["calibrate_rows"], calib_rows)
 
     def calib_auto():
         res = engine.calibrate_auto()
         print(f"[Calib auto] {res.message}")
 
-    keyboard.add_hotkey(hk["calibrate_auto"], lambda: threading.Thread(target=calib_auto, daemon=True).start())
-    keyboard.add_hotkey(hk["pause"], toggle_pause)
-    keyboard.add_hotkey("ctrl+shift+p", print_all)
+    core.HOTKEYS.add(hk["calibrate_auto"], lambda: threading.Thread(target=calib_auto, daemon=True).start())
+    core.HOTKEYS.add(hk["pause"], toggle_pause)
+    core.HOTKEYS.add("ctrl+shift+p", print_all)
 
     print("Dofus Price Helper (CLI) prêt.")
     print(f"Tableau: {'OK' if cfg.table_region else 'à calibrer'} | "
@@ -263,7 +263,7 @@ def main(argv: Optional[List[str]] = None) -> int:
              if len(cfg.profile_names()) > 1 else ""))
     print(f"Quitter : {hk['quit']}")
     try:
-        keyboard.wait(hk["quit"])
+        core.HOTKEYS.wait(hk["quit"])
     except KeyboardInterrupt:
         pass
     print("Bye!")

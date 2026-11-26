@@ -98,6 +98,10 @@ def hotkey_problem(name: str, combo: str, hotkeys: dict) -> Optional[str]:
         return "lecture du clavier impossible" + (f" ({combo[1:]})" if combo else "")
     if combo == "esc":
         return None
+    try:
+        core.parse_combo(combo)
+    except ValueError as e:
+        return str(e)
     parts = combo.split("+")
     if parts[-1] in ("enter", "backspace", "esc", "end") or combo in ("ctrl+v", "ctrl+a"):
         return "touche utilisée par l'outil pour saisir les prix (Entrée, Fin, Retour arrière, Ctrl+V)"
@@ -693,7 +697,7 @@ class App(ctk.CTk):
         self._log(f"[Hotkeys] « {HOTKEY_LABELS[name]} » : appuie sur la nouvelle touche ou combinaison "
                   "(Échap = annuler).", "CAL")
         try:
-            keyboard.unhook_all_hotkeys()   # sinon la touche choisie déclencherait son action actuelle
+            core.HOTKEYS.clear()   # sinon la touche choisie déclencherait son action actuelle
         except Exception:
             pass
 
@@ -1319,13 +1323,17 @@ class App(ctk.CTk):
         hk = self.cfg.hotkeys
         last_warn = [0.0]
         try:
-            keyboard.unhook_all_hotkeys()   # ré-enregistrement après un changement
+            core.HOTKEYS.clear()   # ré-enregistrement après un changement
         except Exception:
             pass
 
         def game_job(job):
             def cb():
                 if self.engine.paused:
+                    if time.time() - last_warn[0] > 5:   # sinon on croit les raccourcis cassés
+                        last_warn[0] = time.time()
+                        self.ui_events.put(("log", (f"[Hotkeys] Raccourci ignoré : l'outil est en pause "
+                                                    f"({hk['pause'].upper()} pour reprendre).", "WARN")))
                     return
                 if not core.game_has_focus(self.cfg):
                     if time.time() - last_warn[0] > 5:  # diagnostic, max 1 fois / 5 s
@@ -1340,25 +1348,25 @@ class App(ctk.CTk):
             return cb
 
         try:
-            keyboard.add_hotkey(hk["sell"], game_job(("sell", False)))
-            keyboard.add_hotkey(hk["optimize"], game_job(("sell", True)))
-            keyboard.add_hotkey(hk["sell_all"], game_job(("sell_all", None)))
-            keyboard.add_hotkey(hk["relist"], game_job(("relist", None)))
-            keyboard.add_hotkey(hk["relist_all"], game_job(("relist_all", None)))
-            keyboard.add_hotkey(hk["calibrate_mine"], lambda: self.jobs.put(("calib_rect", "mine")))
-            keyboard.add_hotkey(hk["calibrate_modify"], lambda: self.jobs.put(("calib_point", "modify_button")))
-            keyboard.add_hotkey(hk["calibrate_rows"], lambda: self.jobs.put(("calib_rows", None)))
-            keyboard.add_hotkey(hk["calibrate_anchor"], lambda: self.jobs.put(("calib_rect", "anchor")))
-            keyboard.add_hotkey(hk["calibrate_name"], lambda: self.jobs.put(("calib_rect", "name")))
-            keyboard.add_hotkey(hk["calibrate_auto"], lambda: self.jobs.put(("calib_auto", None)))
-            keyboard.add_hotkey(hk["calibrate_table"], lambda: self.jobs.put(("calib_rect", "table")))
-            keyboard.add_hotkey(hk["calibrate_qty"], lambda: self.jobs.put(("calib_rect", "qty")))
-            keyboard.add_hotkey(hk["calibrate_avg"], lambda: self.jobs.put(("calib_rect", "avg")))
-            keyboard.add_hotkey(hk["calibrate_count"], lambda: self.jobs.put(("calib_rect", "count")))
-            keyboard.add_hotkey(hk["calibrate_field"], lambda: self.jobs.put(("calib_point", "price_field")))
-            keyboard.add_hotkey(hk["calibrate_button"], lambda: self.jobs.put(("calib_point", "sell_button")))
-            keyboard.add_hotkey(hk["show_zones"], lambda: self.ui_events.put(("zones", None)))
-            keyboard.add_hotkey(hk["pause"], lambda: self.ui_events.put(("pause", None)))
+            core.HOTKEYS.add(hk["sell"], game_job(("sell", False)))
+            core.HOTKEYS.add(hk["optimize"], game_job(("sell", True)))
+            core.HOTKEYS.add(hk["sell_all"], game_job(("sell_all", None)))
+            core.HOTKEYS.add(hk["relist"], game_job(("relist", None)))
+            core.HOTKEYS.add(hk["relist_all"], game_job(("relist_all", None)))
+            core.HOTKEYS.add(hk["calibrate_mine"], lambda: self.jobs.put(("calib_rect", "mine")))
+            core.HOTKEYS.add(hk["calibrate_modify"], lambda: self.jobs.put(("calib_point", "modify_button")))
+            core.HOTKEYS.add(hk["calibrate_rows"], lambda: self.jobs.put(("calib_rows", None)))
+            core.HOTKEYS.add(hk["calibrate_anchor"], lambda: self.jobs.put(("calib_rect", "anchor")))
+            core.HOTKEYS.add(hk["calibrate_name"], lambda: self.jobs.put(("calib_rect", "name")))
+            core.HOTKEYS.add(hk["calibrate_auto"], lambda: self.jobs.put(("calib_auto", None)))
+            core.HOTKEYS.add(hk["calibrate_table"], lambda: self.jobs.put(("calib_rect", "table")))
+            core.HOTKEYS.add(hk["calibrate_qty"], lambda: self.jobs.put(("calib_rect", "qty")))
+            core.HOTKEYS.add(hk["calibrate_avg"], lambda: self.jobs.put(("calib_rect", "avg")))
+            core.HOTKEYS.add(hk["calibrate_count"], lambda: self.jobs.put(("calib_rect", "count")))
+            core.HOTKEYS.add(hk["calibrate_field"], lambda: self.jobs.put(("calib_point", "price_field")))
+            core.HOTKEYS.add(hk["calibrate_button"], lambda: self.jobs.put(("calib_point", "sell_button")))
+            core.HOTKEYS.add(hk["show_zones"], lambda: self.ui_events.put(("zones", None)))
+            core.HOTKEYS.add(hk["pause"], lambda: self.ui_events.put(("pause", None)))
         except Exception as e:
             self._log(f"[Hotkeys] Erreur d'enregistrement: {e}", "ERROR")
             return
