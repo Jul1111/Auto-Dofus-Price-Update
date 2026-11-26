@@ -563,6 +563,8 @@ def relist_engine(monkeypatch):
     monkeypatch.setattr(core, "read_screen", lambda c, d=None, with_mine=False: state["screens"].pop(0))
     monkeypatch.setattr(core, "grab_screen", lambda r: np.zeros((2, 2, 3), np.uint8))
     monkeypatch.setattr(core, "wait_change", lambda *a, **k: None)
+    state["opinions"] = []                         # 2e et 3e lectures de « ton prix » (vide = d'accord)
+    monkeypatch.setattr(core, "mine_second_opinions", lambda c: state["opinions"].pop(0) if state["opinions"] else [])
     state["dialog"] = []                           # fenêtre « Confirmer la mise en vente » vue ?
     monkeypatch.setattr(core, "find_confirm_dialog",
                         lambda c, *a, **k: state["dialog"].pop(0) if state["dialog"] else None)
@@ -662,6 +664,30 @@ def test_find_confirm_dialog_on_screen():
         screen[500:500 + d.shape[0], 900:900 + d.shape[1]] = d
         x, y = core.find_confirm_dialog(cfg, screen)
         assert abs(x - (900 + 60 * f)) <= 3 and abs(y - (500 + 6 * f)) <= 3
+
+
+def test_vote_mine():
+    R = core.Reading
+    assert core.vote_mine(R(489, 95), [R(459, 92), R(459, 90)], 60) == (459, "489 / 459 / 459")
+    assert core.vote_mine(R(489, 95), [R(489, 92), R(459, 90)], 60)[0] == 489
+    assert core.vote_mine(R(489, 95), [R(459, 92), R(None, -1)], 60)[0] is None
+    assert core.vote_mine(R(489, 95), [], 60)[0] == 489
+
+
+def test_relist_rereads_own_price_before_modifying(relist_engine, monkeypatch):
+    # Crocs de Rats : ta vente est à 459, lue 489 -> la majorité dit 459 : rien à faire
+    eng, calls, st = relist_engine
+    monkeypatch.setattr(core, "mine_field_image", lambda c, *a: None)
+    st["screens"] = [scr({1: 459})]
+    st["mine"] = [489]
+    st["opinions"] = [[core.Reading(459, 92), core.Reading(459, 90)]]
+    res = eng.relist()
+    assert "déjà le moins cher" in res.message and calls == []
+    st["screens"] = [scr({1: 459})]                # pas de majorité : ligne passée, rien collé
+    st["mine"] = [489]
+    st["opinions"] = [[core.Reading(459, 92), core.Reading(None, -1)]]
+    res = eng.relist()
+    assert res.hint == "Ton prix douteux" and calls == []
 
 
 def test_relist_avg_guard_then_force(relist_engine):
@@ -952,7 +978,7 @@ def test_relist_confirmation_popup_enter(relist_engine, monkeypatch):
     st["screens"] = [scr({1: 760})]
     st["mine"] = [774, 759, 759]
     res = eng.relist()
-    assert res.level == "ok" and "confirmation validée" in res.message
+    assert res.level == "ok" and "Entrée de secours" in res.message
     assert calls == [("paste", 759), "modify", "enter"]
 
 
@@ -972,6 +998,24 @@ def test_relist_all_continues_at_modified_position(relist_engine, monkeypatch):
     res = eng.relist_all()
     assert "1 modifiées" in res.message
     assert clicks == [(100, 100), (100, 150), (100, 150), (100, 200)]
+
+
+def test_relist_all_skips_a_row_modified_twice_the_same_way(relist_engine, monkeypatch):
+    # « modifié » mais rien n'a changé (prix déjà en place) : la même ligne revient -> passée
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 3
+    clicks = []
+    monkeypatch.setattr(core, "click_at", lambda p: clicks.append(p))
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    n = [0]
+    monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
+                        np.random.default_rng(n[0]).integers(0, 255, (8, 8, 3)).astype(np.uint8))
+    st["screens"] = [scr({1: 87}), scr({1: 760}), scr({1: 760}), scr({1: 50})]
+    st["mine"] = [87, 774, None, 774, None, 50]
+    res = eng.relist_all()
+    assert clicks == [(100, 100), (100, 150), (100, 150), (100, 200)]
+    assert "modification répétée sans effet" in res.message and "fin de la liste" in res.message
 
 
 def test_config_v4_gets_new_relist_max(tmp_path):

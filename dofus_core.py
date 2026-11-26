@@ -1240,6 +1240,21 @@ def field_gray_image(img_bgr: np.ndarray, scale: int = 4) -> Optional[np.ndarray
     return cv2.copyMakeBorder(inv, BORDER, BORDER, BORDER, BORDER, cv2.BORDER_CONSTANT, value=255)
 
 
+def mine_second_opinions(cfg: Config) -> List[Reading]:
+    """Deux autres lectures de « ton prix » : Tesseract seul et niveaux de gris."""
+    return [read_mine(cfg, tesseract_only=True), read_mine_gray(cfg)]
+
+
+def vote_mine(first: Reading, others: List[Reading], min_conf: float) -> Tuple[Optional[int], str]:
+    """Valeur lue par au moins 2 lectures sur 3 (None si aucune majorité) + détail."""
+    vals = [first.value] + [r.value for r in others if r.value is not None and r.confidence >= min_conf]
+    detail = " / ".join(str(v) for v in vals)
+    for v in vals:
+        if v is not None and vals.count(v) >= 2:
+            return v, detail
+    return (first.value if not others else None), detail
+
+
 def read_mine_gray(cfg: Config) -> Reading:
     """2e avis sur ton prix : le champ lu en niveaux de gris (voir field_gray_image)."""
     import pytesseract
@@ -2443,6 +2458,19 @@ class PriceEngine:
         if top is None or top.value is None:
             return Result(lot, "error", f"[{tag}] Lot {lot} : aucun prix lu dans le tableau.", sr,
                           hint="Aucun prix lu")
+        if top.value < mine.value:
+            # Une modification va suivre : « ton prix » relu deux autres fois, vote à la majorité.
+            # (459 lu 489 : l'outil collait 459, « Modifier » grisé, et recommençait sans fin.)
+            voted, detail = vote_mine(mine, mine_second_opinions(cfg), cfg.min_confidence)
+            if voted is None:
+                return Result(lot, "warn", f"[{tag}] Lot {lot} | ton prix douteux (lectures : {detail}), "
+                              "ligne passée", sr, hint="Ton prix douteux")
+            if voted != mine.value:
+                print(f"[Champ] Ton prix relu : {voted} (lecture rapide {mine.value} ; lectures : {detail}).")
+                img = mine_field_image(cfg)
+                if img is not None and cfg.fast_digits:
+                    digit_reader().correct(img, str(voted))
+                mine = Reading(voted, max(mine.confidence, cfg.min_confidence))
         head = f"[{tag}] Lot {lot} | ton prix {mine.value} | moins cher {top.value}"
         self._row_ctx["old"] = mine.value
         if key is not None and mine.confidence >= cfg.min_confidence:
@@ -2533,7 +2561,7 @@ class PriceEngine:
             press_enter()
             wait_change(mine_box, before, cfg.relist_delay)
             check = self._await_new_price(mine.value)
-            confirmed = " (confirmation validée)"
+            confirmed = " (Entrée de secours)" if self._dialog is None else " (confirmation validée)"
         self._tick("validation", t0)
         if check.value is None or check.confidence < cfg.min_confidence:
             self.my_prices.add(key, lot, new_p, replaces=mine.value)
@@ -2691,6 +2719,7 @@ class PriceEngine:
         ok_rows: List[np.ndarray] = []  # images de lignes déjà au bon prix (même objet, même prix)
         bad: List[str] = []           # lignes douteuses laissées telles quelles
         fails = 0                     # lignes douteuses consécutives
+        last_mod = None               # dernière modification (ligne, lot, ancien, nouveau)
         skipped = 0
         mine_box = (mine_regions(cfg) or [None])[0]
         stats0 = dict(ENGINE_STATS)
@@ -2773,7 +2802,18 @@ class PriceEngine:
                                 raise StopIteration
                             continue
                         fails = 0
+                        mod = (g, res.lot, res.old_price, res.new_price)
+                        if "modifié" in res.message and mod == last_mod:
+                            # Même ligne, même modification qu'à l'instant : elle n'a rien changé
+                            # (prix déjà en place, mal lu ?). On passe, sinon boucle sans fin.
+                            bad.append(f"ligne {g + 1} : modification répétée sans effet : {res.message}")
+                            changes.append(RowChange(g + 1, res.lot, res.old_price, res.new_price, False,
+                                                     "Modif. sans effet", res.item_img))
+                            last_mod = None
+                            seen = max(seen, g)
+                            continue
                         if "modifié" in res.message:
+                            last_mod = mod
                             # La ligne modifiée change de place : la liste se décale. On reprend
                             # À CETTE POSITION (relue), lignes repérées à nouveau à l'écran.
                             changed += 1
