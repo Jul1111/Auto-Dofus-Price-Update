@@ -164,7 +164,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"[Calib] {name} : coin 1 = {val}. Souris sur le coin opposé, puis ré-appuie.")
         else:
             print(f"[Calib] {name} = {val}")
-            hint = core.zone_hint(name, val)
+            hint = core.zone_hint(name, val) or core.cut_text_hint(name, val)
             if hint:
                 print(f"[Calib] Attention : {hint}")
 

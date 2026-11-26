@@ -345,6 +345,39 @@ def zone_hint(name: str, region) -> Optional[str]:
     return None
 
 
+CUT_CHECK_ZONES = ("qty", "avg", "count")   # petites zones de texte : un chiffre coupé y est fréquent
+
+
+def text_touches_edge(img_bgr: np.ndarray, scale: int = 2) -> bool:
+    """Du texte touche le HAUT ou le BAS de la zone : chiffres probablement coupés (zone trop
+    serrée ou décalée). La lecture peut alors réussir par chance… ou échouer plus tard."""
+    import cv2
+    th = preprocess(img_bgr, scale)[BORDER:-BORDER, BORDER:-BORDER]
+    ink = (th < 128).astype(np.uint8)
+    n, _, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    for k in range(1, n):
+        x, y, w, h, area = (int(v) for v in stats[k])
+        if area < 4 * scale * scale or w > 16 * scale or h < 3 * scale:
+            continue  # poussière, traits du cadre
+        if y == 0 or y + h >= ink.shape[0]:
+            return True
+    return False
+
+
+def cut_text_hint(name: str, region) -> Optional[str]:
+    """Conseil si le texte de la zone calibrée touche son bord (capture de l'écran, ~1 ms)."""
+    if name not in CUT_CHECK_ZONES or not region:
+        return None
+    try:
+        cut = text_touches_edge(grab_screen(tuple(region)))
+    except Exception:
+        return None
+    if cut:
+        return ("le texte touche le bord haut ou bas de la zone (chiffre coupé ?) : recalibre en "
+                "laissant 3-4 px de marge au-dessus et en dessous")
+    return None
+
+
 def rect_from_points(p1: Point, p2: Point) -> Region:
     x1, x2 = sorted((p1[0], p2[0]))
     y1, y2 = sorted((p1[1], p2[1]))
