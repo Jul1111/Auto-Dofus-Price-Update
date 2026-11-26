@@ -118,6 +118,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("[Erreur]", e)
         return 2
     engine = core.PriceEngine(cfg, debug_dir=debug_dir)
+    engine.progress = lambda r: print(f"   [{r.level.upper():5}] {r.message}")   # Ctrl+F3 : chaque ligne
 
     err = core.setup_tesseract(cfg)
     if err:

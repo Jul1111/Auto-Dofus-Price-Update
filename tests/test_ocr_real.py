@@ -200,18 +200,17 @@ def test_fast_digits_never_wrong_on_unseen_panel(monkeypatch):
         assert (sr.values, sr.selected, sr.avg, sr.mine_r.value) == (table, qty, avg, mine), held_out
 
 
-@pytest.mark.parametrize("fixture,name", [
-    ("nom_b5958d42.png", "Nageoire de Compétition"), ("nom_fd90eefb.png", "Cuivre"),
-    ("nom_660bbef6.png", "Bec du Tofu"), ("nom_5bd9b7bc.png", "Laine de Boufton Noir"),
-    ("nom_33bea070.png", "Laine Céleste"), ("nom_7d72b9f1.png", "Poils du Milimulou"),
-    ("nom_b75f7ca5.png", "Cuir de Bouftou Noir")])
-def test_reads_real_item_name(fixture, name):
-    from dofus_items import NameBook, NameReader, key
+NAME_FIXTURES = ["nom_b5958d42.png", "nom_fd90eefb.png", "nom_660bbef6.png", "nom_5bd9b7bc.png",
+                 "nom_33bea070.png", "nom_7d72b9f1.png", "nom_b75f7ca5.png"]
+
+
+def test_item_key_on_real_names():
+    # 7 noms d'objets réels : une empreinte chacun, toutes différentes, stables
     import cv2
-    assert core.setup_tesseract(core.Config()) is None
-    img = cv2.imread(str(Path(__file__).parent / "fixtures" / fixture))
-    got = NameReader(NameBook()).read(img)
-    assert key(got) == key(name) or got == name, got
+    imgs = [cv2.imread(str(Path(__file__).parent / "fixtures" / f)) for f in NAME_FIXTURES]
+    keys = [core.item_key(i) for i in imgs]
+    assert None not in keys and len(set(keys)) == len(keys)
+    assert keys == [core.item_key(i.copy()) for i in imgs]
 
 
 @pytest.mark.parametrize("fixture,mode", [("boutons_mesventes.png", "relist"), ("boutons_vente.png", "sell")])

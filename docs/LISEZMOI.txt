@@ -2,7 +2,6 @@ Captures utilisées par README.md (section « Démonstration ») :
 
   interface.png        fenêtre principale de l'outil
   calibrage.png        zones calibrées dans l'Hôtel de vente
-  tableau-de-bord.png  onglet « Tableau de bord » (statistiques de ventes)
   assistant.png        onglet Calibration (assistant)
 
 Pour remplacer une capture, garder le même nom de fichier : README.md n'a pas à changer.
