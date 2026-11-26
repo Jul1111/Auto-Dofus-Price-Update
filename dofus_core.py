@@ -300,6 +300,7 @@ class Config:
     relist_delay: float = 0.5         # s après un clic sur une ligne / une modification
     relist_confirm_enter: bool = True # « Modifier » : Entrée si une fenêtre de confirmation reste ouverte
     relist_summary: bool = True       # Ctrl+F3 : fenêtre de résumé (prix modifiés, lignes douteuses)
+    auto_recalibrate: bool = True     # repère perdu (taille de l'HDV changée) : calibration automatique
 
     # Saisie
     auto_paste: bool = False          # coller automatiquement (sinon copie seule)
@@ -1199,9 +1200,52 @@ def _drop_caret(th: np.ndarray) -> np.ndarray:
     return out
 
 
+MINE_SURE = 90   # confiance (%) sous laquelle ton prix est relu autrement (niveaux de gris)
+
+
+def field_gray_image(img_bgr: np.ndarray, scale: int = 4) -> Optional[np.ndarray]:
+    """Champ « Prix du lot » en NIVEAUX DE GRIS (texte foncé sur fond clair), sans
+    noir et blanc. Quand le jeu est mis à l'échelle de l'écran (plein écran à une autre
+    résolution), le texte est adouci : le seuillage soude ou coupe les chiffres
+    (« 1 989 » lu « 1909 »), Tesseract lit mieux l'image grise. Curseur de saisie effacé."""
+    import cv2
+    img = _find_field(img_bgr)
+    if img is None or img.size == 0:
+        return None
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    up = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    inv = 255 - cv2.normalize(up, None, 0, 255, cv2.NORM_MINMAX)
+    _, th = cv2.threshold(inv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    caret = (_drop_caret(th) != th).any(axis=0)             # colonnes du curseur
+    if caret.any():
+        inv = inv.copy()
+        inv[:, caret] = 255
+    return cv2.copyMakeBorder(inv, BORDER, BORDER, BORDER, BORDER, cv2.BORDER_CONSTANT, value=255)
+
+
+def read_mine_gray(cfg: Config) -> Reading:
+    """2e avis sur ton prix : le champ lu en niveaux de gris (voir field_gray_image)."""
+    import pytesseract
+    for region in mine_regions(cfg):
+        img = field_gray_image(grab_screen(region))
+        if img is not None:
+            data = pytesseract.image_to_data(img, config=OCR_CONFIG, output_type=pytesseract.Output.DICT)
+            return parse_number(data, (0, img.shape[0]))
+    return Reading(None, -1.0, "")
+
+
+def surer(a: Optional[Reading], b: Optional[Reading]) -> Reading:
+    """La lecture la plus sûre des deux (une valeur vaut mieux que rien)."""
+    cands = [r for r in (a, b) if r is not None]
+    if not cands:
+        return Reading(None, -1.0, "")
+    return max(cands, key=lambda r: (r.value is not None, r.confidence))
+
+
 def read_mine(cfg: Config, tesseract_only: bool = False) -> Reading:
     """Ton prix actuel (champ « Prix du lot » de la vente sélectionnée).
-    tesseract_only : sans la lecture rapide (2e avis quand la relecture ne colle pas)."""
+    tesseract_only : sans la lecture rapide (2e avis quand la relecture ne colle pas).
+    Lecture peu sûre -> relue en niveaux de gris, la plus sûre des deux est gardée."""
     import pytesseract
     img = mine_field_image(cfg)
     if img is None:
@@ -1213,7 +1257,10 @@ def read_mine(cfg: Config, tesseract_only: bool = False) -> Reading:
             if r.value is not None:
                 return r
     data = pytesseract.image_to_data(img, config=OCR_CONFIG, output_type=pytesseract.Output.DICT)
-    return parse_number(data, (0, img.shape[0]))
+    r = parse_number(data, (0, img.shape[0]))
+    if r.value is None or r.confidence < MINE_SURE:
+        r = surer(r, read_mine_gray(cfg))
+    return r
 
 
 def parse_counter(text: str) -> Optional[Tuple[int, int]]:
@@ -1827,6 +1874,9 @@ class RowChange:
         return f"ligne {self.row} · {lot} : NON modifiée ({self.note})"
 
 
+AUTO_RECAL_RETRY = 30.0   # s entre deux recalibrations automatiques ratées
+
+
 class PriceEngine:
     """Utilisé par la GUI et la CLI. Thread-safe (un seul traitement à la fois)."""
 
@@ -1840,6 +1890,7 @@ class PriceEngine:
         self.my_prices = MyPrices(MY_PRICES_PATH)   # tes ventes : pas d'undercut contre toi-même
         self.progress = None   # Ctrl+F3 : appelé avec le Result de chaque ligne (journal en direct)
         self.last_anchor_msg = ""  # dernier message du repère HDV (lu puis vidé par l'interface)
+        self._autocal_failed = 0.0  # heure du dernier échec de recalibration automatique
 
     # ---- calibration ----
     def calibrate_rect(self, name: str, pos: Optional[Point] = None) -> Tuple[str, object]:
@@ -1878,6 +1929,8 @@ class PriceEngine:
             self.last_anchor_msg = f"Repère HDV : erreur ({e})"
             return None
         if found is None:
+            if self._auto_recalibrate():
+                return None
             self.last_anchor_msg = "Repère HDV introuvable : HDV fermé ou caché ? Zones inchangées."
             return None
         dx, dy = found[0] - x, found[1] - y
@@ -1891,15 +1944,37 @@ class PriceEngine:
     def calibrate_auto(self):
         """Trouve l'HDV à l'écran et place TOUTES les zones du profil actif (dofus_autocal).
         Ne change rien si l'HDV n'est pas reconnu. Retourne le résultat (AutoCal)."""
-        import dofus_autocal
         with self._lock:
-            sx, sy, sw, sh = screen_bounds()
-            screen = grab_screen((sx, sy, sw, sh))
-            res = dofus_autocal.locate(screen, (sx, sy))
-            if res.ok:
-                dofus_autocal.apply(self.cfg, res, screen, (sx, sy))
-                self.cfg.save()
-            return res
+            return self._autocal_now()
+
+    def _autocal_now(self):
+        import dofus_autocal
+        sx, sy, sw, sh = screen_bounds()
+        screen = grab_screen((sx, sy, sw, sh))
+        res = dofus_autocal.locate(screen, (sx, sy))
+        if res.ok:
+            dofus_autocal.apply(self.cfg, res, screen, (sx, sy))
+            self.cfg.save()
+            self._autocal_failed = 0.0
+        return res
+
+    def _auto_recalibrate(self) -> bool:
+        """Repère introuvable : l'HDV a souvent changé de TAILLE (échelle de l'interface,
+        résolution), ce que le repère ne suit pas. On refait la calibration automatique
+        (~1 s). Échec (HDV fermé, autre langue…) : rien ne change, nouvel essai dans 30 s
+        au plus tôt pour ne pas ralentir chaque raccourci."""
+        if not self.cfg.auto_recalibrate or time.time() - self._autocal_failed < AUTO_RECAL_RETRY:
+            return False
+        try:
+            res = self._autocal_now()
+        except Exception:
+            res = None
+        if res is None or not res.ok:
+            self._autocal_failed = time.time()
+            return False
+        self.last_anchor_msg = (f"Taille de l'HDV changée : calibration automatique refaite "
+                                f"(taille ×{res.scale:.2f}), zones recalées.")
+        return True
 
     def calibrate_point(self, name: str, pos: Optional[Point] = None) -> Point:
         """name = "price_field" | "sell_button" | "modify_button"."""
@@ -1995,10 +2070,8 @@ class PriceEngine:
         key = item_key(name_img)
         self._row_ctx["img"] = name_img
         mine = sr.mine_r
-        if mine is None or mine.value is None or mine.confidence < cfg.min_confidence:
-            alone = read_mine(cfg)  # 2e lecture seule, plus grande : garder la plus sûre
-            if mine is None or alone.confidence > mine.confidence:
-                mine = alone
+        if mine is None or mine.value is None or mine.confidence < MINE_SURE:
+            mine = surer(mine, read_mine(cfg))  # 2e lecture seule, plus grande : la plus sûre
         lot = sr.selected
         if lot is None:
             return Result(None, "error", f"[{tag}] Quantité illisible (lu : {sr.selected_raw!r}).", sr,

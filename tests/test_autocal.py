@@ -20,8 +20,8 @@ CAPTURES = {
     "hdv_echelles/2560x1440_80.png": (SALE[0], (106, 210), 1989, 2092),
     "hdv_echelles/2560x1440_100.png": (SALE[0], (106, 210), 1989, 2092),
     "hdv_echelles/1920x1080_90.png": SALE,
-    # petit texte adouci : « 1 989 » du champ lu « 1909 » (limite de l'OCR, pas des zones)
-    "hdv_echelles/1920x1200_90.png": (SALE[0], (108, 210), None, 2092),
+    # texte adouci (jeu mis à l'échelle) : en noir et blanc, « 1 989 » était lu « 1909 »
+    "hdv_echelles/1920x1200_90.png": (SALE[0], (108, 210), 1989, 2092),
     "hdv_mesventes.png": ({1: 760, 10: 6999, 100: 83199, 1000: 844000}, (51, 104), 774, 1189),
 }
 SCALES = {"2560x1440_90": 1.0, "2560x1440_80": 0.876, "2560x1440_100": 1.124, "1920x1080_90": 1.0,
@@ -95,10 +95,74 @@ def test_found_zones_read_correctly(located, monkeypatch, name):
     assert sr.values == values
     assert sr.selected == 1
     assert sr.avg == avg
-    if mine is not None:
-        assert sr.mine_r.value == mine
+    # ton prix, comme F3 : lecture groupée, relue seule (et en gris) si peu sûre
+    got = sr.mine_r
+    if got is None or got.value is None or got.confidence < core.MINE_SURE:
+        got = core.surer(got, core.read_mine(cfg))
+    assert got.value == mine
+    assert core.read_mine(cfg).value == mine
     assert core.read_counter(cfg) == counter
     assert core.detect_panel(cfg) == "relist"
     assert core.item_key(core.grab_name(cfg)) is not None
     for zone in core.CUT_CHECK_ZONES:
         assert core.cut_text_hint(zone, getattr(cfg, f"{zone}_region")) is None, zone
+
+
+# --- Repère perdu (taille de l'HDV changée) : calibration automatique refaite toute seule
+def _engine_on(monkeypatch, screen, **kw):
+    monkeypatch.setattr(core, "grab_screen", lambda r: screen[r[1]:r[1] + r[3], r[0]:r[0] + r[2]].copy())
+    monkeypatch.setattr(core, "screen_bounds", lambda: (0, 0, screen.shape[1], screen.shape[0]))
+    cfg = core.Config(**kw)
+    cfg.save = lambda *a, **k: None
+    return core.PriceEngine(cfg)
+
+
+def test_lost_anchor_triggers_auto_recalibration(located, monkeypatch):
+    # calibré à 90 %, puis l'interface passe à 80 % : le repère n'est plus retrouvé
+    big, res90 = located["hdv_echelles/2560x1440_90.png"]
+    small, res80 = located["hdv_echelles/2560x1440_80.png"]
+    eng = _engine_on(monkeypatch, big)
+    ac.apply(eng.cfg, res90, big)
+    eng = _engine_on(monkeypatch, small, **{f: eng.cfg.__dict__[f] for f in core.PROFILE_FIELDS})
+    assert eng._reanchor() is None
+    assert eng.cfg.table_region == res80.fields["table_region"]
+    assert "calibration automatique refaite" in eng.last_anchor_msg
+    assert eng._reanchor() is None and eng.cfg.table_region == res80.fields["table_region"]  # stable
+
+
+def test_auto_recalibration_off_or_failing_changes_nothing(located, monkeypatch):
+    big, res90 = located["hdv_echelles/2560x1440_90.png"]
+    eng = _engine_on(monkeypatch, big)
+    ac.apply(eng.cfg, res90, big)
+    fields = {f: eng.cfg.__dict__[f] for f in core.PROFILE_FIELDS}
+    empty = (np.random.default_rng(3).random((1440, 2560, 3)) * 60).astype(np.uint8)   # HDV fermé
+    calls = []
+    real = ac.locate
+    monkeypatch.setattr(ac, "locate", lambda *a, **k: calls.append(1) or real(*a, **k))
+    eng = _engine_on(monkeypatch, empty, auto_recalibrate=False, **fields)
+    eng._reanchor()
+    assert not calls and "introuvable" in eng.last_anchor_msg
+    eng = _engine_on(monkeypatch, empty, **fields)
+    eng._reanchor()
+    eng._reanchor()                       # 2e essai dans les 30 s : pas de nouvelle recherche
+    assert len(calls) == 1 and "introuvable" in eng.last_anchor_msg
+    assert eng.cfg.table_region == fields["table_region"]
+
+
+# --- Ton prix : 2e avis en niveaux de gris
+def test_gray_reading_of_field_with_caret(monkeypatch):
+    pytest.importorskip("pytesseract")
+    if core.setup_tesseract(core.Config()) is not None:
+        pytest.skip("tesseract absent")
+    img = cv2.imread(str(FX / "champ_curseur.png"))
+    monkeypatch.setattr(core, "grab_screen", lambda r: img[r[1]:r[1] + r[3], r[0]:r[0] + r[2]].copy())
+    h, w = img.shape[:2]
+    assert core.read_mine_gray(core.Config(mine_region=[0, 0, w, h])).value == 496
+
+
+def test_surer_keeps_the_surest_reading():
+    R = core.Reading
+    assert core.surer(R(1909, 62.0, "1909"), R(1989, 88.0, "1989")).value == 1989
+    assert core.surer(R(None, -1.0, ""), R(774, 50.0, "774")).value == 774
+    assert core.surer(R(774, 96.0, "774"), R(None, -1.0, "")).value == 774
+    assert core.surer(None, None).value is None
