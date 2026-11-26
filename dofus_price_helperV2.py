@@ -131,6 +131,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     def report(res: core.Result):
         print(f"[{res.level.upper():5}] {res.message}")
+        for c in res.changes:          # Ctrl+F3 : résumé, une ligne par prix modifié / à revoir
+            print("   " + c.text())
         core.beep(res.level, cfg)
 
     # Les actions tournent dans un thread à part : exécutées dans le thread du module

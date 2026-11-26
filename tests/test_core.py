@@ -1265,3 +1265,30 @@ def test_file_log_and_tee(tmp_path, monkeypatch):
         for h in list(lg.handlers):
             h.close()
             lg.removeHandler(h)
+
+
+# --- Résumé de fin de Ctrl+F3
+def test_relist_all_summary(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step = True, [100, 100], 20
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(eng, "_page_rows", lambda shift, base: [(100, 0), (120, 1)])
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: (0, None))
+    monkeypatch.setattr(core, "_same_row", lambda a, b: False)
+    monkeypatch.setattr(core, "grab_name", lambda c: _name(4))
+    st["screens"] = [scr({1: 760}),                 # ligne 1 : concurrent à 760, toi à 774 -> 759
+                     scr({1: 759}),                 # ligne 1 relue après modification : c'est toi
+                     scr({1: 800})]                 # ligne 2 : déjà le moins cher
+    st["mine"] = [774, None, 759, 800]
+    res = eng.relist_all()
+    assert [(c.row, c.lot, c.old, c.new, c.modified) for c in res.changes] == [(1, 1, 774, 759, True)]
+    assert res.changes[0].img is not None              # image du nom gardée pour la fenêtre
+    assert res.changes[0].text() == "ligne 1 · lot 1 : 774 → 759 (-1.9%)"
+
+
+def test_row_change_text_not_modified():
+    c = core.RowChange(7, 100, 5200, 4999, False, "Suspect")
+    assert c.text() == "ligne 7 · lot 100 : NON modifiée (Suspect)"
+    big = core.RowChange(2, 1000, 1520000, 1499999, True)
+    assert big.text() == "ligne 2 · lot 1000 : 1 520 000 → 1 499 999 (-1.3%)"

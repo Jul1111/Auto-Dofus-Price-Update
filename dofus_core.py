@@ -298,6 +298,7 @@ class Config:
     relist_max: int = 400             # garde-fou : lignes lues max par appui (boucle infinie impossible)
     relist_delay: float = 0.5         # s après un clic sur une ligne / une modification
     relist_confirm_enter: bool = True # « Modifier » : Entrée si une fenêtre de confirmation reste ouverte
+    relist_summary: bool = True       # Ctrl+F3 : fenêtre de résumé (prix modifiés, lignes douteuses)
 
     # Saisie
     auto_paste: bool = False          # coller automatiquement (sinon copie seule)
@@ -1717,6 +1718,28 @@ class Result:
     new_price: Optional[int] = None
     hint: str = ""          # texte court pour la popup
     floored_top: Optional[int] = None  # prix concurrent ignoré car sous le plancher
+    old_price: Optional[int] = None    # mes ventes : ton prix avant la mise à jour
+    item_img: Optional[np.ndarray] = None   # image du nom de l'objet (résumé Ctrl+F3)
+    changes: List["RowChange"] = field(default_factory=list)   # Ctrl+F3 : résumé ligne par ligne
+
+
+@dataclass
+class RowChange:
+    """Une ligne du résumé de Ctrl+F3 : prix modifié, ou ligne laissée telle quelle (douteuse)."""
+    row: int                     # numéro de la ligne dans la liste (1 = la première)
+    lot: Optional[int]
+    old: Optional[int]           # ton prix avant
+    new: Optional[int]           # nouveau prix (ou prix proposé si non modifié)
+    modified: bool
+    note: str = ""               # pourquoi la ligne n'a pas été modifiée
+    img: Optional[np.ndarray] = None   # image du nom de l'objet
+
+    def text(self) -> str:
+        lot = f"lot {self.lot}" if self.lot else "lot ?"
+        if self.modified and self.old and self.new:
+            return (f"ligne {self.row} · {lot} : {self.old:,} → {self.new:,} "
+                    f"({(self.new - self.old) / self.old:+.1%})").replace(",", " ")
+        return f"ligne {self.row} · {lot} : NON modifiée ({self.note})"
 
 
 class PriceEngine:
@@ -1844,7 +1867,15 @@ class PriceEngine:
             self._lock.release()
 
     def _relist(self, auto: bool = False) -> Result:
-        """auto=True (boucle) : jamais de forçage, une lecture suspecte arrête la boucle."""
+        """auto=True (boucle) : jamais de forçage, une lecture suspecte arrête la boucle.
+        Le résultat porte ton ancien prix et l'image du nom de l'objet (résumé Ctrl+F3)."""
+        self._row_ctx = {}
+        res = self._relist_row(auto)
+        res.old_price = self._row_ctx.get("old")
+        res.item_img = self._row_ctx.get("img")
+        return res
+
+    def _relist_row(self, auto: bool) -> Result:
         cfg = self.cfg
         tag = "MAJ"
         if not cfg.table_region or not cfg.qty_region:
@@ -1862,7 +1893,9 @@ class PriceEngine:
                 break
             if attempt < RELIST_READ_TRIES - 1:
                 time.sleep(0.12)
-        key = item_key(grab_name(cfg))  # avant « Modifier » : le panneau se vide ensuite
+        name_img = grab_name(cfg)  # avant « Modifier » : le panneau se vide ensuite
+        key = item_key(name_img)
+        self._row_ctx["img"] = name_img
         mine = sr.mine_r
         if mine is None or mine.value is None or mine.confidence < cfg.min_confidence:
             alone = read_mine(cfg)  # 2e lecture seule, plus grande : garder la plus sûre
@@ -1880,6 +1913,7 @@ class PriceEngine:
             return Result(lot, "error", f"[{tag}] Lot {lot} : aucun prix lu dans le tableau.", sr,
                           hint="Aucun prix lu")
         head = f"[{tag}] Lot {lot} | ton prix {mine.value} | moins cher {top.value}"
+        self._row_ctx["old"] = mine.value
         if key is not None and mine.confidence >= cfg.min_confidence:
             self.my_prices.add(key, lot, mine.value)     # une de tes ventes est à ce prix
         if top.value >= mine.value:
@@ -2081,6 +2115,7 @@ class PriceEngine:
         skipped = 0
         mine_box = (mine_regions(cfg) or [None])[0]
         stats0 = dict(ENGINE_STATS)
+        changes: List[RowChange] = []   # résumé : prix modifiés et lignes douteuses
         stop = "fin de la liste"
         try:
             while True:
@@ -2125,6 +2160,8 @@ class PriceEngine:
                                 raise StopIteration
                             # ligne douteuse : on n'y touche pas et on passe à la suivante
                             bad.append(f"ligne {g + 1} : {res.message}")
+                            changes.append(RowChange(g + 1, res.lot, res.old_price, res.new_price, False,
+                                                     res.hint or res.level, res.item_img))
                             fails += 1
                             seen = max(seen, g)
                             if fails >= 3:
@@ -2136,6 +2173,8 @@ class PriceEngine:
                             # La ligne modifiée change de place : la liste se décale. On reprend
                             # À CETTE POSITION (relue), lignes repérées à nouveau à l'écran.
                             changed += 1
+                            changes.append(RowChange(g + 1, res.lot, res.old_price, res.new_price, True,
+                                                     img=res.item_img))
                             seen = g - 1
                             restart = True
                             break
@@ -2178,7 +2217,7 @@ class PriceEngine:
         return Result(None, level, f"[MAJ TOUT] {done + skipped} lignes vues ({pages + 1} pages, "
                       f"{skipped} identiques sautées{start_note}) : "
                       f"{changed} modifiées, {same} déjà au bon prix | arrêt : {stop}{detail}",
-                      hint=f"{changed} modifiées")
+                      hint=f"{changed} modifiées", changes=changes)
 
     # ---- actions ----
     def sell(self, optimize: bool = False) -> Result:

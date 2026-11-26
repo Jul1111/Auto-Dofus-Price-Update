@@ -44,6 +44,7 @@
   "RELIST_MAX": 400,
   "RELIST_DELAY": 0.5,
   "RELIST_CONFIRM_ENTER": true,
+  "RELIST_SUMMARY": true,
   "AUTO_PASTE": false,
   "CLICK_FIELD": false,
   "INPUT_METHOD": "paste",

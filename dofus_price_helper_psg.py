@@ -176,6 +176,7 @@ class App(ctk.CTk):
             "toast": ctk.BooleanVar(value=c.toast),
             "relist_auto": ctk.BooleanVar(value=c.relist_auto),
             "relist_confirm_enter": ctk.BooleanVar(value=c.relist_confirm_enter),
+            "relist_summary": ctk.BooleanVar(value=c.relist_summary),
             "fast_digits": ctk.BooleanVar(value=c.fast_digits),
             "banner": ctk.BooleanVar(value=c.banner),
             "verify_before_enter": ctk.BooleanVar(value=c.verify_before_enter),
@@ -441,6 +442,8 @@ class App(ctk.CTk):
                       progress_color=ORANGE).pack(anchor="w", pady=2)
         ctk.CTkSwitch(b, text="Valider la fenêtre de confirmation avec Entrée",
                       variable=self.v["relist_confirm_enter"]).pack(anchor="w", pady=2)
+        ctk.CTkSwitch(b, text="Résumé à la fin du parcours (prix modifiés, lignes à revoir)",
+                      variable=self.v["relist_summary"]).pack(anchor="w", pady=2)
         r = self._row(b)
         ctk.CTkLabel(r, text="Défilement", width=120, anchor="w").pack(side="left")
         ctk.CTkSlider(r, from_=0.2, to=1.0, number_of_steps=8, variable=self.v["relist_scroll_page"],
@@ -656,7 +659,7 @@ class App(ctk.CTk):
         c.floor_mode = {lbl: k for k, lbl in FLOOR_LABELS.items()}.get(v["floor_mode"].get(), "floor")
         was_auto = c.relist_auto
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
-                     "relist_auto", "relist_confirm_enter", "fast_digits",
+                     "relist_auto", "relist_confirm_enter", "relist_summary", "fast_digits",
                      "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates"):
             setattr(c, name, bool(v[name].get()))
         self._apply_topmost()
@@ -843,6 +846,8 @@ class App(ctk.CTk):
         tag = {"warn": "WARN", "error": "ERROR"}.get(res.level) or (
             "OPT" if res.message.startswith("[OPT]") else "OK")
         self._log(res.message, tag)
+        if res.message.startswith("[MAJ TOUT]"):
+            self._relist_summary(res)
         core.beep(res.level, self.cfg)
         if self.cfg.toast:
             head = f"Lot {res.lot} → {fmt(res.new_price)}" if res.new_price is not None else "Pas de prix"
@@ -852,6 +857,66 @@ class App(ctk.CTk):
                 self._banner(head, res.hint or res.level, LEVEL_COLORS[res.level])
             else:
                 self._toast(head, res.hint or res.level, LEVEL_COLORS[res.level])
+
+    # ---- résumé de fin de Ctrl+F3
+    def _relist_summary(self, res: core.Result):
+        """Journal : une ligne par prix modifié / ligne à revoir. Fenêtre : la même chose avec
+        l'image du nom de chaque objet (le nom n'est pas lu en texte)."""
+        mod = [c for c in res.changes if c.modified]
+        bad = [c for c in res.changes if not c.modified]
+        for c in res.changes:
+            self._log("   " + c.text(), "OK" if c.modified else "WARN")
+        if not self.cfg.relist_summary or not res.changes:
+            return
+        w = getattr(self, "_summary_win", None)
+        if w is not None and w.winfo_exists():
+            w.destroy()
+        w = ctk.CTkToplevel(self)
+        self._summary_win = w
+        w.title("Résumé de la mise à jour (Ctrl+F3)")
+        w.geometry("560x520")
+        w.attributes("-topmost", True)
+        ctk.CTkLabel(w, text=f"{len(mod)} prix modifié{'s' if len(mod) > 1 else ''}"
+                             + (f"  ·  {len(bad)} ligne{'s' if len(bad) > 1 else ''} à revoir avec "
+                                f"{self.cfg.hotkeys['relist'].upper()}" if bad else ""),
+                     font=ctk.CTkFont(size=15, weight="bold")).pack(anchor="w", padx=14, pady=(12, 4))
+        body = ctk.CTkScrollableFrame(w, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=8, pady=4)
+        self._summary_imgs = []                     # garder les images (sinon effacées par Tk)
+        for c in bad + mod:                          # à revoir en premier
+            r = ctk.CTkFrame(body, fg_color=CARD)
+            r.pack(fill="x", pady=2)
+            img = self._name_thumb(c.img)
+            if img is not None:
+                self._summary_imgs.append(img)
+                ctk.CTkLabel(r, text="", image=img).pack(side="left", padx=6, pady=4)
+            lot = f"lot {c.lot}" if c.lot else "lot ?"
+            if c.modified:
+                txt = f"{lot}   {fmt(c.old)} → {fmt(c.new)}"
+                if c.old and c.new:
+                    txt += f"   ({(c.new - c.old) / c.old:+.1%})"
+                color = "#a6e22e"
+            else:
+                txt = f"{lot}   NON modifiée : {c.note}"
+                color = "#f1c40f"
+            ctk.CTkLabel(r, text=txt, text_color=color, anchor="w", justify="left",
+                         wraplength=300).pack(side="left", padx=6)
+            ctk.CTkLabel(r, text=f"ligne {c.row}", text_color=MUTED).pack(side="right", padx=8)
+        ctk.CTkButton(w, text="Fermer", width=100, command=w.destroy).pack(pady=(4, 12))
+
+    @staticmethod
+    def _name_thumb(img):
+        """Image du nom (BGR) -> vignette pour l'interface, ou None."""
+        if img is None or getattr(img, "size", 0) == 0:
+            return None
+        try:
+            from PIL import Image
+            pil = Image.fromarray(img[:, :, ::-1].copy())
+            h = 36
+            w = max(1, int(pil.width * h / pil.height))
+            return ctk.CTkImage(light_image=pil, dark_image=pil, size=(w, h))
+        except Exception:
+            return None
 
     def _count_stats(self, res: core.Result):
         m = res.message
