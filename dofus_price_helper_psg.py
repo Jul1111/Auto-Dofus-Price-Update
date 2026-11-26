@@ -2789,6 +2789,8 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
+    if not dofus_update.single_instance():   # déjà ouvert : sa fenêtre est ramenée devant
+        raise SystemExit(0)
     try:
         core.setup_file_log()
     except OSError:

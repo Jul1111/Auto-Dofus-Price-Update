@@ -118,6 +118,40 @@ def test_spawned_script_really_runs(tmp_path):
     assert out.exists()
 
 
+@pytest.mark.skipif(sys.platform != "win32" or shutil.which("powershell") is None, reason="Windows seulement")
+def test_installer_waits_while_internal_is_busy(tmp_path):
+    # Fichier de _internal encore ouvert quelques secondes (antivirus, 2e fenêtre qui se ferme) :
+    # avant, « accès refusé » et échec immédiat.
+    app = tmp_path / "app" / "DofusPriceHelper"
+    work = tmp_path / "work"
+    new = work / "nouveau" / "DofusPriceHelper"
+    for d, ver in ((app, "old"), (new, "new")):
+        (d / "_internal").mkdir(parents=True)
+        (d / "DofusPriceHelper.exe").write_text(ver)
+        (d / "_internal" / f"{ver}.dll").write_text(ver)
+    locker = subprocess.Popen([sys.executable, "-c",
+                               "import sys, time; f = open(sys.argv[1]); time.sleep(3)",
+                               str(app / "_internal" / "old.dll")])
+    import time
+    time.sleep(0.5)
+    log = tmp_path / "maj.log"
+    script = tmp_path / "installer.ps1"
+    script.write_text(du.installer_script(new, app, 999999, work, log, relaunch=False), encoding="utf-8-sig")
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                   check=True, capture_output=True, timeout=120)
+    locker.wait()
+    assert (app / "DofusPriceHelper.exe").read_text() == "new"
+    assert "installée" in log.read_text(encoding="utf-8-sig")
+
+
+def test_single_instance():
+    name = rf"Local\DofusPriceHelper-test-{__import__('os').getpid()}"
+    assert du.single_instance(name)
+    keep = du._instance_mutex
+    assert not du.single_instance(name)          # déjà ouvert (aucune fenêtre à ramener ici)
+    du._instance_mutex = keep
+
+
 # --- Rapport de problème
 def test_report_contains_what_helps_and_no_sales(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LOG_DIR", tmp_path / "journaux")
