@@ -33,6 +33,7 @@ import tkinter as tk
 from typing import Optional
 
 import dofus_core as core  # active la gestion DPI avant Tk
+import dofus_update  # noqa: E402
 
 import customtkinter as ctk
 
@@ -334,7 +335,7 @@ class App(ctk.CTk):
             self._log(err, "ERROR")
         if self.cfg.check_updates:
             threading.Thread(target=lambda: self.ui_events.put(
-                ("update", core.newer_release(core.app_version()))), daemon=True).start()
+                ("update", dofus_update.find_update(core.app_version()))), daemon=True).start()
         if core.TESSERACT_USED:
             self._log(f"[OCR] {core.TESSERACT_USED}. Réglages : {core.BASE_DIR}", "INFO")
         self._register_hotkeys()
@@ -995,6 +996,14 @@ class App(ctk.CTk):
                       command=self._open_log_dir).pack(side="left")
         ctk.CTkButton(r, text="Page des versions", width=150, fg_color=BTN2, hover_color=BTN2_HOVER,
                       command=lambda: self._open_url(core.RELEASES_URL)).pack(side="left", padx=8)
+        r = self._row(b)
+        self._tip(ctk.CTkButton(r, text="📦 Rapport de problème", width=200,
+                                command=lambda: self._countdown("rapport", self._make_report)),
+                  "Crée un zip à envoyer quand quelque chose ne marche pas : journal, réglages, captures "
+                  "de diagnostic et une image de l'HDV (affiche-le pendant le compte à rebours). Rien "
+                  "n'est envoyé tout seul ; ton historique de ventes n'est pas inclus.").pack(side="left")
+        ctk.CTkButton(r, text="Signaler sur GitHub", width=150, fg_color=BTN2, hover_color=BTN2_HOVER,
+                      command=lambda: self._open_url(dofus_update.ISSUES_URL)).pack(side="left", padx=8)
 
     def _set_ui_scale(self, label: str):
         s = UI_SCALES.get(label, 1.0)
@@ -1397,6 +1406,11 @@ class App(ctk.CTk):
                     self.ui_events.put(("calib_rect", (arg, self.engine.calibrate_rect(arg))))
                 elif name == "calib_point":
                     self.ui_events.put(("calib_point", (arg, self.engine.calibrate_point(arg))))
+                elif name == "report":
+                    try:
+                        self.ui_events.put(("report", dofus_update.make_report(self.cfg)))
+                    except Exception as e:
+                        self.ui_events.put(("report", e))
                 elif name == "calib_auto":
                     res = self.engine.calibrate_auto()
                     self.ui_events.put(("calib_auto", (res, self._wizard_checks() if res.ok else [])))
@@ -1471,6 +1485,12 @@ class App(ctk.CTk):
                     self._wiz_report_show(arg)
                 elif name == "update":
                     self._on_update(arg)
+                elif name == "update_progress":
+                    self.update_btn.configure(text=arg)
+                elif name == "update_ready":
+                    self._on_update_ready(*arg)
+                elif name == "report":
+                    self._on_report(arg)
                 elif name == "hotkey":
                     self._on_hotkey_captured(*arg)
         except queue.Empty:
@@ -1897,8 +1917,11 @@ class App(ctk.CTk):
             self._refresh_status()
             action()
             return
-        todo = "affiche l'HDV !" if label == "automatique" else "place la souris !"
-        self.status_var.set(f"Calibration {label} dans {n}s… {todo}")
+        if label == "rapport":
+            self.status_var.set(f"Rapport dans {n}s… affiche l'HDV (il sera photographié) !")
+        else:
+            todo = "affiche l'HDV !" if label == "automatique" else "place la souris !"
+            self.status_var.set(f"Calibration {label} dans {n}s… {todo}")
         self.after(1000, lambda: self._countdown(label, action, n - 1))
 
     def _calib_rect_ui(self, name: str, label: str):
@@ -2196,13 +2219,78 @@ class App(ctk.CTk):
         self._cmp_pause.configure(text="▶ Reprendre" if self.engine.paused else "⏸ Pause")
 
     # ---- mises à jour / journal
-    def _on_update(self, found):
-        if not found:
+    def _on_update(self, up):
+        if not up:
             return
-        tag, url = found
-        self._log(f"[Version] {tag} est disponible (tu as {core.app_version()}) : {url}", "OK")
-        self.update_btn.configure(text=f"⬆ {tag} disponible", command=lambda: self._open_url(url))
+        self._update = up
+        if up.installable:
+            self._log(f"[Version] {up.tag} est disponible (tu as {core.app_version()}) : clique sur "
+                      f"« ⬆ Installer {up.tag} » en haut (téléchargement, puis redémarrage).", "OK")
+            self.update_btn.configure(text=f"⬆ Installer {up.tag}", command=self._install_update)
+        else:
+            self._log(f"[Version] {up.tag} est disponible (tu as {core.app_version()}) : {up.page_url}", "OK")
+            self.update_btn.configure(text=f"⬆ {up.tag} disponible", command=lambda: self._open_url(up.page_url))
         self.update_btn.pack(side="right", padx=4)
+
+    def _install_update(self):
+        from tkinter import messagebox
+        up = self._update
+        if getattr(self, "_installing", False):
+            return
+        if self.engine._lock.locked():
+            self._log("[Version] Une action est en cours : installe la mise à jour quand elle est finie.", "WARN")
+            return
+        if not messagebox.askyesno(
+                "Mise à jour", f"Installer {up.tag} maintenant ?\n\nL'outil télécharge la nouvelle version "
+                f"({up.size / 1e6:.0f} Mo), se ferme, puis redémarre tout seul (moins d'une minute).\n"
+                "Tes réglages, ta calibration et tes profils sont gardés.", parent=self):
+            return
+        self._installing = True
+        self._log(f"[Version] Téléchargement de {up.tag}…", "INFO")
+
+        def progress(done, total):
+            pct = f" {done * 100 // total} %" if total else ""
+            self.ui_events.put(("update_progress", f"⬇ Téléchargement{pct}"))
+
+        def work():
+            try:
+                self.ui_events.put(("update_ready", (dofus_update.prepare(up, progress), None)))
+            except Exception as e:
+                self.ui_events.put(("update_ready", (None, e)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_ready(self, new_dir, err):
+        up = self._update
+        if err is not None:
+            self._installing = False
+            self._log(f"[Version] Mise à jour impossible : {err}. Télécharge-la à la main sur la page "
+                      "des versions (elle s'ouvre).", "ERROR")
+            self.update_btn.configure(text=f"⬆ {up.tag} disponible", command=lambda: self._open_url(up.page_url))
+            self._open_url(up.page_url)
+            return
+        try:
+            dofus_update.launch_installer(new_dir, dofus_update.work_dir(new_dir))
+        except Exception as e:
+            self._installing = False
+            self._log(f"[Version] Installation impossible : {e}", "ERROR")
+            return
+        self._log(f"[Version] {up.tag} prête : l'outil se ferme et redémarre tout seul.", "OK")
+        self.after(300, self._on_close)
+
+    # ---- rapport de problème
+    def _make_report(self):
+        self._log("[Rapport] Préparation…", "INFO")
+        self.jobs.put(("report", None))
+
+    def _on_report(self, res):
+        if isinstance(res, Exception):
+            self._log(f"[Rapport] Impossible de créer le rapport : {res}", "ERROR")
+            return
+        self._log(f"[Rapport] Créé : {res}. Envoie ce fichier (Discord, GitHub…) avec quelques mots "
+                  "sur le problème. Il contient le journal, les réglages, les captures de diagnostic et "
+                  "une image de l'HDV ; pas ton historique de ventes.", "OK")
+        dofus_update.reveal(res)
 
     def _open_url(self, url: str):
         import webbrowser

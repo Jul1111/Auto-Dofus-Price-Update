@@ -42,7 +42,8 @@ version du jeu que le modèle de l'outil ; sinon, calibration manuelle (section 
 
 Réglages, calibration et historique : %APPDATA%\\Dofus Price Helper
 Ils sont gardés quand tu passes à une nouvelle version (nouveau zip, nouveau dossier).
-Nouvelle version : l'outil le signale au démarrage (bouton vert en haut).
+Nouvelle version : bouton vert « Installer » en haut au démarrage ; un clic la télécharge et
+l'installe (l'outil redémarre, réglages gardés).
 
 Un problème ? Joins le fichier journal à ton message :
 %APPDATA%\\Dofus Price Helper\\journaux\\journal.log

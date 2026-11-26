@@ -16,5 +16,6 @@ dist/
 digit_templates*.npz
 hdv_anchor*.png
 dofus_my_prices.json
+rapports/
 dofus_relist_runs.json
 journaux/
