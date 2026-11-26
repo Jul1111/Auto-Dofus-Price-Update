@@ -33,6 +33,7 @@ Options de la ligne de commande (enregistrées dans la config, comme dans l'inte
   --sous-plancher MODE   concurrent sous le plancher : plancher | garder | arret
   --f1-simple            F1 vend toujours (pas de mise à jour automatique)
   --f1-intelligent       F1 vend OU met à jour selon le panneau ouvert (défaut)
+  --profil NOM           profil de calibration à utiliser (créé dans l'interface, un par HDV)
   --debug                enregistre les images envoyées à l'OCR dans captures/
 """
 from __future__ import annotations
@@ -63,6 +64,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                     help="F1 vend toujours")
     f1.add_argument("--f1-intelligent", dest="smart_f1", action="store_true",
                     help="F1 vend OU met à jour une de tes ventes (défaut)")
+    ap.add_argument("--profil", metavar="NOM", help="profil de calibration à utiliser (un par HDV)")
     ap.add_argument("--debug", action="store_true", help="images OCR dans captures/")
     return ap.parse_args(argv)
 
@@ -80,6 +82,11 @@ def apply_args(cfg: "core.Config", args: argparse.Namespace) -> bool:
         changed = True
     if args.smart_f1 is not None:
         cfg.smart_f1 = args.smart_f1
+        changed = True
+    if getattr(args, "profil", None) and args.profil != cfg.profile:
+        if args.profil not in cfg.profile_names():
+            raise ValueError(f"profil inconnu « {args.profil} » (profils : {', '.join(cfg.profile_names())})")
+        cfg.switch_profile(args.profil)
         changed = True
     return changed
 
@@ -242,6 +249,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"Tableau: {'OK' if cfg.table_region else 'à calibrer'} | "
           f"Quantité: {'OK' if cfg.qty_region else 'à calibrer'} | coller auto : {cfg.auto_paste}")
     print(describe(cfg))
+    print(f"Profil de calibration : {cfg.profile}"
+          + (f" (autres : {', '.join(n for n in cfg.profile_names() if n != cfg.profile)})"
+             if len(cfg.profile_names()) > 1 else ""))
     print(f"Quitter : {hk['quit']}")
     try:
         keyboard.wait(hk["quit"])

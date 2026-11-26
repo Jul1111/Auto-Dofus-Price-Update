@@ -48,3 +48,14 @@ def test_describe_flags_missing_zones():
     out = cli.describe(cfg)
     assert "à calibrer" not in out
     assert "70% du prix moyen" in out
+
+
+def test_profile_option():
+    cfg = core.Config(table_region=[1, 1, 5, 5])
+    cfg.new_profile("Runes")
+    cfg.table_region = [9, 9, 5, 5]
+    cfg.switch_profile("Principal")
+    assert cli.apply_args(cfg, cli.parse_args(["--profil", "Runes"]))
+    assert cfg.profile == "Runes" and cfg.table_region == [9, 9, 5, 5]
+    with pytest.raises(ValueError):
+        cli.apply_args(cfg, cli.parse_args(["--profil", "Inconnu"]))

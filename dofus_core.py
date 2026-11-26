@@ -326,6 +326,11 @@ class Config:
 
     hotkeys: Dict = field(default_factory=lambda: _copy(DEFAULT_HOTKEYS))
 
+    # Profils de calibration (un par HDV / personnage) : zones, points, repère.
+    # Les champs ci-dessus sont ceux du profil ACTIF ; `profiles` garde tous les profils.
+    profile: str = "Principal"
+    profiles: Dict = field(default_factory=dict)
+
     # ---------- I/O ----------
     @classmethod
     def load(cls, path: Path = CONFIG_PATH) -> "Config":
@@ -369,10 +374,59 @@ class Config:
             cfg.input_method, cfg.clear_method = "paste", "backspace"
         if int(data.get("CONFIG_VERSION", 1)) < 5 and cfg.relist_max == 120:
             cfg.relist_max = cls.relist_max  # v5 : 120 était trop bas pour une liste de 100+ lots
+        if not isinstance(cfg.profiles, dict):
+            cfg.profiles = {}
+        cfg.profiles = {str(k): v for k, v in cfg.profiles.items() if isinstance(v, dict)}
+        if not isinstance(cfg.profile, str) or not cfg.profile.strip():
+            cfg.profile = DEFAULT_PROFILE
         cfg.config_version = CONFIG_VERSION
         return cfg
 
+    # ---------- profils de calibration ----------
+    def profile_data(self) -> dict:
+        return {f: _copy(getattr(self, f)) for f in PROFILE_FIELDS}
+
+    def profile_names(self) -> List[str]:
+        names = set(self.profiles) | {self.profile}
+        return sorted(names, key=lambda n: (n != DEFAULT_PROFILE, n.casefold()))
+
+    def switch_profile(self, name: str) -> None:
+        """Active le profil `name` (le profil actuel est gardé tel quel)."""
+        if name == self.profile:
+            return
+        if name not in self.profiles:
+            raise KeyError(f"profil inconnu : {name}")
+        self.profiles[self.profile] = self.profile_data()
+        data, defaults = self.profiles[name], Config()
+        for f in PROFILE_FIELDS:
+            setattr(self, f, _copy(data.get(f, getattr(defaults, f))))
+        self.profile = name
+
+    def new_profile(self, name: str) -> None:
+        """Nouveau profil = copie du profil actuel (on ne recalibre que ce qui diffère), activé."""
+        name = (name or "").strip()
+        problem = profile_name_problem(name, self.profile_names())
+        if problem:
+            raise ValueError(problem)
+        src_anchor = anchor_path(self)
+        self.profiles[self.profile] = self.profile_data()
+        self.profiles[name] = self.profile_data()
+        self.profile = name
+        if src_anchor.exists():
+            shutil.copy2(src_anchor, anchor_path(self))
+
+    def delete_profile(self, name: str) -> None:
+        if name == self.profile:
+            raise ValueError("impossible de supprimer le profil actif : choisis-en un autre d'abord")
+        if name not in self.profiles:
+            raise KeyError(f"profil inconnu : {name}")
+        path = anchor_path(self, name)
+        del self.profiles[name]
+        if name != DEFAULT_PROFILE:
+            path.unlink(missing_ok=True)
+
     def save(self, path: Path = CONFIG_PATH) -> None:
+        self.profiles[self.profile] = self.profile_data()   # profil actif toujours à jour
         data = {name.upper(): getattr(self, name) for name in self.__dataclass_fields__}
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -387,6 +441,29 @@ ANCHOR_FOUND = 0.80   # score mini pour accepter une nouvelle position
 REGION_FIELDS = ("table_region", "qty_region", "avg_region", "count_region", "mine_region", "anchor_region",
                  "name_region")
 POINT_FIELDS = ("price_field", "sell_button", "modify_button", "relist_row")
+PROFILE_FIELDS = REGION_FIELDS + POINT_FIELDS + ("relist_step",)   # ce que contient un profil
+DEFAULT_PROFILE = "Principal"
+
+
+def profile_name_problem(name: str, existing: List[str]) -> Optional[str]:
+    """Pourquoi `name` ne peut pas être un nouveau profil (None = accepté)."""
+    if not name:
+        return "donne un nom au profil"
+    if len(name) > 30:
+        return "nom trop long (30 caractères au plus)"
+    if any(name.casefold() == n.casefold() for n in existing):
+        return f"le profil « {name} » existe déjà"
+    return None
+
+
+def anchor_path(cfg: "Config", profile: Optional[str] = None) -> Path:
+    """Image du repère « Hôtel de vente » du profil (hdv_anchor.png pour « Principal »)."""
+    name = profile or cfg.profile
+    if name == DEFAULT_PROFILE:
+        return ANCHOR_PATH
+    import hashlib
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_")[:20] or "profil"
+    return ANCHOR_PATH.with_name(f"hdv_anchor_{slug}_{hashlib.sha1(name.encode()).hexdigest()[:6]}.png")
 
 
 def save_anchor(img_bgr: np.ndarray, path: Optional[Path] = None) -> None:
@@ -1769,7 +1846,7 @@ class PriceEngine:
         region = rect_from_points(first[0], p)
         setattr(self.cfg, f"{name}_region", list(region))
         if name == "anchor":
-            save_anchor(grab_screen(region))
+            save_anchor(grab_screen(region), anchor_path(self.cfg))
         self.cfg.save()
         return "done", region
 
@@ -1781,7 +1858,7 @@ class PriceEngine:
         cfg = self.cfg
         if not cfg.anchor_region:
             return None
-        tpl = load_anchor()
+        tpl = load_anchor(anchor_path(cfg))
         if tpl is None:
             return None
         x, y, w, h = cfg.anchor_region

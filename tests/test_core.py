@@ -1292,3 +1292,54 @@ def test_row_change_text_not_modified():
     assert c.text() == "ligne 7 · lot 100 : NON modifiée (Suspect)"
     big = core.RowChange(2, 1000, 1520000, 1499999, True)
     assert big.text() == "ligne 2 · lot 1000 : 1 520 000 → 1 499 999 (-1.3%)"
+
+
+# --- Profils de calibration
+def test_profiles_switch_save_load(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "hdv_anchor.png")
+    core.ANCHOR_PATH.write_bytes(b"repere-principal")
+    path = tmp_path / "cfg.json"
+    cfg = core.Config(table_region=[10, 10, 100, 80], price_field=[50, 50], relist_step=24)
+    cfg.new_profile("Runes")                                   # copie du profil actuel, activée
+    assert cfg.profile == "Runes" and cfg.table_region == [10, 10, 100, 80]
+    assert core.anchor_path(cfg).read_bytes() == b"repere-principal"   # repère copié
+    cfg.table_region, cfg.relist_step = [300, 20, 100, 80], 30          # recalibré pour les runes
+    cfg.save(path)
+
+    again = core.Config.load(path)
+    assert again.profile == "Runes" and again.table_region == [300, 20, 100, 80]
+    assert again.profile_names() == ["Principal", "Runes"]
+    again.switch_profile("Principal")
+    assert again.table_region == [10, 10, 100, 80] and again.relist_step == 24
+    again.switch_profile("Runes")
+    assert again.table_region == [300, 20, 100, 80] and again.relist_step == 30
+
+
+def test_profiles_names_and_delete(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "hdv_anchor.png")
+    cfg = core.Config()
+    for bad in ("", "x" * 31, "principal"):                   # vide, trop long, déjà pris
+        with pytest.raises(ValueError):
+            cfg.new_profile(bad)
+    cfg.new_profile("Équipements !")
+    a = core.anchor_path(cfg)
+    a.write_bytes(b"x")
+    assert a.parent == tmp_path and a.name.startswith("hdv_anchor_quipements")
+    with pytest.raises(ValueError):
+        cfg.delete_profile("Équipements !")                   # actif : refusé
+    cfg.switch_profile("Principal")
+    cfg.delete_profile("Équipements !")
+    assert cfg.profile_names() == ["Principal"] and not a.exists()
+    with pytest.raises(KeyError):
+        cfg.switch_profile("Équipements !")
+
+
+def test_reanchor_uses_profile_anchor(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "hdv_anchor.png")
+    cfg = core.Config()
+    cfg.new_profile("Runes")
+    seen = []
+    monkeypatch.setattr(core, "load_anchor", lambda p=None: seen.append(p) or None)
+    cfg.anchor_region = [0, 0, 10, 10]
+    core.PriceEngine(cfg)._reanchor()
+    assert seen == [core.anchor_path(cfg)] and seen[0] != core.ANCHOR_PATH

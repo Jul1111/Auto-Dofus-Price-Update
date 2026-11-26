@@ -25,3 +25,9 @@ def no_my_prices_file(monkeypatch, tmp_path):
 def debug_dir_in_tmp(monkeypatch, tmp_path):
     """Captures de diagnostic (champ refusé) écrites dans un dossier temporaire."""
     monkeypatch.setattr(core, "DEBUG_DIR", tmp_path / "captures")
+
+
+@pytest.fixture(autouse=True)
+def anchor_in_tmp(monkeypatch, tmp_path):
+    """Images du repère (et copies par profil) dans un dossier temporaire, jamais dans le projet."""
+    monkeypatch.setattr(core, "ANCHOR_PATH", tmp_path / "hdv_anchor.png")

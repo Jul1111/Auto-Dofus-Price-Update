@@ -194,6 +194,8 @@ class App(ctk.CTk):
         self.mine_var = ctk.StringVar(value="—")
         self.engine_var = ctk.StringVar(value="—")
         self.digits_var = ctk.StringVar(value="")
+        self.profile_var = ctk.StringVar(value=self.cfg.profile)
+        self.profile_info = ctk.StringVar(value=f"Profil : {self.cfg.profile}")
         self.stats_var = ctk.StringVar(value="")
         self.scroll_lbl = ctk.StringVar(value="")
         self.stats = {"ventes": 0, "modifs": 0, "suspects": 0}
@@ -237,6 +239,8 @@ class App(ctk.CTk):
                      ).pack(side="left")
         ctk.CTkLabel(info, textvariable=self.stats_var, text_color=MUTED, font=ctk.CTkFont(size=12)
                      ).pack(side="left", padx=16)
+        ctk.CTkLabel(info, textvariable=self.profile_info, text_color="#66d9ef", font=ctk.CTkFont(size=12)
+                     ).pack(side="left")
         ctk.CTkButton(head, text="Voir zones", width=90, fg_color=BTN2,
                       command=self._show_zones).pack(side="right", padx=(4, 12))
         ctk.CTkButton(head, text="Lire (test)", width=90, fg_color=BTN2,
@@ -466,6 +470,17 @@ class App(ctk.CTk):
 
     def _tab_calibration(self, page):
         page.pack(fill="both", expand=True)
+        pb = self._section(page, "Profil de calibration",
+                           "Un profil par HDV ou par personnage : zones, points et repère. « Nouveau » "
+                           "copie le profil actuel : recalibre seulement ce qui change.")
+        r = self._row(pb)
+        self.profile_menu = ctk.CTkOptionMenu(r, values=self.cfg.profile_names(), variable=self.profile_var,
+                                              width=220, dynamic_resizing=False, command=self._switch_profile)
+        self.profile_menu.pack(side="left")
+        ctk.CTkButton(r, text="Nouveau", width=90, fg_color=BTN2, command=self._new_profile
+                      ).pack(side="left", padx=(8, 4))
+        ctk.CTkButton(r, text="Supprimer", width=90, fg_color=BTN2, command=self._delete_profile
+                      ).pack(side="left", padx=4)
         top = self._section(page, "Assistant", "Pas à pas, avec une vérification à la fin. Conseillé la "
                                                "première fois ou après un changement d'interface.")
         ctk.CTkButton(top, text="🧭 Ouvrir l'assistant de calibration", width=260,
@@ -556,6 +571,65 @@ class App(ctk.CTk):
         self.cfg.save()
         self._log(f"[Calib] Zone « {key} » effacée.", "CAL")
         self._refresh_status()
+
+    # ---- profils de calibration
+    def _busy(self) -> bool:
+        if self.engine._lock.locked():
+            self._log("[Profil] Une action est en cours : réessaie quand elle est finie.", "WARN")
+            return True
+        return False
+
+    def _after_profile_change(self, msg: str):
+        try:
+            self.cfg.save()
+        except OSError as e:
+            self._log(f"[Profil] Sauvegarde impossible : {e}", "ERROR")
+        self.profile_menu.configure(values=self.cfg.profile_names())
+        self.profile_var.set(self.cfg.profile)
+        self.profile_info.set(f"Profil : {self.cfg.profile}")
+        self._log(msg, "CAL")
+        self._refresh_status()
+
+    def _switch_profile(self, name: str):
+        if name == self.cfg.profile:
+            return
+        if self._busy():
+            self.profile_var.set(self.cfg.profile)
+            return
+        self.cfg.switch_profile(name)
+        self._after_profile_change(f"[Profil] « {name} » actif.")
+
+    def _new_profile(self):
+        if self._busy():
+            return
+        name = ctk.CTkInputDialog(title="Nouveau profil",
+                                  text=f"Nom du nouveau profil (copie de « {self.cfg.profile} ») :").get_input()
+        if name is None:
+            return
+        try:
+            self.cfg.new_profile(name)
+        except ValueError as e:
+            self._log(f"[Profil] {e}.", "ERROR")
+            return
+        self._after_profile_change(f"[Profil] « {self.cfg.profile} » créé (copie) et actif : recalibre "
+                                   "ce qui change dans cet HDV.")
+
+    def _delete_profile(self):
+        from tkinter import messagebox
+        names = self.cfg.profile_names()
+        if len(names) <= 1:
+            self._log("[Profil] C'est le seul profil : rien à supprimer.", "WARN")
+            return
+        if self._busy():
+            return
+        name = self.cfg.profile
+        if not messagebox.askyesno("Supprimer le profil",
+                                   f"Supprimer le profil « {name} » et sa calibration ?", parent=self):
+            return
+        other = next(n for n in names if n != name)
+        self.cfg.switch_profile(other)
+        self.cfg.delete_profile(name)
+        self._after_profile_change(f"[Profil] « {name} » supprimé ; « {other} » actif.")
 
     def _wizard_checks(self) -> list:
         """Lecture complète une fois (thread de travail) -> lignes ✓ / ✗ pour l'assistant."""
