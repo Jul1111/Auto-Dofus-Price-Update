@@ -92,6 +92,7 @@ La lecture des chiffres repose sur un modèle de la police du jeu, appris automa
 | `Ctrl+Alt+V` | Afficher les zones calibrées |
 | `Ctrl+Alt+H` | Aide-mémoire des touches par-dessus le jeu |
 | `Ctrl+Alt+U` | Afficher ou cacher le HUD |
+| `Ctrl+Alt+O` | Afficher ou cacher la fenêtre de l'outil, même depuis le jeu |
 | `Ctrl+Alt+F1` à `F12` | Calibration (liste dans l'onglet **Raccourcis**, section **Avancé**) |
 
 Tous les raccourcis se changent dans l'onglet **Raccourcis** : bouton **Changer**, puis la touche voulue.
@@ -111,6 +112,7 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
 **Par-dessus le jeu.**
 - **HUD** (`Ctrl+Alt+U`) : une ligne avec l'état, la dernière action ou la progression. Après chaque action, son bord s'allume de la couleur du résultat. Les clics le traversent et il n'apparaît que quand Dofus est au premier plan.
   - Pendant Tout vendre ou Toute la liste, il rappelle la touche pour arrêter (`Ctrl+Alt+P`).
+  - Si la mise en vente automatique est coupée, il rappelle « Entrée pour valider » une fois le prix saisi, ou « Ctrl+V puis Entrée » si le prix est seulement copié.
   - Dans l'onglet **Options** : **Déplacer**, taille (petit, normal, grand), opacité, et contenu (état, dernière action, ou les deux).
 - **Aide-mémoire** (`Ctrl+Alt+H`) : déplaçable ; il reste alors affiché à cet endroit jusqu'au ✕.
 
@@ -126,7 +128,7 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
 
 ## Profils et multi-compte
 
-Les profils de calibration (onglet **Calibration**) permettent d'en garder un par HDV ou par personnage. On passe de l'un à l'autre en un clic. **Nouveau** copie le profil actuel : il ne reste qu'à recalibrer ce qui change.
+Les profils de calibration (onglet **Calibration**) permettent d'en garder un par HDV ou par personnage. On passe de l'un à l'autre en un clic. **Nouveau** copie le profil actuel : il ne reste qu'à recalibrer ce qui change. **Renommer** change le nom du profil actif ; ses personnages associés, sa couleur et son repère suivent.
 
 Le profil suit aussi le personnage joué, lu dans le titre de la fenêtre du jeu :
 - choisir un profil pendant que vous jouez un personnage associe ce profil au personnage ;

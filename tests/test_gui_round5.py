@@ -23,7 +23,7 @@ def test_whats_new_shows_versions_since_last_seen():
 
 
 def test_whats_new_lines_format_with_hotkeys():
-    keys = {"pause": "CTRL+ALT+P", "hud": "CTRL+ALT+U"}
+    keys = {"pause": "CTRL+ALT+P", "hud": "CTRL+ALT+U", "window": "CTRL+ALT+O"}
     for lines in gui.WHATS_NEW.values():
         for line in lines:
             assert "{" not in line.format(**keys)
