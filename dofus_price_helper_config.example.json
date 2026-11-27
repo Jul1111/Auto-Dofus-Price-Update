@@ -73,6 +73,7 @@
   "THEME": "dark",
   "ACCENT": "blue",
   "AMBIENCE": "night",
+  "HUD_SHAPE": "card",
   "ANIMATIONS": true,
   "TRAY": true,
   "TRAY_MINIMIZE": false,

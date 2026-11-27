@@ -655,6 +655,9 @@ WHATS_NEW = {
         "du thème (Windows 11). Le panneau Activité montre l'écart de prix (▼ 4 %).",
         "Journal en cartes : une barre de couleur et une icône par ligne. Ambiances du thème sombre "
         "(Nuit, Ambre, Forêt, Océan) et petites animations (survol, onglets, compteurs).",
+        "HUD : le nouveau prix défile jusqu'à sa valeur, le HUD change de taille en douceur, le rond respire "
+        "pendant un parcours. Formes au choix (Carte, Pilule, Minimal) ; en multi-compte, son bord prend la "
+        "couleur du personnage.",
     ],
 }
 
@@ -781,6 +784,22 @@ def tour_place(target, size, area, gap: int = 12) -> tuple:
 
 HUD_SIZES = {"small": ("Petit", 11), "normal": ("Normal", 12), "large": ("Grand", 15)}
 HUD_CONTENTS = {"state": "État", "action": "Action", "both": "Les deux", "dot": "Pastille"}
+HUD_SHAPES = {"card": "Carte", "pill": "Pilule", "minimal": "Minimal"}
+HUD_COUNT_MS = 380     # le nouveau prix « défile » jusqu'à sa valeur
+HUD_RESIZE_MS = 150    # le HUD change de taille en douceur
+HUD_BREATH_S = 1.8     # pendant un parcours, le rond d'état « respire » (période)
+HUD_PULSE_S = 0.6      # à chaque résultat, le rond s'illumine puis revient
+
+
+def count_value(start: int, end: int, frac: float) -> int:
+    """Valeur affichée pendant le défilement d'un prix (frac 0..1, courbe douce)."""
+    return round(start + (end - start) * style.ease_out(frac))
+
+
+def breath(t: float, period: float = HUD_BREATH_S) -> float:
+    """0..1..0 en douceur sur une période (respiration du rond d'état)."""
+    import math
+    return (1 - math.cos(2 * math.pi * (t % period) / period)) / 2
 HUD_AUTOHIDE = {0: "Jamais", 10: "10 s", 30: "30 s", 60: "1 min"}
 HUD_EXPAND_S = 2.5    # mode pastille : le HUD s'agrandit ce temps-là à chaque action
 ALT_HOLD_S = 0.25     # Alt maintenu ce temps-là (seul) : HUD cliquable
@@ -936,6 +955,12 @@ class App(ctk.CTk):
         self._tour: Optional[dict] = None    # visite guidée en cours : étape, bulle, cadre
         self._hud_moving = False
         self._game_fg = False
+        self._hud_shape = "card"
+        self._hud_ticker: Optional[dict] = None    # prix qui défile dans le HUD
+        self._hud_tick_after = None
+        self._hud_resize_anim = None
+        self._hud_pulse: Optional[tuple] = None    # (couleur, début) : éclat du rond d'état
+        self._hud_tinted = False
         self._drift_text: Optional[str] = None     # problème de calibration affiché (bandeau + HUD)
         self._drift_ignored: Optional[str] = None  # « Ignorer » : ce texte-là ne revient plus
         self._calib_alert_t = 0.0                  # début de l'alerte (le HUD la montre jusqu'au résultat suivant)
@@ -974,6 +999,7 @@ class App(ctk.CTk):
             self.tray.start()
         self.after(400, self._apply_hud)          # HUD activé : créé dès le lancement (caché hors du jeu)
         self.after(1500, self._hud_alt_poll)
+        self.after(1600, self._hud_anim_tick)
         self.after(1800, self._whats_new)         # 1er lancement d'une nouvelle version
         self.after(1200, self._watch_game)
         self.bind("<Control-KeyPress>", self._on_ctrl_key)
@@ -1884,6 +1910,13 @@ class App(ctk.CTk):
         ctk.CTkLabel(r, text="Taille", width=70, anchor="w").pack(side="left", padx=(42, 0))
         seg = ctk.CTkSegmentedButton(r, values=[v[0] for v in HUD_SIZES.values()], command=self._set_hud_size)
         seg.set(HUD_SIZES.get(self.cfg.hud_size, HUD_SIZES["normal"])[0])
+        seg.pack(side="left")
+        r = self._row(b)
+        self._tip(ctk.CTkLabel(r, text="Forme", width=70, anchor="w"),
+                  "Carte : la ligne habituelle. Pilule : plus arrondie et compacte. Minimal : le texte seul "
+                  "avec un fin liseré de couleur dessous.").pack(side="left", padx=(42, 0))
+        seg = ctk.CTkSegmentedButton(r, values=list(HUD_SHAPES.values()), command=self._set_hud_shape)
+        seg.set(HUD_SHAPES.get(self.cfg.hud_shape, HUD_SHAPES["card"]))
         seg.pack(side="left")
         ctk.CTkLabel(r, text="Contenu", width=70, anchor="w").pack(side="left", padx=(16, 0))
         seg = ctk.CTkSegmentedButton(r, values=list(HUD_CONTENTS.values()), command=self._set_hud_content)
@@ -2830,6 +2863,10 @@ class App(ctk.CTk):
                 else "Liste mise à jour" if res.message.startswith("[MAJ TOUT]") else "Pas de prix")
         self.last_action = (head, res.hint or res.level, LEVEL_COLORS[res.level])
         self._last_action_t = time.time()
+        if res.new_price is not None:                # le HUD fait défiler le prix jusqu'à sa valeur
+            start = res.old_price if res.old_price and res.old_price != res.new_price else 0
+            self._hud_ticker = {"head": head, "tpl": f"Lot {res.lot} → {{}}", "from": start,
+                                "to": res.new_price, "t0": time.time()}
         remind = validate_reminder(res, self.cfg)
         if remind:                                   # prix prêt mais pas mis en vente : à toi de valider
             self.last_action = (head, remind, P["gold"])
@@ -4296,11 +4333,21 @@ class App(ctk.CTk):
     def _hud_create(self):
         c = self.cfg
         size = HUD_SIZES.get(c.hud_size, HUD_SIZES["normal"])[1]
-        t, card = rounded_popup(self, radius=10, alpha=min(1.0, max(0.5, c.hud_opacity)))
+        shape = c.hud_shape if c.hud_shape in HUD_SHAPES else "card"
+        radius = {"card": 10, "pill": size + 8, "minimal": 0}[shape]
+        t, card = rounded_popup(self, radius=radius, alpha=min(1.0, max(0.5, c.hud_opacity)),
+                                border=self._hud_border())
+        card.pack_configure(fill="both", expand=True)     # la fenêtre change de taille en douceur
+        if shape == "minimal":                             # texte seul : fond transparent, liseré dessous
+            card.configure(fg_color=POPUP_KEY, border_width=0)
         self._hud, self._hud_card = t, card
+        self._hud_shape = shape
         row = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(padx=(10, 14), pady=max(3, size // 2 - 1))
+        row.pack(anchor="w", padx=(18, 20) if shape == "pill" else (10, 14), pady=max(3, size // 2 - 1))
         self._hud_row = row
+        self._hud_line = ctk.CTkFrame(card, height=2, corner_radius=1, fg_color=P["border"])
+        if shape == "minimal":
+            self._hud_line.pack(fill="x", padx=(10, 14), pady=(0, 4), after=row)
         self._hud_layout_key = None
         self._hud_logo = ctk.CTkLabel(row, text="", image=self._logo_img_small())
         self._hud_logo.pack(side="left", padx=(0, 8))
@@ -4396,11 +4443,90 @@ class App(ctk.CTk):
             if alert and not (note and now < note[3]) and self._calib_alert_t >= self._last_action_t:
                 hint = " · maintiens Alt pour recalibrer" if c.hud_alt else ""
                 head, sub, col = "", alert[1] + hint, style.CHIP["orange"][1]
+        tick = self._hud_ticker
+        if tick and head == tick["head"]:              # nouveau prix : il défile jusqu'à sa valeur
+            f = (now - tick["t0"]) * 1000 / HUD_COUNT_MS
+            if f < 1 and ANIMATE["on"]:
+                head = tick["tpl"].format(fmt(count_value(tick["from"], tick["to"], f)))
+                if not self._hud_tick_after:
+                    self._hud_tick_after = self.after(16, self._hud_tick_refresh)
+            else:
+                self._hud_ticker = None
         self._hud_head.configure(text=head if show_action and not dot else "")
         self._hud_sub.configure(text=sub if show_action and not dot else "", text_color=col)
+        if self._hud_shape == "minimal":
+            self._hud_line.configure(fg_color=state_color)
+        elif not getattr(self, "_hud_flash_after", None) and not self._hud_moving:
+            self._hud_card.configure(border_color=self._hud_border())
         self._refresh_hud_bar(None if dot else frac)
         self._refresh_hud_actions()
         self._refresh_hud_history(hide=dot)
+        self._hud_resize()
+
+    def _hud_border(self) -> str:
+        """Bord du HUD : couleur du personnage en multi-compte, sinon le bord fin habituel."""
+        return self._profile_color() if len(self.cfg.profile_names()) > 1 else P["border"]
+
+    def _hud_tick_refresh(self):
+        self._hud_tick_after = None
+        self._refresh_hud()
+
+    def _hud_resize(self):
+        """La fenêtre du HUD suit la taille de son contenu en douceur (au lieu d'un saut)."""
+        w = self._hud
+        if w is None or not w.winfo_exists():
+            return
+        w.update_idletasks()
+        tw, th = self._hud_card.winfo_reqwidth(), self._hud_card.winfo_reqheight()
+        cw, ch = w.winfo_width(), w.winfo_height()
+        if (cw, ch) == (tw, th):
+            return
+        if not ANIMATE["on"] or self._hud_moving or not w.winfo_ismapped() or cw <= 1:
+            self._hud_resize_anim = None
+            w.geometry(f"{tw}x{th}")
+            return
+        token = object()
+        self._hud_resize_anim = token
+        steps = max(1, HUD_RESIZE_MS // 16)
+
+        def step(i=1):
+            if self._hud_resize_anim is not token or not w.winfo_exists():
+                return
+            e = style.ease_out(i / steps)
+            w.geometry(f"{round(cw + (tw - cw) * e)}x{round(ch + (th - ch) * e)}")
+            if i < steps:
+                self.after(16, lambda: step(i + 1))
+            else:
+                self._hud_resize_anim = None
+                self._hud_resize()                # le contenu a pu changer entre-temps
+        step()
+
+    def _hud_anim_tick(self):
+        """Rond d'état vivant : il respire pendant un parcours et s'illumine à chaque résultat."""
+        delay = 400
+        try:
+            w = self._hud
+            if w is not None and w.winfo_exists() and w.winfo_ismapped() and ANIMATE["on"] \
+                    and not self._hud_moving:
+                now = time.time()
+                card = P["card"] if self._hud_shape != "minimal" else P["bg"]
+                pulse = self._hud_pulse
+                if pulse and now - pulse[1] < HUD_PULSE_S:
+                    f = (now - pulse[1]) / HUD_PULSE_S
+                    color = style.blend(w, "#ffffff", pulse[0], style.ease_out(f))
+                    self._hud_state.configure(text_color=color)
+                    self._hud_tinted, delay = True, 30
+                elif self._loop is not None:
+                    color = style.blend(w, P["cyan"], card, 0.55 * breath(now))
+                    self._hud_state.configure(text_color=color)
+                    self._hud_tinted, delay = True, 50
+                elif self._hud_tinted:
+                    self._hud_tinted = False
+                    self._hud_pulse = None
+                    self._refresh_hud()
+        except Exception:
+            pass
+        self.after(delay, self._hud_anim_tick)
 
     def _hud_layout(self, dot: bool, multi: bool):
         """Éléments de la ligne du HUD : tout, ou seulement le rond d'état (pastille)."""
@@ -4494,6 +4620,11 @@ class App(ctk.CTk):
         self._save_cfg()
         self._hud_rebuild()
 
+    def _set_hud_shape(self, label: str):
+        self.cfg.hud_shape = next((k for k, lbl in HUD_SHAPES.items() if lbl == label), "card")
+        self._save_cfg()
+        self._hud_rebuild()
+
     def _set_hud_content(self, label: str):
         self.cfg.hud_content = next((k for k, lbl in HUD_CONTENTS.items() if lbl == label), "both")
         self._save_cfg()
@@ -4540,14 +4671,20 @@ class App(ctk.CTk):
             self._hud_expand_until = time.time() + HUD_EXPAND_S
             self._refresh_hud()
             self.after(int(HUD_EXPAND_S * 1000) + 60, self._refresh_hud)
-        self._hud_card.configure(border_color=color, border_width=2)
+        self._hud_pulse = (color, time.time())
+        if self._hud_shape == "minimal":
+            self._hud_line.configure(fg_color=color)
+        else:
+            self._hud_card.configure(border_color=color, border_width=2)
         if getattr(self, "_hud_flash_after", None):
             self.after_cancel(self._hud_flash_after)
 
         def back():
             self._hud_flash_after = None
             if self._hud is not None and self._hud.winfo_exists() and not self._hud_moving:
-                self._hud_card.configure(border_color=P["border"], border_width=1)
+                if self._hud_shape != "minimal":
+                    self._hud_card.configure(border_color=self._hud_border(), border_width=1)
+                self._refresh_hud()
         self._hud_flash_after = self.after(ms, back)
 
     def _hud_message(self, head: str, sub: str, color: str, ms: int = 2500):
@@ -4647,7 +4784,9 @@ class App(ctk.CTk):
         if on:
             self._hud_bump()
             self._hud_visibility()
-        self._hud_card.configure(border_color=P["accent"] if on else P["border"], border_width=2 if on else 1)
+        if self._hud_shape != "minimal":
+            self._hud_card.configure(border_color=P["accent"] if on else self._hud_border(),
+                                     border_width=2 if on else 1)
         self._hud_apply_click()
         self._refresh_hud()
 
@@ -4677,7 +4816,8 @@ class App(ctk.CTk):
         if w is None or not w.winfo_exists():
             return
         self._hud_moving = True
-        self._hud_card.configure(border_color=P["accent"], border_width=2)
+        if self._hud_shape != "minimal":
+            self._hud_card.configure(border_color=P["accent"], border_width=2)
         style.set_click_through(w, False)
         self._refresh_hud()
         self._hud_visibility()
@@ -4697,7 +4837,8 @@ class App(ctk.CTk):
         self._hud_moving = False
         w = self._hud
         if w is not None and w.winfo_exists():
-            self._hud_card.configure(border_color=P["border"], border_width=1)
+            if self._hud_shape != "minimal":
+                self._hud_card.configure(border_color=self._hud_border(), border_width=1)
             style.set_click_through(w, True)
         self.hud_move_btn.configure(text="Déplacer", state="normal")
         self._refresh_hud()
