@@ -8,6 +8,7 @@ Le [README](../README.md) donne l'essentiel. Ce guide détaille chaque fonction.
 - [Raccourcis](#raccourcis)
 - [Interface](#interface)
 - [Profils et multi-compte](#profils-et-multi-compte)
+- [Sauvegarde](#sauvegarde)
 - [Mises à jour](#mises-à-jour)
 - [Signaler un problème](#signaler-un-problème)
 - [Configuration](#configuration)
@@ -54,7 +55,7 @@ Quand le titre « Hôtel de vente » est calibré, les zones suivent la fenêtre
 - **Ctrl+F3** met à jour toute la liste de vos ventes, avec défilement automatique. Fonction désactivée par défaut : activez-la dans l'onglet **Mes ventes**.
 - **F4** choisit le meilleur lot (prix par objet le plus élevé).
 
-Pendant un parcours **F2** ou **Ctrl+F3**, la progression s'affiche en haut et en mode compact (« Ligne 34 / 87 · 12 modifiées » ; le total est connu si le compteur « x/100 lots » est calibré). Le bouton **Arrêter** interrompt le parcours sans mettre l'outil en pause.
+Pendant un parcours **F2** ou **Ctrl+F3**, la progression s'affiche en haut de la fenêtre et dans le HUD (« Ligne 34 / 87 · 12 modifiées » ; le total est connu si le compteur « x/100 lots » est calibré). Le bouton **Arrêter**, ou **Arrêter le parcours** dans le menu de l'icône de la zone de notification, interrompt le parcours sans mettre l'outil en pause. En jeu, `Ctrl+Alt+P` l'arrête aussi (et met l'outil en pause).
 
 À la fin d'un Ctrl+F3, un résumé liste les prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et les lignes à revoir. Les 10 derniers résumés restent consultables dans l'onglet **Mes ventes**.
 
@@ -105,15 +106,15 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
 
 **Journal.** Filtres **Tout**, **Ventes** et **Problèmes**, bouton **Copier**, une icône par type de ligne. Chaque parcours F2 ou Ctrl+F3 est regroupé dans un bloc repliable. Un clic sur une ligne qui contient un prix copie ce prix.
 
-**Activité.** Les dernières actions (ancien → nouveau prix, statut en couleur) et la dernière lecture.
+**Activité.** Les dernières actions (ancien → nouveau prix, statut en couleur) et la dernière lecture. Devant chaque prix lu, une pastille indique la fiabilité de la lecture : verte si elle est sûre, orange si elle est moyenne, rouge si elle est douteuse (l'outil ne colle alors pas ce prix tout seul). Le détail s'affiche au survol.
 
 **Par-dessus le jeu.**
-- Un bandeau de résultat s'affiche au-dessus de l'HDV.
-- **Mode compact** (bouton 🗗 Compact) : petite fenêtre toujours au premier plan, avec la dernière action, l'état et la pause.
-- **HUD** (`Ctrl+Alt+U`) : une ligne avec l'état, la dernière action ou la progression. Les clics le traversent et il n'apparaît que quand Dofus est au premier plan. **Déplacer** (onglet **Options**) permet de le placer ailleurs.
+- **HUD** (`Ctrl+Alt+U`) : une ligne avec l'état, la dernière action ou la progression. Après chaque action, son bord s'allume de la couleur du résultat. Les clics le traversent et il n'apparaît que quand Dofus est au premier plan.
+  - Pendant Tout vendre ou Toute la liste, il rappelle la touche pour arrêter (`Ctrl+Alt+P`).
+  - Dans l'onglet **Options** : **Déplacer**, taille (petit, normal, grand), opacité, et contenu (état, dernière action, ou les deux).
 - **Aide-mémoire** (`Ctrl+Alt+H`) : déplaçable ; il reste alors affiché à cet endroit jusqu'au ✕.
 
-**Zone de notification.** Un clic ouvre l'outil, un clic droit donne accès à la pause, au mode compact, à l'aide-mémoire ou à la fermeture. La pastille de l'icône montre l'état : vert actif, orange pause, bleu parcours en cours, rouge calibration à faire. En option, réduire la fenêtre la cache à cet endroit.
+**Zone de notification.** Un clic ouvre l'outil. Un clic droit donne accès à la pause, au HUD, à l'aide-mémoire ou à la fermeture, et pendant un parcours à **Arrêter le parcours**. La pastille de l'icône montre l'état : vert actif, orange pause, bleu parcours en cours, rouge calibration à faire. En option, réduire la fenêtre la cache à cet endroit.
 
 **Notifications et sons.** Une notification Windows signale la fin d'un long parcours quand vous êtes dans une autre fenêtre. Des sons discrets accompagnent succès, avertissements, erreurs et fin de parcours, avec volume réglable et bouton **Tester**. Tout se désactive dans **Options**.
 
@@ -131,11 +132,19 @@ Le profil suit aussi le personnage joué, lu dans le titre de la fenêtre du jeu
 - choisir un profil pendant que vous jouez un personnage associe ce profil au personnage ;
 - un profil qui porte le nom du personnage est pris automatiquement.
 
+Chaque profil a une couleur, choisie sous **Couleur du profil**. Avec plusieurs profils, elle apparaît dans le HUD, sur la pastille **Profil** et en anneau autour de l'icône de la zone de notification : vous voyez d'un coup d'œil quel profil est actif.
+
+## Sauvegarde
+
+Dans l'onglet **Options**, **Sauvegarder…** crée un seul fichier `.zip`. Il contient les réglages, les profils (avec leurs personnages et leurs couleurs), la calibration, les chiffres appris et les derniers parcours Ctrl+F3. L'historique des ventes n'y est pas.
+
+**Restaurer…** remplace les réglages actuels par ceux de la sauvegarde, puis redémarre l'outil. Les réglages actuels sont d'abord gardés dans le dossier `sauvegardes`.
+
 ## Mises à jour
 
 Au démarrage, l'outil vérifie sur GitHub si une version plus récente est publiée. Si c'est le cas, il affiche un bouton **⬆ Installer vX.Y.Z** : un clic télécharge la version, vérifie le fichier, puis l'outil redémarre dans la nouvelle version.
 
-Réglages, calibration et profils sont conservés. Si la copie échoue, l'ancienne version est remise en place.
+Réglages, calibration et profils sont conservés. Si la copie échoue, l'ancienne version est remise en place. Au premier lancement d'une nouvelle version, une fenêtre **Quoi de neuf** résume les nouveautés. Elle se rouvre depuis l'onglet **Options**.
 
 La vérification se désactive dans l'onglet **Options**.
 
@@ -184,5 +193,6 @@ Tout reste sur votre PC, dans `%APPDATA%\Dofus Price Helper` (ou dans le dossier
 | `digit_templates.npz` | Modèle des chiffres du jeu, appris sur votre écran |
 | `hdv_anchor.png` | Image du titre « Hôtel de vente », servant de repère |
 | `journaux/` | Journal de fonctionnement |
+| `sauvegardes/` | Réglages mis de côté avant une restauration |
 
 La seule connexion réseau est la vérification des mises à jour sur GitHub, désactivable.

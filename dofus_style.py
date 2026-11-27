@@ -88,6 +88,21 @@ ACCENTS = {
     "cyan": ("Cyan", "#16819a", "#126f85"),
 }
 THEMES = {"dark": "Sombre", "light": "Clair", "system": "Comme Windows"}
+# couleur par profil (multi-compte) : vives, avec du texte sombre dessus, lisibles dans les 2 thèmes
+PROFILE_COLORS = {"blue": ("Bleu", "#6b8cff"), "green": ("Vert", "#3ecf8e"), "gold": ("Or", "#f2b134"),
+                  "red": ("Rouge", "#f0616d"), "violet": ("Violet", "#b392f0"), "cyan": ("Cyan", "#5ccfe6"),
+                  "pink": ("Rose", "#f08cc0"), "orange": ("Orange", "#f0a03c")}
+ON_PROFILE = "#101216"         # texte sur une couleur de profil
+
+
+def profile_color(name: str, chosen: dict) -> str:
+    """Couleur du profil : celle choisie, sinon une couleur stable déduite du nom."""
+    import zlib
+    key = chosen.get(name)
+    if key not in PROFILE_COLORS:
+        keys = list(PROFILE_COLORS)
+        key = keys[zlib.crc32(name.encode("utf-8")) % len(keys)]
+    return PROFILE_COLORS[key][1]
 
 # pastilles de la barre d'état : (fond, texte)
 CHIP_DARK = {

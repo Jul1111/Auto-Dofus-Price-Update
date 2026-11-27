@@ -80,6 +80,11 @@
   "CHARACTER_PROFILES": {},
   "HUD": true,
   "HUD_POS": null,
+  "HUD_SIZE": "normal",
+  "HUD_OPACITY": 0.9,
+  "HUD_CONTENT": "both",
+  "PROFILE_COLORS": {},
+  "LAST_SEEN_VERSION": "",
   "HOTKEYS": {
     "sell": "f1",
     "sell_all": "f2",

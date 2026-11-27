@@ -88,10 +88,19 @@ def logo_image(size: int = 256, glow: bool = False):
     return img.resize((size, size), Image.LANCZOS)
 
 
-def logo_with_dot(color: str, size: int = 64):
-    """Logo + pastille d'état en bas à droite (icône de la zone de notification)."""
-    from PIL import ImageDraw
-    img = logo_image(size).copy()
+def logo_with_dot(color: str, size: int = 64, ring: str = None):
+    """Logo + pastille d'état en bas à droite (icône de la zone de notification).
+    ring : couleur d'un anneau autour de la pièce (couleur du profil actif)."""
+    from PIL import Image, ImageDraw
+    if ring:
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        w = max(2, round(size * 0.10))
+        d.ellipse((0, 0, size - 1, size - 1), fill=ring)
+        inner = size - 2 * w
+        img.alpha_composite(logo_image(inner), (w, w))
+    else:
+        img = logo_image(size).copy()
     d = ImageDraw.Draw(img)
     dr = size * 0.19
     x1, y1 = size - 1, size - 1

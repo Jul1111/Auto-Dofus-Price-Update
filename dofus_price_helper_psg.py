@@ -39,6 +39,7 @@ import dofus_update  # noqa: E402
 
 import customtkinter as ctk
 
+import dofus_backup
 import dofus_logo
 import dofus_style as style
 from dofus_style import P
@@ -444,9 +445,9 @@ TRAY_STATES = {"ok": ("#3ecf8e", "Actif"), "pause": ("#f0a03c", "En pause"),
                "loop": ("#5ccfe6", "Parcours en cours"), "calib": ("#f0616d", "Calibration à faire")}
 
 
-def tray_image(color: str, size: int = 64):
-    """Icône : la pièce du logo, pastille de couleur = état de l'outil."""
-    return dofus_logo.logo_with_dot(color, size)
+def tray_image(color: str, size: int = 64, ring: str = None):
+    """Icône : la pièce du logo, pastille de couleur = état de l'outil, anneau = couleur du profil."""
+    return dofus_logo.logo_with_dot(color, size, ring=ring)
 
 
 _ICO_PATH = None
@@ -494,29 +495,36 @@ class Tray:
         item = pystray.MenuItem
         menu = pystray.Menu(
             item("Ouvrir l'outil", lambda: put(("tray", "open")), default=True),
+            item("■ Arrêter le parcours", lambda: put(("tray", "stop")),
+                 visible=lambda _i: self.app._loop is not None),
             item(lambda _i: "▶ Reprendre" if self.app.engine.paused else "⏸ Pause", lambda: put(("tray", "pause"))),
             item("Aide-mémoire en jeu", lambda: put(("tray", "cheatsheet"))),
             item("HUD discret", lambda: put(("tray", "hud")), checked=lambda _i: bool(self.app.cfg.hud)),
             pystray.Menu.SEPARATOR,
             item("Quitter", lambda: put(("tray", "quit"))),
             item("Forcer l'arrêt", self._kill))
-        color, text = self._last or TRAY_STATES["ok"]
+        color, text = (self._last or (*TRAY_STATES["ok"], None))[:2]
+        ring = self._last[2] if self._last else None
         try:
-            self.icon = pystray.Icon("DofusPriceHelper", tray_image(color), f"Dofus Price Helper · {text}", menu)
+            self.icon = pystray.Icon("DofusPriceHelper", tray_image(color, ring=ring),
+                                     f"Dofus Price Helper · {text}", menu)
             self.icon.run_detached()
         except Exception as e:
             self.icon = None
             self.app._log(f"[Zone de notification] Icône impossible : {e}", "WARN")
 
-    def update(self, state: str):
+    def update(self, state: str, ring: str = None, profile: str = ""):
         color, text = TRAY_STATES.get(state, TRAY_STATES["ok"])
-        if (color, text) == self._last:
+        if profile:
+            text += f" · {profile}"
+        if (color, text, ring) == self._last:
             return
-        self._last = (color, text)
+        self._last = (color, text, ring)
         if self.icon is not None:
             try:
-                self.icon.icon = tray_image(color)
+                self.icon.icon = tray_image(color, ring=ring)
                 self.icon.title = f"Dofus Price Helper · {text}"
+                self.icon.update_menu()          # « Arrêter le parcours » visible ou non
             except Exception:
                 pass
 
@@ -556,6 +564,64 @@ def relaunch_command() -> list:
     if getattr(sys, "frozen", False):          # version .exe
         return [sys.executable] + args
     return [sys.executable, sys.argv[0]] + args
+
+
+# ---------------------------------------------------------------- « Quoi de neuf » après une mise à jour
+# {version: [lignes]} ; {pause} / {hud} = touches actuelles. Les plus récentes en dernier.
+WHATS_NEW = {
+    "1.8.0": [
+        "Le HUD, une ligne discrète par-dessus le jeu, remplace le popup de résultat, le bandeau et le "
+        "mode compact. Après chaque action, il s'allume de la couleur du résultat.",
+        "{hud} l'affiche ou le cache. « Déplacer » (onglet Options) le pose où tu veux.",
+    ],
+    "1.9.0": [
+        "HUD réglable dans l'onglet Options : taille, opacité, et contenu (état, dernière action, ou les deux).",
+        "Pendant Tout vendre ou Toute la liste, le HUD rappelle « {pause} = arrêter », et le menu de "
+        "l'icône près de l'horloge propose « Arrêter le parcours ».",
+        "Une couleur par profil, visible dans le HUD, sur la pastille Profil et sur l'icône près de "
+        "l'horloge. Elle se choisit dans l'onglet Calibration.",
+        "Dernière lecture : une pastille de couleur indique si chaque prix a été lu de façon sûre "
+        "(détail au survol).",
+        "Sauvegarder et restaurer réglages, profils et calibration en un seul fichier (onglet Options).",
+    ],
+}
+
+
+def whats_new(last_seen: str, current: str) -> list:
+    """[(version, lignes)] à montrer : les versions après `last_seen`, jusqu'à `current` (3 au plus).
+    last_seen vide = mise à jour depuis une version qui ne le notait pas : les dernières."""
+    cur = core.parse_version(current)
+    if cur is None:
+        return []
+    seen = core.parse_version(last_seen) or (0, 0, 0)
+    out = [(v, lines) for v, lines in WHATS_NEW.items()
+           if seen < (core.parse_version(v) or (0, 0, 0)) <= cur]
+    out.sort(key=lambda x: core.parse_version(x[0]))
+    return out[-3:]
+
+
+# ---------------------------------------------------------------- dernière lecture : fiabilité
+def reading_quality(reading, min_conf: float) -> tuple:
+    """(niveau "good" | "doubt" | "bad" | None, texte) pour la pastille d'un prix lu."""
+    if reading is None or reading.value is None:
+        return None, "Pas lu"
+    conf = reading.confidence
+    if reading.raw == "estimé":
+        return "doubt", "Estimé d'après les autres lots (pas lu directement)"
+    if conf >= max(80.0, min_conf + 15):
+        level = "good"
+    elif conf >= min_conf:
+        level = "doubt"
+    else:
+        level = "bad"
+    words = {"good": "lecture sûre", "doubt": "lecture moyenne : vérifie le prix",
+             "bad": "lecture douteuse : l'outil ne collera pas ce prix tout seul"}[level]
+    raw = f" · lu « {reading.raw} »" if reading.raw and reading.raw != str(reading.value) else ""
+    return level, f"Fiabilité {conf:.0f} % : {words}{raw}"
+
+
+HUD_SIZES = {"small": ("Petit", 11), "normal": ("Normal", 12), "large": ("Grand", 15)}
+HUD_CONTENTS = {"state": "État", "action": "Action", "both": "Les deux"}
 
 
 # ---------------------------------------------------------------- accueil : premiers pas
@@ -684,6 +750,7 @@ class App(ctk.CTk):
         if self.cfg.tray:
             self.tray.start()
         self.after(400, self._apply_hud)          # HUD activé : créé dès le lancement (caché hors du jeu)
+        self.after(1800, self._whats_new)         # 1er lancement d'une nouvelle version
         self.after(1200, self._watch_game)
         self.bind("<Control-KeyPress>", self._on_ctrl_key)
         self.bind("<Escape>", self._on_escape)
@@ -972,17 +1039,24 @@ class App(ctk.CTk):
                                                   "vente, ou avec « Lire (test) » (onglet Calibration).",
                                        text_color=MUTED, justify="left", anchor="w", wraplength=360)
         self.read_grid = grid = ctk.CTkFrame(side, fg_color=P["card2"], corner_radius=8)
-        for c, t in enumerate(("Lot", "Prix", "Par objet")):
+        # pastille devant chaque prix : vert = lecture sûre, orange = moyenne, rouge = douteuse
+        for c, t in ((0, "Lot"), (2, "Prix"), (3, "Par objet")):
             ctk.CTkLabel(grid, text=t, text_color=MUTED, height=22).grid(
                 row=0, column=c, sticky="w" if c == 0 else "e", padx=10, pady=(4, 0))
+        self.read_dots, self.read_tips = {}, {}
         for i, lot in enumerate(self.cfg.lots, start=1):
             ctk.CTkLabel(grid, text=str(lot), height=22).grid(row=i, column=0, sticky="w", padx=10)
-            ctk.CTkLabel(grid, textvariable=self.read_vars[lot], text_color=P["gold"], height=22,
-                         font=ctk.CTkFont(size=13, weight="bold")).grid(row=i, column=1, sticky="e", padx=10)
+            dot = ctk.CTkLabel(grid, text="", width=14, height=22, font=ctk.CTkFont(size=12))
+            dot.grid(row=i, column=1, sticky="e")
+            price = ctk.CTkLabel(grid, textvariable=self.read_vars[lot], text_color=P["gold"], height=22,
+                                 font=ctk.CTkFont(size=13, weight="bold"))
+            price.grid(row=i, column=2, sticky="e", padx=(4, 10))
             ctk.CTkLabel(grid, textvariable=self.unit_vars[lot], text_color=MUTED, height=22
-                         ).grid(row=i, column=2, sticky="e", padx=10)
+                         ).grid(row=i, column=3, sticky="e", padx=10)
+            self.read_dots[lot] = dot
+            self.read_tips[lot] = (Tooltip(dot, ""), Tooltip(price, ""))   # fiabilité au survol
         ctk.CTkFrame(grid, fg_color="transparent", height=4).grid(row=len(self.cfg.lots) + 1, column=0)
-        grid.grid_columnconfigure(1, weight=1)
+        grid.grid_columnconfigure(1, weight=1)   # la pastille reste collée au prix
         self.read_empty.pack(anchor="w", fill="x", padx=14, pady=4)
         ctk.CTkLabel(side, textvariable=self.status_var, text_color=MUTED, wraplength=380,
                      justify="left").pack(side="bottom", anchor="w", padx=14, pady=(0, 10))
@@ -1436,6 +1510,18 @@ class App(ctk.CTk):
         self.char_lbl.pack(side="left", fill="x", expand=True)
         self.char_btn = ctk.CTkButton(r, text="", width=200, height=26, fg_color=BTN2, text_color=P["text"],
                                       hover_color=BTN2_HOVER, command=self._link_character)
+        r = self._row(pb)
+        self._tip(ctk.CTkLabel(r, text="Couleur du profil", anchor="w"),
+                  "Montrée dans le HUD, sur la pastille Profil et sur l'icône près de l'horloge : en "
+                  "multi-compte, tu vois d'un coup d'œil quel profil est actif.").pack(side="left", padx=(0, 10))
+        self.pcolor_btns = {}
+        for key, (label, color) in style.PROFILE_COLORS.items():
+            sw = ctk.CTkButton(r, text="", width=24, height=24, corner_radius=12, fg_color=color,
+                               hover_color=color, border_width=3, command=lambda k=key: self._set_profile_color(k))
+            sw.pack(side="left", padx=2)
+            self._tip(sw, label)
+            self.pcolor_btns[key] = sw
+        self._refresh_profile_colors()
         adv = self._collapsible(page, "Avancé : assistant et zones manuelles",
                                 "Seulement si la calibration automatique échoue ou place mal une zone.")
         top = self._section(adv, "Assistant", "Pas à pas, avec une vérification à la fin.")
@@ -1517,6 +1603,24 @@ class App(ctk.CTk):
         self.hud_move_btn = ctk.CTkButton(r, text="Déplacer", width=90, height=24, fg_color=BTN2,
                                           text_color=P["text"], hover_color=BTN2_HOVER, command=self._hud_move)
         self.hud_move_btn.pack(side="left", padx=10)
+        r = self._row(b)
+        ctk.CTkLabel(r, text="Taille", width=70, anchor="w").pack(side="left", padx=(42, 0))
+        seg = ctk.CTkSegmentedButton(r, values=[v[0] for v in HUD_SIZES.values()], command=self._set_hud_size)
+        seg.set(HUD_SIZES.get(self.cfg.hud_size, HUD_SIZES["normal"])[0])
+        seg.pack(side="left")
+        ctk.CTkLabel(r, text="Contenu", width=70, anchor="w").pack(side="left", padx=(16, 0))
+        seg = ctk.CTkSegmentedButton(r, values=list(HUD_CONTENTS.values()), command=self._set_hud_content)
+        seg.set(HUD_CONTENTS.get(self.cfg.hud_content, HUD_CONTENTS["both"]))
+        seg.pack(side="left")
+        self._tip(seg, "État : actif, pause… seulement. Action : la dernière action seulement. Pendant un "
+                       "parcours, la progression s'affiche toujours.")
+        r = self._row(b)
+        ctk.CTkLabel(r, text="Opacité", width=70, anchor="w").pack(side="left", padx=(42, 0))
+        sl = ctk.CTkSlider(r, from_=0.5, to=1.0, number_of_steps=10, width=180, command=self._set_hud_opacity)
+        sl.set(min(1.0, max(0.5, self.cfg.hud_opacity)))
+        sl.pack(side="left")
+        self.hud_op_lbl = ctk.CTkLabel(r, text=f"{self.cfg.hud_opacity:.0%}", text_color=MUTED, width=44)
+        self.hud_op_lbl.pack(side="left", padx=6)
         tr = self._switch(b, "Icône dans la zone de notification (près de l'horloge)", "tray",
                           tip="Clic = ouvrir l'outil. Clic droit : pause, HUD, aide-mémoire, quitter. "
                               "La pastille montre l'état : vert actif, orange pause, bleu parcours en cours, "
@@ -1598,10 +1702,22 @@ class App(ctk.CTk):
                      tip="Beaucoup plus rapide que Tesseract, qui reste utilisé en secours.")
         ctk.CTkButton(b, text="Réapprendre les chiffres", width=180, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._reset_digits).pack(anchor="w", pady=4)
+        b = self._section(page, "Sauvegarde", "Réglages, profils (avec leurs personnages et couleurs), "
+                                              "calibration et chiffres appris, dans un seul fichier.",
+                          tip="Pour changer de PC ou réinstaller. Restaurer remplace les réglages actuels "
+                              "(ils sont d'abord gardés dans le dossier « sauvegardes ») puis redémarre l'outil.")
+        r = self._row(b)
+        ctk.CTkButton(r, text="💾 Sauvegarder…", width=150, command=self._backup).pack(side="left")
+        ctk.CTkButton(r, text="Restaurer…", width=120, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      command=self._restore).pack(side="left", padx=8)
         b = self._section(page, "Mises à jour et journal", f"Version {core.app_version()}.",
                           tip="Le journal (fichier) garde l'historique des messages et des erreurs : à "
                               "joindre quand tu signales un problème.")
         self._switch(b, "Vérifier au démarrage si une nouvelle version est publiée (GitHub)", "check_updates")
+        if core.parse_version(core.app_version()):
+            ctk.CTkButton(b, text="Quoi de neuf dans cette version ?", width=240, fg_color=BTN2, text_color=P["text"],
+                          hover_color=BTN2_HOVER, command=lambda: self._whats_new(force=True)
+                          ).pack(anchor="w", pady=(4, 2))
         r = self._row(b)
         ctk.CTkButton(r, text="Ouvrir le dossier du journal", width=200, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._open_log_dir).pack(side="left")
@@ -1745,6 +1861,7 @@ class App(ctk.CTk):
         self._log(msg, "CAL")
         self._refresh_status()
         self._refresh_character()
+        self._refresh_profile_colors()
 
     def _switch_profile(self, name: str):
         if name == self.cfg.profile:
@@ -2421,8 +2538,15 @@ class App(ctk.CTk):
                 else:
                     self.read_grid.pack(fill="x", padx=12, pady=6)
         self.qty_var.set(str(sr.selected) if sr.selected else "?")
+        qcolors = {"good": P["green"], "doubt": P["orange"], "bad": P["red"]}
         for lot, var in self.read_vars.items():
             r = sr.prices.get(lot)
+            level, why = reading_quality(r, self.cfg.min_confidence)
+            if sr.engine and level:
+                why += " · " + {"chiffres": "lecture rapide", "tesseract": "Tesseract"}.get(sr.engine, sr.engine)
+            self.read_dots[lot].configure(text="●" if level else "", text_color=qcolors.get(level, MUTED))
+            for tip in self.read_tips[lot]:
+                tip.text = why
             if r and r.value is not None:
                 var.set(fmt(r.value))
                 self.unit_vars[lot].set(f"{r.value / lot:,.1f}/u".replace(",", " ") if lot > 1 else "")
@@ -2981,6 +3105,8 @@ class App(ctk.CTk):
         paused = self.engine.paused
         for key, (text, color) in self._chip_values().items():
             bg, fg = style.CHIP[color]
+            if key == "profile":                     # couleur du profil
+                bg, fg = self._profile_color(), style.ON_PROFILE
             self.chips[key].configure(text=text, fg_color=bg, text_color=fg)
         self._refresh_hud()
         self.pause_btn.configure(text="▶ Reprendre" if paused else "⏸ Pause")
@@ -3080,6 +3206,7 @@ class App(ctk.CTk):
         self.loop_stop.configure(text="■ Arrêter", state="normal")
         self._loop_show()
         self._tray_update()
+        self._refresh_hud()
 
     def _loop_progress(self, d: dict):
         if self._loop is None or d.get("finished"):
@@ -3453,6 +3580,7 @@ class App(ctk.CTk):
         self._log(msg, "CAL")
         self._refresh_status()
         self._refresh_character()
+        self._refresh_profile_colors()
         self._hud_message(f"Profil « {self.cfg.profile} »", self._char or "", P["cyan"])
 
     def _refresh_character(self):
@@ -3522,16 +3650,20 @@ class App(ctk.CTk):
             self._hud_moving = False
 
     def _hud_create(self):
-        t, card = rounded_popup(self, radius=10, alpha=0.9)
+        c = self.cfg
+        size = HUD_SIZES.get(c.hud_size, HUD_SIZES["normal"])[1]
+        t, card = rounded_popup(self, radius=10, alpha=min(1.0, max(0.5, c.hud_opacity)))
         self._hud, self._hud_card = t, card
         row = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(padx=(10, 14), pady=5)
+        row.pack(padx=(10, 14), pady=max(3, size // 2 - 1))
         ctk.CTkLabel(row, text="", image=self._logo_img_small()).pack(side="left", padx=(0, 8))
-        self._hud_state = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=12, weight="bold"))
+        self._hud_profile = ctk.CTkLabel(row, text="", corner_radius=8, height=size + 6, text_color=style.ON_PROFILE,
+                                         font=ctk.CTkFont(size=size - 1, weight="bold"))
+        self._hud_state = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=size, weight="bold"))
         self._hud_state.pack(side="left")
-        self._hud_head = ctk.CTkLabel(row, text="", text_color=P["text"], font=ctk.CTkFont(size=12, weight="bold"))
+        self._hud_head = ctk.CTkLabel(row, text="", text_color=P["text"], font=ctk.CTkFont(size=size, weight="bold"))
         self._hud_head.pack(side="left", padx=(10, 0))
-        self._hud_sub = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=12))
+        self._hud_sub = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=size))
         self._hud_sub.pack(side="left", padx=(8, 0))
         pos = self.cfg.hud_pos
         try:
@@ -3557,23 +3689,83 @@ class App(ctk.CTk):
         w = self._hud
         if w is None or not w.winfo_exists():
             return
+        c = self.cfg
         state = ("pause" if self.engine.paused else "loop" if self._loop is not None
                  else "calib" if not self._calibrated() else "ok")
         color, text = TRAY_STATES[state]
         chip = {"ok": "green", "pause": "orange", "loop": "grey", "calib": "red"}[state]
-        self._hud_state.configure(text=f"● {text}", text_color=P["cyan"] if state == "loop" else style.CHIP[chip][1])
+        if len(c.profile_names()) > 1:          # multi-compte : profil actif dans sa couleur
+            self._hud_profile.configure(text=f" {c.profile} ", fg_color=self._profile_color())
+            if not self._hud_profile.winfo_ismapped():
+                self._hud_profile.pack(side="left", padx=(0, 8), before=self._hud_state)
+        else:
+            self._hud_profile.pack_forget()
+        show_state = c.hud_content != "action" or self._hud_moving
+        show_action = c.hud_content != "state" or self._loop is not None or self._hud_moving
+        self._hud_state.configure(text=f"● {text}" if show_state else "●",
+                                  text_color=P["cyan"] if state == "loop" else style.CHIP[chip][1])
         lp = self._loop
         if self._hud_moving:
-            self._hud_head.configure(text="Glisse-moi où tu veux")
-            self._hud_sub.configure(text="(lâche pour terminer)", text_color=MUTED)
-        elif lp is not None:
-            self._hud_head.configure(text=self.LOOP_NAMES.get(lp["kind"], ""))
-            self._hud_sub.configure(text=lp["text"], text_color=P["text"])
+            head, sub, col = "Glisse-moi où tu veux", "(lâche pour terminer)", MUTED
+        elif lp is not None:                    # parcours : progression + comment l'arrêter
+            stop = "arrêt demandé…" if self.engine.stop_requested else f"{c.hotkeys['pause'].upper()} = arrêter"
+            head, sub, col = self.LOOP_NAMES.get(lp["kind"], ""), f"{lp['text']} · {stop}", P["text"]
         else:
             note = self._hud_note
             head, sub, col = note[:3] if note and time.time() < note[3] else self.last_action
-            self._hud_head.configure(text="" if head.startswith("En attente") else head)
-            self._hud_sub.configure(text=sub, text_color=col)
+            if head.startswith("En attente"):
+                head = ""
+        self._hud_head.configure(text=head if show_action else "")
+        self._hud_sub.configure(text=sub if show_action else "", text_color=col)
+
+    def _hud_rebuild(self):
+        """Taille / contenu changés : le HUD est recréé."""
+        w = self._hud
+        if w is not None and w.winfo_exists():
+            w.destroy()
+        self._hud = None
+        self._apply_hud()
+
+    def _set_hud_size(self, label: str):
+        self.cfg.hud_size = next((k for k, (lbl, _s) in HUD_SIZES.items() if lbl == label), "normal")
+        self._save_cfg()
+        self._hud_rebuild()
+
+    def _set_hud_content(self, label: str):
+        self.cfg.hud_content = next((k for k, lbl in HUD_CONTENTS.items() if lbl == label), "both")
+        self._save_cfg()
+        self._refresh_hud()
+
+    def _set_hud_opacity(self, value: float):
+        self.cfg.hud_opacity = round(float(value), 2)
+        self.hud_op_lbl.configure(text=f"{self.cfg.hud_opacity:.0%}")
+        w = self._hud
+        if w is not None and w.winfo_exists():
+            try:
+                w.attributes("-alpha", self.cfg.hud_opacity)
+            except tk.TclError:
+                pass
+        if getattr(self, "_hud_op_save", None):
+            self.after_cancel(self._hud_op_save)
+        self._hud_op_save = self.after(500, self._save_cfg)
+
+    # ---- couleur du profil
+    def _profile_color(self, name: str = None) -> str:
+        return style.profile_color(name or self.cfg.profile, self.cfg.profile_colors)
+
+    def _set_profile_color(self, key: str):
+        self.cfg.profile_colors[self.cfg.profile] = key
+        self._save_cfg()
+        self._refresh_profile_colors()
+        self._refresh_status()
+
+    def _refresh_profile_colors(self):
+        btns = getattr(self, "pcolor_btns", None)
+        if not btns:
+            return
+        current = self._profile_color()
+        for key, sw in btns.items():
+            sw.configure(border_color=P["text"] if style.PROFILE_COLORS[key][1] == current else P["card"])
 
     def _hud_flash(self, color: str, ms: int = 1800):
         """Nouveau résultat : le bord du HUD prend sa couleur un instant."""
@@ -3644,6 +3836,106 @@ class App(ctk.CTk):
         self._refresh_hud()
         self._hud_visibility()
 
+    # ---- « Quoi de neuf » après une mise à jour
+    def _whats_new(self, force: bool = False):
+        c, cur = self.cfg, core.app_version()
+        if core.parse_version(cur) is None:
+            return                                 # version de développement
+        if force:
+            items = whats_new("", cur)[-1:]
+        else:
+            if c.last_seen_version == cur:
+                return
+            # 1re installation (rien de calibré) : rien à annoncer
+            items = whats_new(c.last_seen_version, cur) if (c.last_seen_version or self._calibrated()) else []
+            c.last_seen_version = cur
+            self._save_cfg()
+        if not items:
+            return
+        w = ctk.CTkToplevel(self)
+        brand(w)
+        w.title("Quoi de neuf")
+        w.resizable(False, False)
+        w.attributes("-topmost", True)
+        w.transient(self)
+        hr = ctk.CTkFrame(w, fg_color="transparent")
+        hr.pack(fill="x", padx=18, pady=(16, 4))
+        ctk.CTkLabel(hr, text="", image=self._logo_img).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(hr, text=f"Quoi de neuf dans la {cur}", font=ctk.CTkFont(size=17, weight="bold")
+                     ).pack(side="left")
+        keys = {"pause": c.hotkeys["pause"].upper(), "hud": c.hotkeys["hud"].upper()}
+        for version, lines in reversed(items):
+            if len(items) > 1:
+                ctk.CTkLabel(w, text=f"v{version}", text_color=P["gold"], anchor="w",
+                             font=ctk.CTkFont(size=13, weight="bold")).pack(fill="x", padx=18, pady=(10, 2))
+            for line in lines:
+                r = ctk.CTkFrame(w, fg_color="transparent")
+                r.pack(fill="x", padx=18, pady=2)
+                ctk.CTkLabel(r, text="•", text_color=P["accent"], width=14, anchor="n").pack(side="left", anchor="n")
+                ctk.CTkLabel(r, text=line.format(**keys), anchor="w", justify="left", wraplength=470
+                             ).pack(side="left", fill="x")
+        bar = ctk.CTkFrame(w, fg_color="transparent")
+        bar.pack(fill="x", padx=18, pady=(16, 16))
+        ctk.CTkButton(bar, text="OK", width=100, command=w.destroy).pack(side="right")
+        ctk.CTkButton(bar, text="Page de la version", width=150, fg_color=BTN2, text_color=P["text"],
+                      hover_color=BTN2_HOVER, command=lambda: self._open_url(
+                          f"https://github.com/{core.GITHUB_REPO}/releases/tag/v{cur.lstrip('v')}")
+                      ).pack(side="right", padx=8)
+        w.bind("<Escape>", lambda _e: w.destroy())
+        w.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - w.winfo_reqwidth()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - w.winfo_reqheight()) // 3
+        w.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+    # ---- sauvegarde / restauration
+    def _backup(self):
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Sauvegarder les réglages", defaultextension=".zip",
+            initialfile=f"DofusPriceHelper-sauvegarde-{time.strftime('%Y-%m-%d')}.zip",
+            filetypes=[("Sauvegarde Dofus Price Helper", "*.zip")])
+        if not path:
+            return
+        self._apply_settings()                     # réglages en cours d'édition compris
+        try:
+            dofus_backup.make_backup(path)
+        except (OSError, ValueError) as e:
+            self._log(f"[Sauvegarde] Impossible : {e}", "ERROR")
+            return
+        self._log(f"[Sauvegarde] Créée : {path}", "OK")
+        dofus_update.reveal(path)
+
+    def _restore(self):
+        from tkinter import filedialog
+        if self.engine._lock.locked() or self._loop is not None:
+            self._log("[Sauvegarde] Une action est en cours : restaure quand elle est finie.", "WARN")
+            return
+        path = filedialog.askopenfilename(parent=self, title="Restaurer une sauvegarde",
+                                          filetypes=[("Sauvegarde Dofus Price Helper", "*.zip")])
+        if not path:
+            return
+        try:
+            info = dofus_backup.read_backup(path)
+        except ValueError as e:
+            self._log(f"[Sauvegarde] {e}.", "ERROR")
+            return
+        profiles = ", ".join(info["profiles"][:6]) + ("…" if len(info["profiles"]) > 6 else "")
+        if not self._confirm("Restaurer la sauvegarde",
+                             f"Sauvegarde du {info['date']} (version {info['version']}).\nProfils : {profiles}.\n\n"
+                             "Tes réglages, profils et calibration actuels seront remplacés. Ils sont d'abord "
+                             "gardés dans le dossier « sauvegardes ». L'outil redémarre ensuite.",
+                             ok="Restaurer", danger=True):
+            return
+        try:
+            keep = dofus_backup.restore_backup(path)
+        except (OSError, ValueError) as e:
+            self._log(f"[Sauvegarde] Restauration impossible : {e}", "ERROR")
+            return
+        core.log_line(f"[Sauvegarde] Restaurée depuis {path} ; anciens réglages dans {keep}", "OK")
+        self._restored = True                      # ne pas réécrire la config en fermant
+        self.restart_requested = True
+        self._on_close()
+
     # ---- zone de notification
     def _tray_update(self):
         if self.engine.paused:
@@ -3654,7 +3946,9 @@ class App(ctk.CTk):
             state = "calib"
         else:
             state = "ok"
-        self.tray.update(state)
+        multi = len(self.cfg.profile_names()) > 1     # couleur du profil : utile seulement s'il y en a plusieurs
+        self.tray.update(state, ring=self._profile_color() if multi else None,
+                         profile=self.cfg.profile if multi else "")
 
     def _apply_tray(self):
         if self.cfg.tray:
@@ -3679,6 +3973,8 @@ class App(ctk.CTk):
             self._toggle_pause()
         elif action == "cheatsheet":
             self._toggle_cheatsheet()
+        elif action == "stop":
+            self._stop_loop()
         elif action == "hud":
             self._toggle_hud()
         elif action == "quit":
@@ -3728,11 +4024,12 @@ class App(ctk.CTk):
             self.cfg.window_geometry = "zoomed" if self.state() == "zoomed" else self.geometry()
         except tk.TclError:
             pass
-        self._apply_settings()
-        try:
-            self.cfg.save()       # taille de la fenêtre, même si un réglage était invalide
-        except OSError:
-            pass
+        if not getattr(self, "_restored", False):      # réglages restaurés : ne pas les écraser
+            self._apply_settings()
+            try:
+                self.cfg.save()       # taille de la fenêtre, même si un réglage était invalide
+            except OSError:
+                pass
         if KEYBOARD_AVAILABLE:
             try:
                 keyboard.unhook_all()
