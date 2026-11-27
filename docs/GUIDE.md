@@ -57,7 +57,7 @@ Quand le titre « Hôtel de vente » est calibré, les zones suivent la fenêtre
 
 Pendant un parcours **F2** ou **Ctrl+F3**, la progression s'affiche en haut de la fenêtre et dans le HUD (« Ligne 34 / 87 · 12 modifiées » ; le total est connu si le compteur « x/100 lots » est calibré). Le bouton **Arrêter**, ou **Arrêter le parcours** dans le menu de l'icône de la zone de notification, interrompt le parcours sans mettre l'outil en pause. En jeu, `Ctrl+Alt+P` l'arrête aussi (et met l'outil en pause).
 
-À la fin d'un Ctrl+F3, un résumé liste les prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et les lignes à revoir. Les 10 derniers résumés restent consultables dans l'onglet **Mes ventes**.
+À la fin d'un Ctrl+F3, un résumé s'ouvre. En tête, un récap : prix modifiés, lignes à revoir, lignes déjà au bon prix, durée, et la raison de l'arrêt si la liste n'a pas été parcourue jusqu'au bout. Dessous, le détail des prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et des lignes à revoir. Un clic sur une ligne la retrouve et la surligne dans le journal. Les 10 derniers résumés restent consultables dans l'onglet **Mes ventes**.
 
 L'onglet **Prix** affiche un aperçu en direct du calcul (« Moins cher 1 000 → ton prix 999 (plancher 700) »), recalculé à chaque réglage.
 
@@ -114,6 +114,7 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
   - Pendant Tout vendre ou Toute la liste, il rappelle la touche pour arrêter (`Ctrl+Alt+P`).
   - Si la mise en vente automatique est coupée, il rappelle « Entrée pour valider » une fois le prix saisi, ou « Ctrl+V puis Entrée » si le prix est seulement copié.
   - Dans l'onglet **Options** : **Déplacer**, taille (petit, normal, grand), opacité, et contenu (état, dernière action, ou les deux).
+  - Option **3 derniers prix sous la ligne** : les trois derniers lots traités (prix lu → prix mis), le plus récent en couleur, aussi pendant un parcours.
 - **Aide-mémoire** (`Ctrl+Alt+H`) : déplaçable ; il reste alors affiché à cet endroit jusqu'au ✕.
 
 **Zone de notification.** Un clic ouvre l'outil. Un clic droit donne accès à la pause, au HUD, à l'aide-mémoire ou à la fermeture, et pendant un parcours à **Arrêter le parcours**. La pastille de l'icône montre l'état : vert actif, orange pause, bleu parcours en cours, rouge calibration à faire. En option, réduire la fenêtre la cache à cet endroit.

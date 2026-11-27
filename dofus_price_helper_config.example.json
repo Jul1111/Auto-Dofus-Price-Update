@@ -83,6 +83,7 @@
   "HUD_SIZE": "normal",
   "HUD_OPACITY": 0.9,
   "HUD_CONTENT": "both",
+  "HUD_HISTORY": false,
   "PROFILE_COLORS": {},
   "LAST_SEEN_VERSION": "",
   "HOTKEYS": {
