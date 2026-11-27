@@ -343,6 +343,11 @@ class Config:
     character_profiles: Dict = field(default_factory=dict)   # personnage -> profil de calibration
     hud: bool = True                  # HUD par-dessus le jeu (les clics le traversent) : résultat des actions
     hud_pos: Optional[List[int]] = None        # position du HUD (choisie avec « Déplacer »)
+    hud_size: str = "normal"          # HUD : "small" | "normal" | "large"
+    hud_opacity: float = 0.9          # HUD : opacité (0.5 .. 1)
+    hud_content: str = "both"         # HUD : "state" (état seul) | "action" (dernière action) | "both"
+    profile_colors: Dict = field(default_factory=dict)       # profil -> couleur (HUD, pastille, icône)
+    last_seen_version: str = ""       # « Quoi de neuf » déjà montré pour cette version
 
     hotkeys: Dict = field(default_factory=lambda: _copy(DEFAULT_HOTKEYS))
 
@@ -396,6 +401,9 @@ class Config:
             cfg.relist_max = cls.relist_max  # v5 : 120 était trop bas pour une liste de 100+ lots
         if int(data.get("CONFIG_VERSION", 1)) < 6:
             cfg.hud = True   # v6 : le HUD remplace le popup / bandeau de résultat et le mode compact
+        if not isinstance(cfg.profile_colors, dict):
+            cfg.profile_colors = {}
+        cfg.profile_colors = {str(k): v for k, v in cfg.profile_colors.items() if isinstance(v, str)}
         if not isinstance(cfg.character_profiles, dict):
             cfg.character_profiles = {}
         cfg.character_profiles = {str(k): str(v) for k, v in cfg.character_profiles.items()
@@ -447,6 +455,7 @@ class Config:
         if name not in self.profiles:
             raise KeyError(f"profil inconnu : {name}")
         self.character_profiles = {c: p for c, p in self.character_profiles.items() if p != name}
+        self.profile_colors.pop(name, None)
         path = anchor_path(self, name)
         del self.profiles[name]
         if name != DEFAULT_PROFILE:
