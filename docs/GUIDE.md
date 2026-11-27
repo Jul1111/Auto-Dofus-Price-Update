@@ -129,6 +129,8 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
 
 **Apparence** (onglet **Options**).
 - Thème **Sombre**, **Clair** ou **Comme Windows**, et six couleurs d'accent, avec aperçu avant d'appliquer.
+- **Ambiance** du thème sombre : **Nuit**, **Ambre**, **Forêt** ou **Océan** teintent les fonds, les cartes et les bordures.
+- **Animations** : fondus, survol des boutons en douceur, onglets qui glissent en place, compteurs qui montent. L'option **Animations** les coupe toutes.
 - Style **Verre** : le jeu derrière l'outil apparaît flouté, comme une vitre teintée, avec une teinte réglable. Nécessite Windows 10 (1803+) ou 11 et le thème sombre. Le style **Classique** reste opaque.
 - Taille du texte réglable, aide au survol sur les options, fondus désactivables.
 - Taille et position de la fenêtre mémorisées.

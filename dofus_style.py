@@ -88,6 +88,22 @@ ACCENTS = {
     "cyan": ("Cyan", "#16819a", "#126f85"),
 }
 THEMES = {"dark": "Sombre", "light": "Clair", "system": "Comme Windows"}
+# ambiances du thème sombre : fonds, cartes, bordures et rails teintés (texte et couleurs vives inchangés)
+AMBIENCES = {
+    "night": ("Nuit", {}),
+    "amber": ("Ambre", {"bg": "#15110c", "card": "#1e1812", "card2": "#272017", "border": "#3a2f22",
+                        "input": "#181309", "log_bg": "#100c08", "btn2": "#2e261b", "btn2_hover": "#3a3022",
+                        "track": "#4a3d2c", "track_hover": "#5a4a36", "menu_hover": "#44392a",
+                        "check_border": "#5c4d3a", "log_time": "#74685a"}),
+    "forest": ("Forêt", {"bg": "#0d1411", "card": "#141d18", "card2": "#1b2620", "border": "#26362d",
+                         "input": "#0f1713", "log_bg": "#0a100d", "btn2": "#212d26", "btn2_hover": "#2a3a31",
+                         "track": "#34463b", "track_hover": "#415649", "menu_hover": "#364a3e",
+                         "check_border": "#4a5f52", "log_time": "#5c6e63"}),
+    "ocean": ("Océan", {"bg": "#0b1219", "card": "#111b25", "card2": "#17232f", "border": "#22313f",
+                        "input": "#0d1620", "log_bg": "#080e14", "btn2": "#1c2a37", "btn2_hover": "#253545",
+                        "track": "#2f4255", "track_hover": "#3b5167", "menu_hover": "#32475c",
+                        "check_border": "#475d72", "log_time": "#5b6c7c"}),
+}
 # couleur par profil (multi-compte) : vives, avec du texte sombre dessus, lisibles dans les 2 thèmes
 PROFILE_COLORS = {"blue": ("Bleu", "#6b8cff"), "green": ("Vert", "#3ecf8e"), "gold": ("Or", "#f2b134"),
                   "red": ("Rouge", "#f0616d"), "violet": ("Violet", "#b392f0"), "cyan": ("Cyan", "#5ccfe6"),
@@ -120,7 +136,7 @@ CHIP_LIGHT = {
 
 P = dict(DARK)                # palette ACTIVE (modifiée en place par configure)
 CHIP = dict(CHIP_DARK)
-CURRENT = {"theme": "dark", "accent": "blue"}
+CURRENT = {"theme": "dark", "accent": "blue", "ambience": "night"}
 GLASS_BG = "#000000"          # noir = verre (laisse voir le flou)
 FONT = "Segoe UI" if sys.platform == "win32" else "Roboto"
 MONO = "Consolas" if sys.platform == "win32" else "Courier"
@@ -146,9 +162,13 @@ def resolve_theme(theme: str) -> str:
     return theme if theme in ("dark", "light") else "dark"
 
 
-def palette(theme: str = "dark", accent: str = "blue") -> dict:
-    """Palette complète pour ce thème et cet accent (sans rien changer : sert à l'aperçu)."""
-    pal = dict(LIGHT if resolve_theme(theme) == "light" else DARK)
+def palette(theme: str = "dark", accent: str = "blue", ambience: str = "night") -> dict:
+    """Palette complète pour ce thème, cet accent et cette ambiance (sans rien changer : sert à l'aperçu).
+    L'ambiance ne s'applique qu'au thème sombre."""
+    dark = resolve_theme(theme) != "light"
+    pal = dict(DARK if dark else LIGHT)
+    if dark:
+        pal.update(AMBIENCES.get(ambience, AMBIENCES["night"])[1])
     _, pal["accent"], pal["accent_hover"] = ACCENTS.get(accent, ACCENTS["blue"])
     return pal
 
@@ -157,13 +177,14 @@ def chips(theme: str = "dark") -> dict:
     return dict(CHIP_LIGHT if resolve_theme(theme) == "light" else CHIP_DARK)
 
 
-def configure(theme: str = "dark", accent: str = "blue") -> None:
+def configure(theme: str = "dark", accent: str = "blue", ambience: str = "night") -> None:
     """Choisit la palette ACTIVE (avant de créer les widgets et avant apply_theme)."""
     P.clear()
-    P.update(palette(theme, accent))
+    P.update(palette(theme, accent, ambience))
     CHIP.clear()
     CHIP.update(chips(theme))
-    CURRENT.update(theme=resolve_theme(theme), accent=accent if accent in ACCENTS else "blue")
+    CURRENT.update(theme=resolve_theme(theme), accent=accent if accent in ACCENTS else "blue",
+                   ambience=ambience if ambience in AMBIENCES else "night")
 
 
 def is_dark() -> bool:
@@ -180,6 +201,18 @@ def saved_look(path) -> tuple:
         data = {}
     theme, accent = data.get("THEME", "dark"), data.get("ACCENT", "blue")
     return (theme if theme in THEMES else "dark", accent if accent in ACCENTS else "blue")
+
+
+def saved_ambience(path) -> str:
+    """Ambiance enregistrée dans la config (« night » par défaut)."""
+    import json
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.loads(f.read()) or {}
+    except (OSError, ValueError):
+        data = {}
+    amb = data.get("AMBIENCE", "night")
+    return amb if amb in AMBIENCES else "night"
 
 
 def apply_theme(ctk) -> None:
@@ -319,6 +352,85 @@ def set_glass(window, on: bool, opacity: float = 0.6) -> bool:
         return bool(ctypes.windll.user32.SetWindowCompositionAttribute(hwnd, byref(data)))
     except Exception:
         return False
+
+
+# ------------------------------------------------------------------ micro-animations
+def ease_out(t: float) -> float:
+    """Courbe douce : rapide au début, lente à la fin (0 -> 0, 1 -> 1)."""
+    t = max(0.0, min(1.0, t))
+    return 1 - (1 - t) ** 3
+
+
+def _rgb(widget, color: str) -> tuple:
+    r, g, b = widget.winfo_rgb(color)
+    return r // 257, g // 257, b // 257
+
+
+def blend(widget, a: str, b: str, t: float) -> str:
+    """Couleur entre a et b (noms Tk ou #rrggbb acceptés)."""
+    ca, cb = _rgb(widget, a), _rgb(widget, b)
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
+
+
+def smooth_hover(ctk, enabled, ms: int = 120) -> None:
+    """Survol des boutons CustomTkinter en fondu (au lieu d'un changement sec de couleur).
+    Le clic garde son petit effet « enfoncé ». enabled() : option Animations."""
+    B = ctk.CTkButton
+    if getattr(B, "_smooth_hover", False):
+        return
+    enter0, leave0 = B._on_enter, B._on_leave
+    steps = max(1, ms // 16)
+
+    def paint(btn, color):
+        btn._canvas.itemconfig("inner_parts", outline=color, fill=color)
+        for lab in (btn._text_label, btn._image_label):
+            if lab is not None:
+                lab.configure(bg=color)
+
+    def current(btn):
+        items = btn._canvas.find_withtag("inner_parts")
+        return btn._canvas.itemcget(items[0], "fill") if items else None
+
+    def run(btn, target, final):
+        start = current(btn)
+        if not start or start == target:
+            final()
+            return
+        token = object()
+        btn._hover_tween = token
+
+        def tick(i=1):
+            try:
+                if getattr(btn, "_hover_tween", None) is not token or not btn.winfo_exists():
+                    return
+                if i >= steps:
+                    btn._hover_tween = None
+                    final()
+                    return
+                paint(btn, blend(btn, start, target, ease_out(i / steps)))
+                btn.after(16, lambda: tick(i + 1))
+            except Exception:
+                btn._hover_tween = None
+        tick()
+
+    def on_enter(self, event=None):
+        if not enabled() or not (self._hover is True and self._state == "normal"):
+            self._hover_tween = None
+            return enter0(self, event)
+        self._mouse_inside = True
+        color = self._fg_color if self._hover_color is None else self._hover_color
+        run(self, self._apply_appearance_mode(color), lambda: enter0(self))
+
+    def on_leave(self, event=None):
+        if not enabled():
+            self._hover_tween = None
+            return leave0(self, event)
+        self._mouse_inside = False
+        self._click_animation_running = False
+        color = self._bg_color if self._fg_color == "transparent" else self._fg_color
+        run(self, self._apply_appearance_mode(color), lambda: leave0(self))
+
+    B._on_enter, B._on_leave, B._smooth_hover = on_enter, on_leave, True
 
 
 # ------------------------------------------------------------------ fondus (popups, bandeau)

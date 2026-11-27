@@ -45,7 +45,7 @@ import dofus_logo
 import dofus_style as style
 from dofus_style import P
 
-style.configure(*style.saved_look(core.CONFIG_PATH))   # thème et accent : avant les couleurs ci-dessous
+style.configure(*style.saved_look(core.CONFIG_PATH), style.saved_ambience(core.CONFIG_PATH))   # thème et accent : avant les couleurs ci-dessous
 
 try:
     import keyboard
@@ -653,6 +653,8 @@ WHATS_NEW = {
         "quitter le jeu.",
         "Nouveau look : en-tête redessiné, icônes maison à la place des emojis, barre de titre aux couleurs "
         "du thème (Windows 11). Le panneau Activité montre l'écart de prix (▼ 4 %).",
+        "Journal en cartes : une barre de couleur et une icône par ligne. Ambiances du thème sombre "
+        "(Nuit, Ambre, Forêt, Océan) et petites animations (survol, onglets, compteurs).",
     ],
 }
 
@@ -888,6 +890,7 @@ class App(ctk.CTk):
         super().__init__()
         self.cfg = core.Config.load()
         style.apply_theme(ctk)
+        style.smooth_hover(ctk, lambda: ANIMATE["on"])      # survol des boutons en fondu
         self.configure(fg_color=P["bg"])
         self.title(f"Dofus Price Helper {core.app_version()}")
         brand(self)
@@ -944,6 +947,7 @@ class App(ctk.CTk):
         self._build_vars()
         self._build_ui()
         self._setup_log_tags()
+        self._render_log()                  # journal vide : message d'accueil
 
         threading.Thread(target=self._worker, daemon=True).start()
         self._poll_ui()
@@ -1235,7 +1239,8 @@ class App(ctk.CTk):
                                         hover_color=P["green_hover"], text_color=style.CHIP["green"][1])   # affiché si une version plus récente existe
 
         # ---------------- onglets
-        tabs = ctk.CTkTabview(self, anchor="nw", fg_color="transparent", corner_radius=12)
+        tabs = ctk.CTkTabview(self, anchor="nw", fg_color="transparent", corner_radius=12,
+                              command=lambda: self._on_tab_change())
         tabs.grid(row=1, column=0, sticky="nsew", padx=(8, 4), pady=(0, 4))
         self.tabs = tabs
         for name in ("Accueil", "Prix", "Mes ventes", "Calibration", "Raccourcis", "Options"):
@@ -1453,7 +1458,7 @@ class App(ctk.CTk):
         if all_done:
             self.steps_outer.pack_forget()
         for key, lbl in self.tiles.items():
-            lbl.configure(text=str(self.stats[key]))
+            self._count_to(lbl, self.stats[key])
         note = self.relist_all_note
         if note is not None:
             if self.cfg.relist_auto:
@@ -1926,13 +1931,21 @@ class App(ctk.CTk):
             tm.configure(state="disabled")
         b = self._section(page, "Apparence")
         self._look = {"theme": self.cfg.theme if self.cfg.theme in style.THEMES else "dark",
-                      "accent": self.cfg.accent if self.cfg.accent in style.ACCENTS else "blue"}
+                      "accent": self.cfg.accent if self.cfg.accent in style.ACCENTS else "blue",
+                      "ambience": self.cfg.ambience if self.cfg.ambience in style.AMBIENCES else "night"}
         r = self._row(b)
         self._tip(ctk.CTkLabel(r, text="Thème", width=120, anchor="w"),
                   "Comme Windows : suit le mode clair / sombre de Windows (Paramètres › Couleurs).").pack(side="left")
         self.theme_seg = ctk.CTkSegmentedButton(r, values=list(style.THEMES.values()), command=self._pick_theme)
         self.theme_seg.set(style.THEMES[self._look["theme"]])
         self.theme_seg.pack(side="left")
+        r = self._row(b)
+        self._tip(ctk.CTkLabel(r, text="Ambiance", width=120, anchor="w"),
+                  "Teinte des fonds, cartes et bordures du thème sombre.").pack(side="left")
+        self.amb_seg = ctk.CTkSegmentedButton(r, values=[v[0] for v in style.AMBIENCES.values()],
+                                              command=self._pick_ambience)
+        self.amb_seg.set(style.AMBIENCES[self._look["ambience"]][0])
+        self.amb_seg.pack(side="left")
         r = self._row(b)
         ctk.CTkLabel(r, text="Couleur", width=120, anchor="w").pack(side="left")
         self.accent_btns = {}
@@ -2033,6 +2046,10 @@ class App(ctk.CTk):
         self._look["theme"] = next((k for k, v in style.THEMES.items() if v == label), "dark")
         self._refresh_look()
 
+    def _pick_ambience(self, label: str):
+        self._look["ambience"] = next((k for k, v in style.AMBIENCES.items() if v[0] == label), "night")
+        self._refresh_look()
+
     def _pick_accent(self, key: str):
         self._look["accent"] = key
         self._refresh_look()
@@ -2041,7 +2058,9 @@ class App(ctk.CTk):
         for key, sw in self.accent_btns.items():
             sw.configure(border_color=P["text"] if key == self._look["accent"] else P["card"])
         self._render_look_preview()
-        pending = (self._look["theme"], self._look["accent"]) != (self.cfg.theme, self.cfg.accent)
+        self.amb_seg.configure(state="normal" if style.resolve_theme(self._look["theme"]) == "dark" else "disabled")
+        pending = (self._look["theme"], self._look["accent"], self._look["ambience"]) != \
+            (self.cfg.theme, self.cfg.accent, self.cfg.ambience)
         if pending and not self.look_apply.winfo_manager():
             self.look_apply.pack(fill="x", pady=(4, 2), after=self.look_preview)
         elif not pending:
@@ -2090,7 +2109,8 @@ class App(ctk.CTk):
         if self.engine._lock.locked() or self._loop is not None:
             self._log("[Apparence] Une action est en cours : applique le thème quand elle est finie.", "WARN")
             return
-        self.cfg.theme, self.cfg.accent = self._look["theme"], self._look["accent"]
+        self.cfg.theme, self.cfg.accent, self.cfg.ambience = (self._look["theme"], self._look["accent"],
+                                                              self._look["ambience"])
         self._save_cfg()
         self.restart_requested = True
         self._on_close()
@@ -2119,7 +2139,8 @@ class App(ctk.CTk):
         ctk.set_widget_scaling(s)
         size = self._log_font_size()
         self.log_text.configure(font=("Consolas", size))
-        self.log_text.tag_configure("HDR", font=("Consolas", size, "bold"))
+        self._log_fonts()
+        self._render_log()
         try:
             self.cfg.save()
         except OSError as e:
@@ -2292,22 +2313,73 @@ class App(ctk.CTk):
                                      "cat": "sale", "block": self._block, "header": True})
         self._render_log()
 
+    def _log_plain(self) -> str:
+        """Lignes affichées du journal, en texte simple (pour « Copier »)."""
+        lines = []
+        for e in self.log_entries:
+            if not self._entry_visible(e):
+                continue
+            if e["header"]:
+                b = self.log_blocks.get(e["block"])
+                if b:
+                    lines.append(b["title"])
+                continue
+            ind = "   " if e["block"] is not None else ""
+            lines.append(f"{e['t']}  {ind}{LOG_ICONS[e.get('kind', 'info')]} {e['msg'].lstrip()}")
+        return "\n".join(lines)
+
     def _copy_log(self):
         self.clipboard_clear()
-        self.clipboard_append(self.log_text.get("1.0", "end-1c"))
+        self.clipboard_append(self._log_plain())
         self.copy_btn.configure(text="Copié ✓")
         self.after(1500, lambda: self.copy_btn.configure(text="Copier"))
 
     ICON_COLORS = {"sale": "gold", "update": "cyan", "warn": "orange", "error": "red", "cal": "cyan",
                    "ok": "green", "info": "log_time"}
 
+    LOG_BARS = {"sale": "gold", "update": "cyan", "warn": "orange", "error": "red", "cal": "violet",
+                "ok": "green", "info": "track"}
+    LOG_ICON_NAMES = {"sale": "tag", "update": "edit", "warn": "warn", "error": "error", "cal": "target",
+                      "ok": "check", "info": "dot"}
+
+    def _log_fonts(self):
+        size = self._log_font_size()
+        t = self.log_text
+        t.tag_configure("CARD", font=(style.FONT, size))
+        t.tag_configure("TIME", font=(style.MONO, max(7, size - 1)))
+        t.tag_configure("HDR", font=(style.FONT, size, "bold"))
+        t.tag_configure("EMPTY", font=(style.FONT, size + 1))
+        t.tag_configure("EMPTY_HINT", font=(style.FONT, size))
+        self._log_icon_imgs = {}
+
+    def _log_icon(self, kind: str):
+        """Icône d'une ligne du journal (image Tk, à la taille du texte)."""
+        imgs = self._log_icon_imgs
+        if kind not in imgs:
+            from PIL import Image, ImageTk
+            px = self._log_font_size() + 5
+            img = dofus_icons.icon_image(self.LOG_ICON_NAMES.get(kind, "dot"),
+                                         P[self.ICON_COLORS.get(kind, "log_time")], px)
+            imgs[kind] = ImageTk.PhotoImage(img.resize((px, px), Image.LANCZOS))
+        return imgs[kind]
+
     def _setup_log_tags(self):
         t = self.log_text
+        # chaque ligne est une « carte » : fond légèrement plus clair, barre de couleur à gauche
+        t.tag_configure("CARD", background=P["card"] if style.is_dark() else P["card2"],
+                        spacing1=2, spacing3=2, rmargin=6)
+        for kind, color in self.LOG_BARS.items():
+            t.tag_configure(f"B_{kind}", lmargincolor=P[color], lmargin1=4, lmargin2=4)
+        t.tag_configure("B_hdr", lmargincolor=P["cyan"], lmargin1=4, lmargin2=4)
+        t.tag_configure("GAP", font=(style.MONO, 2))
+        t.tag_configure("EMPTY", foreground=P["text"], justify="center", spacing1=26)
+        t.tag_configure("EMPTY_HINT", foreground=MUTED, justify="center", spacing1=4)
+        self._log_fonts()
         for tag, color in TAG_COLORS.items():
             t.tag_configure(tag, foreground=color)
         for kind, color in self.ICON_COLORS.items():
             t.tag_configure(f"I_{kind}", foreground=P[color])
-        t.tag_configure("HDR", foreground=P["cyan"], font=(style.MONO, self._log_font_size(), "bold"))
+        t.tag_configure("HDR", foreground=P["cyan"])
         t.tag_configure("FOCUS", background=P["track"])
         t.tag_bind("PRICE", "<Button-1>", self._on_log_click)
         t.tag_bind("PRICE", "<Enter>", lambda _e: t.configure(cursor="hand2"))
@@ -2358,23 +2430,32 @@ class App(ctk.CTk):
     def _insert_entries(self, entries: list):
         t = self.log_text
         t.configure(state="normal")
+        if getattr(self, "_log_empty", False) and entries:      # le message « journal vide » s'efface
+            t.delete("1.0", "end")
+            self._log_empty = False
         for e in entries:
             if e["header"]:
                 b = self.log_blocks.get(e["block"])
                 if b is None:
                     continue
                 htag = f"hdr{e['block']}"
-                t.insert("end", ("▶ " if b["collapsed"] else "▼ ") + b["title"] + "\n", ("HDR", htag))
+                t.insert("end", " " + ("▶ " if b["collapsed"] else "▼ ") + b["title"] + "\n",
+                         ("CARD", "B_hdr", "HDR", htag))
+                t.insert("end", "\n", ("GAP",))
                 t.tag_bind(htag, "<Button-1>", lambda _e, k=e["block"]: self._toggle_block(k))
                 t.tag_bind(htag, "<Enter>", lambda _e: t.configure(cursor="hand2"))
                 t.tag_bind(htag, "<Leave>", lambda _e: t.configure(cursor=""))
                 continue
-            t.insert("end", e["t"] + "  ", ("TIME",))
             kind = e.get("kind", "info")
-            t.insert("end", ("   " if e["block"] is not None else "") + LOG_ICONS[kind] + " ", (f"I_{kind}",))
-            tags = (e["tag"],) + ((f"e{e['id']}",) if e.get("id") else ()) + (
-                ("PRICE",) if e.get("price") is not None else ())
-            t.insert("end", e["msg"].lstrip() + "\n", tags)
+            card = ("CARD", f"B_{kind}") + ((f"e{e['id']}",) if e.get("id") else ())
+            t.insert("end", " " + ("      " if e["block"] is not None else "") + e["t"] + "  ", card + ("TIME",))
+            at = t.index("end-1c")
+            t.image_create("end", image=self._log_icon(kind), padx=1)
+            for tag in card:
+                t.tag_add(tag, at)
+            tags = card + (e["tag"],) + (("PRICE",) if e.get("price") is not None else ())
+            t.insert("end", "  " + e["msg"].lstrip() + "\n", tags)
+            t.insert("end", "\n", ("GAP",))
         t.see("end")
         t.configure(state="disabled")
 
@@ -2383,7 +2464,19 @@ class App(ctk.CTk):
         t.configure(state="normal")
         t.delete("1.0", "end")
         t.configure(state="disabled")
-        self._insert_entries([e for e in self.log_entries if self._entry_visible(e)])
+        shown = [e for e in self.log_entries if self._entry_visible(e)]
+        self._log_empty = False
+        if shown:
+            self._insert_entries(shown)
+            return
+        filtered = bool(self.log_entries) and LOG_FILTERS.get(self.log_filter.get(), "all") != "all"
+        t.configure(state="normal")
+        t.insert("end", ("Rien avec ce filtre" if filtered else "Le journal est vide") + "\n", ("EMPTY",))
+        t.insert("end", ("Choisis « Tout » pour revoir toutes les lignes." if filtered else
+                         "Chaque action de l'outil s'affiche ici, la plus récente en bas.") + "\n",
+                 ("EMPTY_HINT",))
+        t.configure(state="disabled")
+        self._log_empty = True
 
     def _toggle_block(self, key: int):
         b = self.log_blocks.get(key)
@@ -3525,7 +3618,12 @@ class App(ctk.CTk):
             bg, fg = style.CHIP[color]
             if key == "profile":                     # couleur du profil
                 bg, fg = self._profile_color(), style.ON_PROFILE
-            self.chips[key].configure(text=text, fg_color=bg, text_color=fg)
+            chip = self.chips[key]
+            changed = getattr(chip, "_last_text", None) not in (None, text)
+            chip._last_text = text
+            chip.configure(text=text, fg_color=bg, text_color=fg)
+            if changed:
+                self._pulse(chip, bg, fg)
         self._refresh_hud()
         try:
             n = len(core.digit_reader().known())
@@ -3569,6 +3667,73 @@ class App(ctk.CTk):
             self._refresh_transparent(self)
         self._update_glass_controls()
         style.set_titlebar(self, P["bg"], P["text"], P["border"])
+
+    # ---- micro-animations (option « Animations »)
+    def _on_tab_change(self):
+        """Nouvel onglet : son contenu glisse de quelques pixels vers le haut en s'installant."""
+        if not ANIMATE["on"]:
+            return
+        try:
+            page = self.tabs.tab(self.tabs.get()).winfo_children()[0]
+        except (IndexError, ValueError, tk.TclError):
+            return
+        token = object()
+        self._tab_anim = token
+        steps = 11
+
+        def tick(i=0):
+            if getattr(self, "_tab_anim", None) is not token:
+                return
+            try:
+                page.pack_configure(pady=(round(18 * (1 - style.ease_out(i / steps))), 0))
+            except tk.TclError:
+                return
+            if i < steps:
+                self.after(16, lambda: tick(i + 1))
+        tick()
+
+    def _count_to(self, label, value: int, ms: int = 450):
+        """Le nombre d'une tuile monte (ou descend) jusqu'à sa nouvelle valeur."""
+        start = getattr(label, "_count", None)
+        label._count = value
+        if start is None or start == value or not ANIMATE["on"]:
+            label.configure(text=str(value))
+            return
+        token = object()
+        label._count_anim = token
+        steps = max(1, ms // 16)
+
+        def tick(i=1):
+            if getattr(label, "_count_anim", None) is not token:
+                return
+            v = round(start + (value - start) * style.ease_out(i / steps))
+            try:
+                label.configure(text=str(v))
+            except tk.TclError:
+                return
+            if i < steps:
+                self.after(16, lambda: tick(i + 1))
+        tick()
+
+    def _pulse(self, widget, bg: str, fg: str, ms: int = 520):
+        """Éclat bref d'une pastille dont l'état vient de changer (sa couleur s'éclaircit puis revient)."""
+        if not ANIMATE["on"]:
+            return
+        token = object()
+        widget._pulse_anim = token
+        steps = max(1, ms // 16)
+        hot = style.blend(widget, bg, fg, 0.45)
+
+        def tick(i=1):
+            if getattr(widget, "_pulse_anim", None) is not token:
+                return
+            try:
+                widget.configure(fg_color=style.blend(widget, hot, bg, style.ease_out(i / steps)))
+            except tk.TclError:
+                return
+            if i < steps:
+                self.after(16, lambda: tick(i + 1))
+        tick()
 
     def _draw_head_strip(self):
         """Liseré dégradé sous l'en-tête : accent -> or -> fond de la carte."""
