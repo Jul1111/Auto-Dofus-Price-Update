@@ -21,6 +21,8 @@
 
 > [!NOTE]
 > Le projet est encore en développement actif. Les fonctionnalités, l'interface, les raccourcis et le format des réglages peuvent évoluer fréquemment d'une version à l'autre. Consultez les [notes de version](https://github.com/Jul1111/Auto-Dofus-Price-Update/releases) avant chaque mise à jour ; vos réglages et votre calibration sont conservés lors des mises à jour.
+>
+> **Vos retours sont les bienvenus.** Le projet étant en cours de développement, chaque retour aide à l'améliorer : un bug, une lecture de prix incorrecte, une idée ou une suggestion sur l'interface. Partagez-les dans les [Discussions](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions) ou en ouvrant une [issue](https://github.com/Jul1111/Auto-Dofus-Price-Update/issues).
 
 > [!WARNING]
 > Les conditions d'utilisation d'Ankama interdisent en général les logiciels tiers qui interagissent avec le client de jeu. La mise en vente automatique et la mise à jour de toute la liste sont désactivées par défaut. Leur utilisation se fait à vos risques.
