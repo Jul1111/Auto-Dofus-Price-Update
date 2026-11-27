@@ -17,7 +17,7 @@ Le [README](../README.md) donne l'essentiel. Ce guide détaille chaque fonction.
 
 ## Calibration
 
-Au tout premier lancement, une **visite guidée** en 5 bulles montre la calibration, les touches, la pause, le HUD et le journal. Elle se relance avec **Visite guidée** dans l'onglet **Accueil** (ou depuis l'onglet **Options**), et `Échap` l'arrête. La calibration automatique est proposée juste après.
+Au tout premier lancement, une **visite guidée** en 5 bulles montre la calibration, les touches, l'arrêt d'un parcours, le HUD et le journal. Elle se relance avec **Visite guidée** dans l'onglet **Accueil** (ou depuis l'onglet **Options**), et `Échap` l'arrête. La calibration automatique est proposée juste après.
 
 L'outil doit savoir où se trouvent les zones de l'HDV à l'écran.
 

@@ -683,8 +683,9 @@ TOUR = (
     ("Accueil", ("keys_outer",), "Les touches, dans le jeu",
      "{sell} vend l'objet sélectionné juste sous le moins cher, {sell_all} remet tout en vente et {relist} "
      "met à jour une de tes ventes. {cheatsheet} affiche l'aide-mémoire par-dessus le jeu."),
-    ("Accueil", ("pause_btn",), "Pause",
-     "Ce bouton, ou {pause} depuis le jeu, met l'outil en pause. Pendant un parcours, il l'arrête."),
+    ("Accueil", ("chips:state",), "Arrêter un parcours",
+     "Pendant Tout vendre ou Toute la liste, {pause} depuis le jeu arrête le parcours après la ligne en "
+     "cours. Ici, cette pastille devient « ■ Arrêter le parcours » : un clic fait pareil."),
     ("Options", ("hud_switch",), "Le HUD, par-dessus le jeu",
      "Une ligne discrète montre le résultat de chaque action et la progression d'un parcours. {hud} "
      "l'affiche ou le cache, « Déplacer » le pose où tu veux."),
@@ -4115,7 +4116,10 @@ class App(ctk.CTk):
     def _tour_target(self, step: dict):
         """Rectangle (x, y, l, h) à l'écran du widget visé, s'il est affiché dans la fenêtre."""
         for name in step["targets"]:
-            w = getattr(self, name, None)
+            attr, _, key = name.partition(":")          # « chips:state » = self.chips["state"]
+            w = getattr(self, attr, None)
+            if key:
+                w = w.get(key) if isinstance(w, dict) else None
             try:
                 if w is None or not w.winfo_ismapped():
                     continue
