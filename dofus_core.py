@@ -1846,11 +1846,15 @@ SCROLL_ZEROS = 3          # crans sans mouvement (avec attente) avant de conclur
 SCROLLBAR_BRIGHT = 90     # poignée de la barre de défilement : ~128 ; piste ~44 ; fond ~33
 
 
-def find_scrollbar(gray: np.ndarray, min_len: int = 20) -> Optional[Tuple[int, int, int, int]]:
+def find_scrollbar(gray: np.ndarray, min_len: int = 20, expect_x: Optional[int] = None,
+                   min_track: int = 0) -> Optional[Tuple[int, int, int, int]]:
     """Barre de défilement verticale de la liste dans une image en niveaux de gris :
     (haut poignée, bas poignée, haut piste, bas piste) en px de l'image, ou None (pas de
     barre : la liste tient sur une page). Poignée = bande claire de 3 à 14 px de large ;
-    la plus à droite (le cadre jaune de la ligne choisie ne fait que 1-2 px)."""
+    la plus proche de `expect_x` (sinon la plus à droite), avec une piste d'au moins
+    `min_track` px : le décor du jeu, à droite de l'HDV, peut contenir des bandes claires
+    (vu : « fin de la liste » au milieu de la liste). Le cadre jaune de la ligne choisie ne
+    fait que 1-2 px."""
     g = gray.astype(int)
     h, w = g.shape
     runs = []                     # (x, début, fin) du plus long segment clair de chaque colonne
@@ -1872,20 +1876,26 @@ def find_scrollbar(gray: np.ndarray, min_len: int = 20) -> Optional[Tuple[int, i
             cur = [r]
     if cur:
         bands.append(cur)
-    bands = [b for b in bands if 3 <= len(b) <= 14]
-    if not bands:
+    found = []
+    for band in bands:
+        if not 3 <= len(band) <= 14:
+            continue
+        xc = band[len(band) // 2][0]
+        t0, t1 = band[0][1], band[0][2]
+        out = g[:, min(w - 1, band[-1][0] + 2)]          # fond juste à droite de la barre
+        track = (g[:, xc] - out >= 5) | (g[:, xc] > SCROLLBAR_BRIGHT)
+        a, b = t0, t1
+        while a > 0 and track[a - 1]:
+            a -= 1
+        while b < h - 1 and track[b + 1]:
+            b += 1
+        if b - a + 1 >= max(min_track, t1 - t0 + 1):
+            found.append((xc, (t0, t1, a, b)))
+    if not found:
         return None
-    band = bands[-1]
-    xc = band[len(band) // 2][0]
-    t0, t1 = band[0][1], band[0][2]
-    out = g[:, min(w - 1, band[-1][0] + 2)]          # fond juste à droite de la barre
-    track = (g[:, xc] - out >= 5) | (g[:, xc] > SCROLLBAR_BRIGHT)
-    a, b = t0, t1
-    while a > 0 and track[a - 1]:
-        a -= 1
-    while b < h - 1 and track[b + 1]:
-        b += 1
-    return t0, t1, a, b
+    if expect_x is None:
+        return found[-1][1]
+    return min(found, key=lambda f: abs(f[0] - expect_x))[1]
 
 
 def scrollbar_at_bottom(cfg: "Config") -> Optional[bool]:
@@ -1900,10 +1910,14 @@ def scrollbar_at_bottom(cfg: "Config") -> Optional[bool]:
     except Exception:
         return None
     gray = img if img.ndim == 2 else __import__("cv2").cvtColor(img, __import__("cv2").COLOR_BGR2GRAY)
-    sb = find_scrollbar(gray, min_len=max(8, step // 3))
+    # Barre à ~4 hauteurs de ligne à droite du point de clic (mesuré : 4,0 à 4,05 lignes).
+    sb = find_scrollbar(gray, min_len=max(8, step // 3), expect_x=2 * step, min_track=3 * step)
     if sb is None:
+        log_line("[MAJ TOUT] Barre de défilement introuvable.")
         return None
     t0, t1, a, b = sb
+    log_line(f"[MAJ TOUT] Barre de défilement : poignée {t0}-{t1}, piste {a}-{b} "
+             f"({'en bas' if t1 >= b - 2 else 'pas en bas'}).")
     return t1 >= b - 2
 
 
