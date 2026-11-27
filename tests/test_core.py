@@ -1038,6 +1038,34 @@ def test_relist_all_scrollbar_at_bottom_wins_over_counter(relist_engine, monkeyp
     assert "fin de la liste" in res.message
 
 
+def test_visible_rows_keeps_the_last_row_at_the_bottom_of_the_list(relist_engine):
+    # Vidéo du joueur : en bas de liste, lignes 16 px (0,32 ligne) plus bas qu'en haut ;
+    # la 10e, entièrement visible, était hors de la zone (« Œil de Crowneille » oublié).
+    eng, calls, st = relist_engine
+    eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = [100, 549], 50, 10
+    rows = eng._visible_rows(50 * 56 - 16)
+    assert len(rows) == 10 and rows[-1][0] == 549 + 9 * 50 + 16
+
+
+def test_relist_all_end_of_list_revisits_rows_below_the_last_click(relist_engine, monkeypatch):
+    # Dernière page : la ligne du bas manquait aux lignes repérées (liste qui bouge encore,
+    # numérotation décalée). Liste immobile en bas : on reprend les lignes sous la dernière traitée.
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None), (0, None)], None)
+    eng.cfg.count_region = None
+    monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: True)
+    pages = iter([[(100, 0)], [(100, 0), (150, 1)]])
+    seen_pages = []
+    monkeypatch.setattr(eng, "_page_rows", lambda shift, base: seen_pages.append(1) or
+                        next(pages, [(100, 0), (150, 1)]))
+    clicks = []
+    monkeypatch.setattr(core, "click_at", lambda p: clicks.append(p[1]))
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "fin de la liste" in res.message
+    assert clicks == [100, 150]                          # la dernière vente traitée aussi
+
+
 def _named_rows(monkeypatch, n):
     names = iter([_name(i) for i in range(n)] * 4)
     monkeypatch.setattr(core, "grab_name", lambda c: next(names))
