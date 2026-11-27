@@ -350,6 +350,7 @@ class Config:
     sound_volume: float = 0.5         # volume des sons (0..1)
     theme: str = "dark"               # "dark" | "light" | "system" (comme Windows)
     accent: str = "blue"              # couleur d'accent (dofus_style.ACCENTS)
+    ambience: str = "night"           # ambiance du thème sombre : night | amber | forest | ocean
     animations: bool = True           # fondus des popups, barre de progression douce
     tray: bool = True                 # icône dans la zone de notification (près de l'horloge)
     tray_minimize: bool = False       # réduire la fenêtre = la cacher dans la zone de notification
@@ -441,6 +442,8 @@ class Config:
             cfg.hud_autohide = 0
         if cfg.hud_content not in ("state", "action", "both", "dot"):
             cfg.hud_content = "both"
+        if cfg.ambience not in ("night", "amber", "forest", "ocean"):
+            cfg.ambience = "night"
         if not isinstance(cfg.profile_colors, dict):
             cfg.profile_colors = {}
         cfg.profile_colors = {str(k): v for k, v in cfg.profile_colors.items() if isinstance(v, str)}
