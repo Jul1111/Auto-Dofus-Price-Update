@@ -162,6 +162,20 @@ def test_single_instance_waits_for_the_closing_copy():
     du._instance_mutex = keep
 
 
+def test_mutex_taken_by_an_admin_copy():
+    # exemplaire lancé en administrateur : accès refusé, pas de poignée -> déjà ouvert
+    assert du.mutex_taken(None, du.ERROR_ACCESS_DENIED)
+    assert du.mutex_taken(123, du.ERROR_ALREADY_EXISTS)
+    assert not du.mutex_taken(123, 0)
+    assert not du.mutex_taken(None, 1450)        # autre échec : on ne bloque pas le lancement
+
+
+def test_installer_finds_other_copies_by_name():
+    # chemin d'un exemplaire administrateur illisible : on le trouve par son nom
+    s = du.installer_script(Path("C:/n"), Path("C:/a"), 42, Path("C:/w"), Path("C:/l"))
+    assert "Get-Process -Name 'DofusPriceHelper'" in s and "-not $_.Path" in s and "$_.Id -ne 42" in s
+
+
 def test_single_instance():
     name = rf"Local\DofusPriceHelper-test-{__import__('os').getpid()}"
     assert du.single_instance(name)

@@ -72,3 +72,5 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 [UninstallDelete]
 ; Fichiers créés par l'outil à côté de l'exe (les réglages, eux, sont dans %APPDATA%)
 Type: filesandordirs; Name: "{app}\_internal.old"
+; Fichiers ajoutés par les mises à jour en un clic : inconnus de l'installeur, ils restaient
+Type: filesandordirs; Name: "{app}\_internal"
