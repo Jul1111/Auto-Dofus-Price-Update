@@ -137,7 +137,11 @@ $log = {_ps(log)}
 function Note($m) {{ Add-Content -LiteralPath $log -Value ("$(Get-Date -Format s)  [MAJ] " + $m) -Encoding UTF8 }}
 try {{ Wait-Process -Id {int(pid)} -Timeout 60 -ErrorAction SilentlyContinue }} catch {{}}
 # Un 2e exemplaire de l'outil ouvert garde _internal : « accès refusé » (vu en v1.5.1).
-$others = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq {_ps(exe)} }})
+# Par NOM : le chemin d'un exemplaire lancé en administrateur est illisible d'ici ($_.Path vide),
+# il n'était donc pas attendu et bloquait _internal. Chemin lisible : seulement le nôtre.
+function Others {{ @(Get-Process -Name {_ps(APP_NAME)} -ErrorAction SilentlyContinue |
+    Where-Object {{ $_.Id -ne {int(pid)} -and (-not $_.Path -or $_.Path -eq {_ps(exe)}) }}) }}
+$others = Others
 if ($others.Count -gt 0) {{
     Note ('attente de la fermeture de ' + $others.Count + ' autre(s) fenêtre(s) de l''outil')
     try {{ $others | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue }} catch {{}}
@@ -163,8 +167,8 @@ try {{
     try {{ & ie4uinit.exe -show }} catch {{}}
 }} catch {{
     Note ('échec (' + $stage + ') : ' + $_.Exception.Message)
-    $still = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq {_ps(exe)} }})
-    if ($still.Count -gt 0) {{ Note ('une fenêtre de l''outil est encore ouverte : ferme-les toutes puis réessaie') }}
+    $still = Others
+    if ($still.Count -gt 0) {{ Note ('une fenêtre de l''outil est encore ouverte (peut-être lancée en administrateur) : ferme-les toutes puis réessaie') }}
     if ($stage -eq 'internal' -and (Test-Path -LiteralPath {_ps(old)})) {{
         Remove-Item -LiteralPath {_ps(internal)} -Recurse -Force -ErrorAction SilentlyContinue
         Rename-Item -LiteralPath {_ps(old)} -NewName '_internal' -ErrorAction SilentlyContinue
@@ -178,6 +182,15 @@ Remove-Item -LiteralPath {_ps(work_dir)} -Recurse -Force -ErrorAction SilentlyCo
 
 
 _instance_mutex = None
+ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS = 5, 183
+
+
+def mutex_taken(handle, err: int) -> bool:
+    """Le verrou « un seul exemplaire » est-il déjà pris ? Un exemplaire lancé en
+    ADMINISTRATEUR crée un verrou qu'un lancement normal ne peut pas ouvrir (accès refusé,
+    pas de poignée) : avant, c'était pris pour « pas encore ouvert », deux exemplaires
+    tournaient, et la mise à jour échouait (_internal utilisé)."""
+    return err == ERROR_ALREADY_EXISTS or (not handle and err == ERROR_ACCESS_DENIED)
 
 
 def single_instance(name: str = r"Local\DofusPriceHelper-instance", wait: float = 0.0) -> bool:
@@ -196,11 +209,12 @@ def single_instance(name: str = r"Local\DofusPriceHelper-instance", wait: float 
     end = time.time() + wait
     while True:
         _instance_mutex = k32.CreateMutexW(None, False, name)
-        if ctypes.get_last_error() != 183:      # ERROR_ALREADY_EXISTS
+        if not mutex_taken(_instance_mutex, ctypes.get_last_error()):
             return True
         if time.time() >= end:
             break
-        k32.CloseHandle(_instance_mutex)        # sinon notre poignée garde le verrou en vie
+        if _instance_mutex:
+            k32.CloseHandle(_instance_mutex)    # sinon notre poignée garde le verrou en vie
         _instance_mutex = None
         time.sleep(0.2)
     user32 = ctypes.windll.user32
