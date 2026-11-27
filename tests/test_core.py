@@ -690,6 +690,42 @@ def test_relist_rereads_own_price_before_modifying(relist_engine, monkeypatch):
     assert res.hint == "Ton prix douteux" and calls == []
 
 
+def test_relist_force_suspect_option(relist_engine, monkeypatch):
+    # Marché qui chute : 774 -> 100 = « baisse énorme ». Option active + 2e lecture identique : modifié.
+    eng, calls, st = relist_engine
+    eng.cfg.relist_force_suspect = True
+    monkeypatch.setattr(core, "table_second_read", lambda c: scr({1: 100}))
+    st["screens"] = [scr({1: 100})]
+    st["mine"] = [774, None]
+    res = eng.relist()
+    assert res.level == "ok" and "suspect accepté" in res.message and "baisse énorme" in res.message
+    assert calls == [("paste", 99), "modify"]
+
+
+def test_relist_force_suspect_needs_same_second_read(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_force_suspect = True
+    monkeypatch.setattr(core, "table_second_read", lambda c: scr({1: 3000}))   # lu autrement : doute
+    st["screens"] = [scr({1: 100})]
+    st["mine"] = [774]
+    res = eng.relist()
+    assert res.hint == "Suspect" and "2e lecture différente (3000)" in res.message
+    assert ("paste", 99) not in calls
+
+
+def test_relist_force_suspect_never_skips_unreliable_reading(relist_engine, monkeypatch):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_force_suspect = True
+    seen = []
+    monkeypatch.setattr(core, "table_second_read", lambda c: seen.append(1) or scr({1: 100}))
+    s1 = scr({1: 100})
+    s1.prices[1] = R(100, 20)                     # confiance OCR trop basse
+    st["screens"] = [s1]
+    st["mine"] = [774]
+    res = eng.relist()
+    assert res.hint == "Suspect" and "confiance OCR" in res.message and not seen
+
+
 def test_relist_avg_guard_then_force(relist_engine):
     eng, calls, st = relist_engine
     eng.cfg.floor_mode = "stop"
