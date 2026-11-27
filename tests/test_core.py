@@ -132,6 +132,46 @@ def test_config_v2_keeps_custom_hotkeys(tmp_path):
     assert cfg.input_method == "type"                # choix explicite v4 conservé
 
 
+def test_unreadable_config_is_kept_aside(tmp_path):
+    # illisible -> valeurs par défaut, enregistrées à la fermeture : la calibration était perdue
+    p = tmp_path / "dofus_price_helper_config.json"
+    p.write_text('{"TABLE_REGION": [1, 2, 3', encoding="utf-8")
+    cfg = core.Config.load(p)
+    assert cfg.table_region is None
+    kept = list(tmp_path.glob("dofus_price_helper_config.illisible-*.json"))
+    assert len(kept) == 1 and kept[0].read_text(encoding="utf-8") == '{"TABLE_REGION": [1, 2, 3'
+
+
+def test_hand_edited_config_never_crashes(tmp_path):
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({"CONFIG_VERSION": 7, "HOTKEYS": ["f1"], "LOTS": [1, "x", 10, -5]}), encoding="utf-8")
+    cfg = core.Config.load(p)
+    assert cfg.hotkeys == core.DEFAULT_HOTKEYS and cfg.lots == [1, 10]
+    p.write_text("[1, 2]", encoding="utf-8")
+    assert core.Config.load(p).lots == [1, 10, 100, 1000]
+
+
+def test_concurrent_saves_leave_a_valid_file(tmp_path):
+    # fenêtre + fil de travail qui enregistrent en même temps
+    import threading
+    p = tmp_path / "c.json"
+    cfgs = [core.Config(table_region=[i, i, 10, 10]) for i in range(4)]
+    errors = []
+
+    def run(c):
+        try:
+            for _ in range(25):
+                c.save(p)
+        except Exception as e:
+            errors.append(e)
+    th = [threading.Thread(target=run, args=(c,)) for c in cfgs]
+    [t.start() for t in th]
+    [t.join() for t in th]
+    assert not errors
+    assert core.Config.load(p).table_region in [c.table_region for c in cfgs]
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 # ---------------- Historique ----------------
 def test_history_rotates_legacy_file(tmp_path):
     h = tmp_path / "hist.csv"
@@ -1782,43 +1822,3 @@ def test_parse_combo():
         core.parse_combo("ctrl+")
     with pytest.raises(ValueError):
         core.parse_combo("f3+f4")
-
-
-def test_unreadable_config_is_kept_aside(tmp_path):
-    # illisible -> valeurs par défaut, enregistrées à la fermeture : la calibration était perdue
-    p = tmp_path / "dofus_price_helper_config.json"
-    p.write_text('{"TABLE_REGION": [1, 2, 3', encoding="utf-8")
-    cfg = core.Config.load(p)
-    assert cfg.table_region is None
-    kept = list(tmp_path.glob("dofus_price_helper_config.illisible-*.json"))
-    assert len(kept) == 1 and kept[0].read_text(encoding="utf-8") == '{"TABLE_REGION": [1, 2, 3'
-
-
-def test_hand_edited_config_never_crashes(tmp_path):
-    p = tmp_path / "c.json"
-    p.write_text(json.dumps({"CONFIG_VERSION": 7, "HOTKEYS": ["f1"], "LOTS": [1, "x", 10, -5]}), encoding="utf-8")
-    cfg = core.Config.load(p)
-    assert cfg.hotkeys == core.DEFAULT_HOTKEYS and cfg.lots == [1, 10]
-    p.write_text("[1, 2]", encoding="utf-8")
-    assert core.Config.load(p).lots == [1, 10, 100, 1000]
-
-
-def test_concurrent_saves_leave_a_valid_file(tmp_path):
-    # fenêtre + fil de travail qui enregistrent en même temps
-    import threading
-    p = tmp_path / "c.json"
-    cfgs = [core.Config(table_region=[i, i, 10, 10]) for i in range(4)]
-    errors = []
-
-    def run(c):
-        try:
-            for _ in range(25):
-                c.save(p)
-        except Exception as e:
-            errors.append(e)
-    th = [threading.Thread(target=run, args=(c,)) for c in cfgs]
-    [t.start() for t in th]
-    [t.join() for t in th]
-    assert not errors
-    assert core.Config.load(p).table_region in [c.table_region for c in cfgs]
-    assert not list(tmp_path.glob("*.tmp"))
