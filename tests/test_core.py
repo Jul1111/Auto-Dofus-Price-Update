@@ -886,6 +886,56 @@ def test_relist_all_real_bottom_with_counter(relist_engine, monkeypatch):
     assert "fin de la liste" in res.message
 
 
+def _gray_fixture(name, crop=None):
+    import cv2
+    img = cv2.imread(str(FIX / name))
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return g if crop is None else g[crop[1]:crop[1] + crop[3], crop[0]:crop[0] + crop[2]]
+
+
+def test_find_scrollbar_on_real_captures():
+    # capture « mes ventes » : 51 ventes, poignée au milieu de sa piste
+    t0, t1, a, b = core.find_scrollbar(_gray_fixture("hdv_mesventes.png", (600, 140, 98, 540)))
+    assert a + 5 < t0 and t1 < b - 5
+    # captures du joueur : liste en haut, puis en bas
+    t0, t1, a, b = core.find_scrollbar(_gray_fixture("barre_defilement_haut.png"))
+    assert t0 <= a + 3 and t1 < b - 100
+    t0, t1, a, b = core.find_scrollbar(_gray_fixture("barre_defilement_bas.png"))
+    assert t1 >= b - 2 and t0 > a + 100
+    assert core.find_scrollbar(_gray_fixture("hdv_mesventes.png", (240, 140, 300, 540))) is None   # pas de barre
+
+
+def test_scrollbar_at_bottom(monkeypatch):
+    cfg = core.Config(relist_row=[100, 100], relist_step=50, relist_rows=10)
+    bas = np.dstack([_gray_fixture("barre_defilement_bas.png")] * 3)
+    haut = np.dstack([_gray_fixture("barre_defilement_haut.png")] * 3)
+    monkeypatch.setattr(core, "grab_screen", lambda r: bas)
+    assert core.scrollbar_at_bottom(cfg) is True
+    monkeypatch.setattr(core, "grab_screen", lambda r: haut)
+    assert core.scrollbar_at_bottom(cfg) is False
+    monkeypatch.setattr(core, "grab_screen", lambda r: np.full((300, 200, 3), 33, np.uint8))
+    assert core.scrollbar_at_bottom(cfg) is None
+
+
+def test_relist_all_scrollbar_not_at_bottom_means_blocked(relist_engine, monkeypatch):
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None), (0, None)], None)
+    eng.cfg.count_region = None
+    monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: False)
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "défilement bloqué" in res.message and "barre de défilement" in res.message
+
+
+def test_relist_all_scrollbar_at_bottom_wins_over_counter(relist_engine, monkeypatch):
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None)], (40, 100))
+    monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: True)
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "fin de la liste" in res.message
+
+
 def test_relist_panel_cleared_means_done(relist_engine):
     # le jeu désélectionne la vente après « Modifier » : plus rien à lire = accepté
     eng, calls, st = relist_engine
