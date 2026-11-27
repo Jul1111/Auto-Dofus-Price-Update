@@ -671,6 +671,8 @@ def hud_history_line(res) -> Optional[tuple]:
 def duration_text(seconds) -> str:
     s = max(0, int(round(seconds or 0)))
     return f"{s} s" if s < 60 else f"{s // 60} min {s % 60:02d}"
+
+
 # ---------------------------------------------------------------- visite guidée
 # (onglet, widgets visés par ordre de préférence, titre, texte) ; {touche} = raccourci actuel
 TOUR = (
