@@ -238,6 +238,7 @@ DEFAULT_HOTKEYS = {
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
     "cheatsheet": "ctrl+alt+h",      # aide-mémoire des touches par-dessus le jeu
+    "hud": "ctrl+alt+u",             # afficher / cacher le HUD discret par-dessus le jeu
     "quit": "ctrl+alt+q",
 }
 
@@ -341,6 +342,10 @@ class Config:
     tray_minimize: bool = False       # réduire la fenêtre = la cacher dans la zone de notification
     calib_window: Optional[List[int]] = None   # fenêtre du jeu (x, y, l, h) quand la calibration marchait
     cheatsheet_pos: Optional[List[int]] = None # aide-mémoire : position choisie en le déplaçant
+    auto_profile: bool = True         # changer de profil tout seul selon le personnage (titre du jeu)
+    character_profiles: Dict = field(default_factory=dict)   # personnage -> profil de calibration
+    hud: bool = False                 # HUD discret par-dessus le jeu (les clics le traversent)
+    hud_pos: Optional[List[int]] = None        # position du HUD (choisie avec « Déplacer »)
 
     hotkeys: Dict = field(default_factory=lambda: _copy(DEFAULT_HOTKEYS))
 
@@ -392,6 +397,10 @@ class Config:
             cfg.input_method, cfg.clear_method = "paste", "backspace"
         if int(data.get("CONFIG_VERSION", 1)) < 5 and cfg.relist_max == 120:
             cfg.relist_max = cls.relist_max  # v5 : 120 était trop bas pour une liste de 100+ lots
+        if not isinstance(cfg.character_profiles, dict):
+            cfg.character_profiles = {}
+        cfg.character_profiles = {str(k): str(v) for k, v in cfg.character_profiles.items()
+                                  if isinstance(v, str) and str(k).strip()}
         if not isinstance(cfg.profiles, dict):
             cfg.profiles = {}
         cfg.profiles = {str(k): v for k, v in cfg.profiles.items() if isinstance(v, dict)}
@@ -438,6 +447,7 @@ class Config:
             raise ValueError("impossible de supprimer le profil actif : choisis-en un autre d'abord")
         if name not in self.profiles:
             raise KeyError(f"profil inconnu : {name}")
+        self.character_profiles = {c: p for c, p in self.character_profiles.items() if p != name}
         path = anchor_path(self, name)
         del self.profiles[name]
         if name != DEFAULT_PROFILE:
@@ -1433,6 +1443,27 @@ def zones_off_screen(cfg: Config, bounds: Region) -> List[str]:
         if pt and not (bx <= pt[0] < bx + bw and by <= pt[1] < by + bh):
             out.append(f)
     return out
+
+
+def character_from_title(title: str) -> Optional[str]:
+    """Nom du personnage d'après le titre de la fenêtre du jeu : « Perso - Classe - 3.x - Release »
+    -> « Perso ». None si le titre n'a pas cette forme (lanceur, écran de connexion…)."""
+    parts = [p.strip() for p in (title or "").split(" - ")]
+    if len(parts) < 3 or not parts[0] or len(parts[0]) > 40:
+        return None
+    return parts[0]
+
+
+def profile_for_character(character: Optional[str], mapping: dict, names: List[str]) -> Optional[str]:
+    """Profil à utiliser pour ce personnage : celui qui lui est associé, sinon un profil qui porte
+    son nom (sans tenir compte des majuscules). None = rien de prévu pour lui."""
+    if not character:
+        return None
+    key = character.casefold()
+    for c, prof in mapping.items():
+        if c.casefold() == key and prof in names:
+            return prof
+    return next((n for n in names if n.casefold() == key), None)
 
 
 def is_game_window(title: str, exe: str, cfg: Config) -> bool:

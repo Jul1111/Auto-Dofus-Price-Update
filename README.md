@@ -78,6 +78,8 @@ Assistant de vente pour l'Hôtel de Vente de Dofus. L'outil lit l'écran par OCR
 - Au démarrage, un bandeau prévient si la calibration semble décalée (fenêtre du jeu redimensionnée, ou bougée sans repère « Hôtel de vente », zones hors de l'écran) avec un bouton **Recalibrer**.
 - Assistant de calibration pas à pas : la liste des étapes avec leur état, une capture de ce que l'outil voit dans chaque zone et ce qu'il y lit (✓ ou ✗), **Refaire cette zone**, **Tout placer automatiquement**, et la vérification finale lancée toute seule.
 - Profils de calibration (onglet **Calibration**) : un par HDV ou par personnage, on passe de l'un à l'autre en un clic. « Nouveau » copie le profil actuel ; il ne reste qu'à recalibrer ce qui change.
+- Profil automatique selon le personnage : le titre de la fenêtre du jeu donne le personnage, et l'outil prend son profil quand vous changez de personnage (utile en multi-compte). Choisir un profil pendant que vous jouez un personnage le lui associe ; un profil qui porte le nom du personnage est pris tout seul.
+- **HUD discret** par-dessus le jeu (`Ctrl+Alt+U`) : une ligne avec l'état, la dernière action ou la progression. Les clics le traversent, il n'apparaît que quand Dofus est au premier plan, et **Déplacer** (onglet **Options**) permet de le poser ailleurs.
 
 ## Installation
 
@@ -170,6 +172,7 @@ Au premier lancement, l'outil propose directement la calibration automatique. Si
 | `Ctrl+Alt+P` | Pause et reprise, arrêt des boucles |
 | `Ctrl+Alt+V` | Afficher les zones calibrées |
 | `Ctrl+Alt+H` | Aide-mémoire des touches par-dessus le jeu |
+| `Ctrl+Alt+U` | Afficher ou cacher le HUD discret |
 
 Les raccourcis de calibration (`Ctrl+Alt+F1` à `Ctrl+Alt+F12`) sont listés dans l'onglet **Raccourcis**, section **Avancé**. Tous les raccourcis se changent dans l'onglet **Raccourcis**.
 

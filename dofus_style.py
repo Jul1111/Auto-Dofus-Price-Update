@@ -227,6 +227,24 @@ def _hwnd(window) -> int:
     return ctypes.windll.user32.GetParent(window.winfo_id())
 
 
+def set_click_through(window, on: bool) -> bool:
+    """Les clics traversent la fenêtre (HUD par-dessus le jeu). Windows seulement."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_NOACTIVATE = -20, 0x80000, 0x20, 0x08000000
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = _hwnd(window)
+        ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        flags = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+        ex = (ex | flags) if on else (ex & ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE))
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
+        return True
+    except Exception:
+        return False
+
+
 def set_glass(window, on: bool, opacity: float = 0.6) -> bool:
     """Active / coupe le flou derrière `window` (fenêtre Tk). True si Windows l'a accepté."""
     if not glass_supported():
