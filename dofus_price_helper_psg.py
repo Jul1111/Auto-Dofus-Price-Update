@@ -282,7 +282,7 @@ ANIMATE = {"on": True}  # fondus et progression douce (option « Animations »)
 
 
 def rounded_popup(master, radius: int = 12, alpha: float = 0.97, border: str = None):
-    """Fenêtre flottante sans bord (popup, bandeau, bulle d'aide) : une carte arrondie avec une
+    """Fenêtre flottante sans bord (HUD, aide-mémoire, bulle d'aide) : une carte arrondie avec une
     bordure fine, aux couleurs de l'outil. Retourne (fenêtre, carte) ; mettre le contenu dans la carte."""
     t = tk.Toplevel(master)
     t.overrideredirect(True)
@@ -494,7 +494,6 @@ class Tray:
         item = pystray.MenuItem
         menu = pystray.Menu(
             item("Ouvrir l'outil", lambda: put(("tray", "open")), default=True),
-            item("Mode compact", lambda: put(("tray", "compact"))),
             item(lambda _i: "▶ Reprendre" if self.app.engine.paused else "⏸ Pause", lambda: put(("tray", "pause"))),
             item("Aide-mémoire en jeu", lambda: put(("tray", "cheatsheet"))),
             item("HUD discret", lambda: put(("tray", "hud")), checked=lambda _i: bool(self.app.cfg.hud)),
@@ -643,11 +642,10 @@ class App(ctk.CTk):
         self.runs = load_runs()        # derniers parcours Ctrl+F3 (onglet Mes ventes)
         self.hdv_state: Optional[str] = None   # None (pas encore lu) | "ok" | "lost"
         self.last_action = ("En attente d'une action…", "", MUTED)
-        self._compact = None
         self._loop: Optional[dict] = None   # boucle en cours (F2 / Ctrl+F3) : type, début
         self.activity: list = []             # panneau Activité : dernières actions (récentes d'abord)
         self._cheat = None                   # aide-mémoire affiché par-dessus le jeu
-        self._toasts: list = []              # popups ouvertes (Échap les ferme)
+        self._hud_note = None                # message temporaire du HUD : (titre, détail, couleur, fin)
         self._log_seq = 0
         self.tray = Tray(self)
         self._char: Optional[str] = None     # personnage du jeu au premier plan (titre de la fenêtre)
@@ -685,6 +683,7 @@ class App(ctk.CTk):
             self.after(2500, self._check_calibration)   # fenêtre du jeu / écran changés depuis ?
         if self.cfg.tray:
             self.tray.start()
+        self.after(400, self._apply_hud)          # HUD activé : créé dès le lancement (caché hors du jeu)
         self.after(1200, self._watch_game)
         self.bind("<Control-KeyPress>", self._on_ctrl_key)
         self.bind("<Escape>", self._on_escape)
@@ -758,13 +757,11 @@ class App(ctk.CTk):
             "auto_validate": ctk.BooleanVar(value=c.auto_validate),
             "require_focus": ctk.BooleanVar(value=c.require_focus),
             "sound": ctk.BooleanVar(value=c.sound),
-            "toast": ctk.BooleanVar(value=c.toast),
             "relist_auto": ctk.BooleanVar(value=c.relist_auto),
             "relist_confirm_enter": ctk.BooleanVar(value=c.relist_confirm_enter),
             "relist_summary": ctk.BooleanVar(value=c.relist_summary),
             "auto_recalibrate": ctk.BooleanVar(value=c.auto_recalibrate),
             "fast_digits": ctk.BooleanVar(value=c.fast_digits),
-            "banner": ctk.BooleanVar(value=c.banner),
             "verify_before_enter": ctk.BooleanVar(value=c.verify_before_enter),
             "smart_f1": ctk.BooleanVar(value=c.smart_f1),
             "always_on_top": ctk.BooleanVar(value=c.always_on_top),
@@ -923,11 +920,8 @@ class App(ctk.CTk):
                                                  self._countdown("automatique", self._calib_auto_ui))),
                   "Calibration automatique : affiche l'HDV (onglet Vente) pendant le compte à rebours."
                   ).pack(side="right", padx=4, pady=6)
-        self._tip(ctk.CTkButton(head, text="🗗 Compact", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._open_compact),
-                  "Petite fenêtre toujours au premier plan pendant que tu joues : dernière action, état, "
-                  "pause.").pack(side="right", padx=(4, 12))
         self._tip(ctk.CTkCheckBox(head, text="📌", variable=self.v["always_on_top"], width=44),
-                  "Fenêtre de l'outil toujours au-dessus du jeu.").pack(side="right", padx=(8, 2))
+                  "Fenêtre de l'outil toujours au-dessus du jeu.").pack(side="right", padx=(8, 14))
         self.pause_btn = ctk.CTkButton(head, text="⏸ Pause", width=90, command=self._toggle_pause)
         self.pause_btn.pack(side="right", padx=4)
         self.update_btn = ctk.CTkButton(head, text="", width=150, fg_color=style.CHIP["green"][0],
@@ -1180,7 +1174,7 @@ class App(ctk.CTk):
         self._hotkey_line(b, None, "Changer d'onglet : Accueil, Prix, Mes ventes, Calibration, Raccourcis, "
                                    "Options", literal="Ctrl+1 … 6")
         self._hotkey_line(b, None, "Vider le journal", literal="Ctrl+L")
-        self._hotkey_line(b, None, "Fermer les popups, le bandeau, l'aide-mémoire et le résumé", literal="Échap")
+        self._hotkey_line(b, None, "Fermer l'aide-mémoire et le résumé", literal="Échap")
         adv = self._collapsible(page, "Avancé : raccourcis de calibration",
                                 "Rarement utiles : la calibration automatique place tout.")
         b = self._section(adv, "Raccourcis de calibration", "Utilisés dans le jeu, souris sur la zone.")
@@ -1509,25 +1503,22 @@ class App(ctk.CTk):
         self.sound_test = [0]
         ctk.CTkButton(r, text="▶ Tester", width=80, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._test_sound).pack(side="left", padx=4)
-        self._switch(b, "Afficher le résultat de chaque action", "toast",
-                     tip="Petit message à l'écran : lot et prix choisis, ou la raison d'un arrêt.")
-        self._switch(b, "… dans un bandeau fixe au-dessus de l'HDV", "banner",
-                     tip="Toujours au même endroit. Désactivé : une popup près de la souris.")
         self._switch(b, "Notification Windows à la fin d'un long parcours", "notify",
                      tip="Tout vendre ou toute la liste de plus de 20 s : une notification Windows "
                          "quand c'est fini, si tu es dans une autre fenêtre que le jeu et l'outil.")
         self._switch(b, "Fenêtre de l'outil toujours au-dessus du jeu", "always_on_top",
                      tip="Même chose que 📌 en haut. Le jeu doit être en fenêtré ou plein écran fenêtré.")
         r = self._row(b)
-        self._tip(ctk.CTkSwitch(r, text="HUD discret par-dessus le jeu", variable=self.v["hud"]),
-                  "Une petite ligne au-dessus du jeu : état, dernière action, progression. Les clics la "
-                  "traversent ; visible seulement quand Dofus est au premier plan. Touche : "
+        self._tip(ctk.CTkSwitch(r, text="HUD par-dessus le jeu (résultat de chaque action)", variable=self.v["hud"]),
+                  "Une petite ligne au-dessus du jeu : état, dernière action (elle s'allume de la couleur du "
+                  "résultat), progression. Les clics la traversent ; visible seulement quand Dofus est au "
+                  "premier plan. Touche : "
                   f"{self.cfg.hotkeys['hud'].upper()}.").pack(side="left")
         self.hud_move_btn = ctk.CTkButton(r, text="Déplacer", width=90, height=24, fg_color=BTN2,
                                           text_color=P["text"], hover_color=BTN2_HOVER, command=self._hud_move)
         self.hud_move_btn.pack(side="left", padx=10)
         tr = self._switch(b, "Icône dans la zone de notification (près de l'horloge)", "tray",
-                          tip="Clic = ouvrir l'outil. Clic droit : pause, mode compact, aide-mémoire, quitter. "
+                          tip="Clic = ouvrir l'outil. Clic droit : pause, HUD, aide-mémoire, quitter. "
                               "La pastille montre l'état : vert actif, orange pause, bleu parcours en cours, "
                               "rouge calibration à faire.")
         tm = self._switch(b, "… réduire la fenêtre l'y cache (plus rien dans la barre des tâches)",
@@ -2026,9 +2017,9 @@ class App(ctk.CTk):
         c.rounding = {lbl: k for k, lbl in ROUNDING_LABELS.items()}.get(v["rounding"].get(), "none")
         c.floor_mode = {lbl: k for k, lbl in FLOOR_LABELS.items()}.get(v["floor_mode"].get(), "floor")
         was_auto = c.relist_auto
-        for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
+        for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound",
                      "relist_auto", "relist_confirm_enter", "relist_summary", "fast_digits", "auto_recalibrate",
-                     "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates", "notify",
+                     "verify_before_enter", "smart_f1", "always_on_top", "check_updates", "notify",
                      "animations", "tray", "tray_minimize", "auto_profile", "hud"):
             setattr(c, name, bool(v[name].get()))
         ANIMATE["on"] = c.animations
@@ -2316,12 +2307,8 @@ class App(ctk.CTk):
         if res.level == "ok" and res.message.startswith(("[VENTE]", "[OPT]", "[TOUT]", "[MAJ]")) \
                 and ("mis en vente" in res.message or "modifié" in res.message or res.message.startswith("[TOUT]")):
             self._mark_step("sell")
-        self._refresh_compact()
-        if self.cfg.toast:
-            if self.cfg.banner:
-                self._banner(head, res.hint or res.level, LEVEL_COLORS[res.level])
-            else:
-                self._toast(head, res.hint or res.level, LEVEL_COLORS[res.level])
+        self._refresh_hud()
+        self._hud_flash(LEVEL_COLORS[res.level])     # le HUD remplace l'ancien popup / bandeau
 
     # ---- résumé de fin de Ctrl+F3
     def _relist_summary(self, res: core.Result):
@@ -2454,30 +2441,6 @@ class App(ctk.CTk):
         self.read_info.configure(text=" · ".join(info))
 
     # ------------------------------------------------------------- overlays
-    def _popup_content(self, card, head: str, sub: str, color: str) -> dict:
-        """Contenu commun du popup et du bandeau : pastille de couleur, titre, détail."""
-        row = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(padx=(12, 16), pady=9)
-        dot = ctk.CTkFrame(row, width=10, height=10, corner_radius=5, fg_color=color)
-        dot.pack(side="left", padx=(0, 10))
-        head_l = ctk.CTkLabel(row, text=head, text_color=P["popup_head"], font=ctk.CTkFont(size=15, weight="bold"))
-        head_l.pack(side="left")
-        sub_l = ctk.CTkLabel(row, text=sub, text_color=color, font=ctk.CTkFont(size=13))
-        sub_l.pack(side="left", padx=(10, 0))
-        return {"dot": dot, "head": head_l, "sub": sub_l}
-
-    def _toast(self, head: str, sub: str, color: str, ms: int = 1800):
-        """Popup près de la souris : carte arrondie aux couleurs de l'outil."""
-        try:
-            x, y = core.mouse_position()
-        except Exception:
-            x, y = self.winfo_pointerx(), self.winfo_pointery()
-        t, card = rounded_popup(self, alpha=0.96)
-        self._popup_content(card, head, sub, color)
-        t.geometry(f"+{x + 18}+{y + 18}")
-        self._toasts = [w for w in self._toasts if w.winfo_exists()] + [t]
-        t.after(ms, lambda: close_popup(t))
-
     def _overlay(self, x, y, w, h, color, alpha, ms, label=""):
         t = tk.Toplevel(self)
         t.overrideredirect(True)
@@ -2509,24 +2472,6 @@ class App(ctk.CTk):
             self._log("[Zones] Rien n'est calibré.", "WARN")
 
     # ---------------------------------------------------------- calibration
-    # ------------------------------------------------------------------ bandeau
-    def _banner(self, head: str, sub: str, color: str, ms: int = 6000):
-        """Bandeau fixe au-dessus de l'HDV (toujours au même endroit), à la place de la popup."""
-        c = self.cfg
-        if not (c.anchor_region or c.price_field or c.table_region):
-            return self._toast(head, sub, color)
-        x, y = self._overlay_anchor()
-        b = getattr(self, "_banner_win", None)
-        if b is not None and b.winfo_exists():
-            b.destroy()                  # recréé : la taille suit le texte
-        b, card = rounded_popup(self, alpha=0.96)
-        self._banner_win = b
-        self._popup_content(card, head, sub, color)
-        b.geometry(f"+{max(0, int(x))}+{max(0, int(y))}")
-        if getattr(self, "_banner_after", None):
-            self.after_cancel(self._banner_after)
-        self._banner_after = self.after(ms, lambda: close_popup(b))
-
     # ------------------------------------------------------------------ assistant
     # (clé, type, titre, optionnel, raccourci, préparation dans le jeu, comment faire)
     WIZ_STEPS = [
@@ -3037,7 +2982,7 @@ class App(ctk.CTk):
         for key, (text, color) in self._chip_values().items():
             bg, fg = style.CHIP[color]
             self.chips[key].configure(text=text, fg_color=bg, text_color=fg)
-        self._refresh_compact()
+        self._refresh_hud()
         self.pause_btn.configure(text="▶ Reprendre" if paused else "⏸ Pause")
         try:
             n = len(core.digit_reader().known())
@@ -3079,10 +3024,6 @@ class App(ctk.CTk):
         if self.cget("fg_color") != bg:
             self.configure(fg_color=bg)
             self._refresh_transparent(self)
-        w = self._compact
-        if w is not None and w.winfo_exists():
-            w.configure(fg_color=style.GLASS_BG if glass and ok else P["bg"])
-            style.set_glass(w, glass and ok, self.cfg.glass_opacity)
         self._update_glass_controls()
 
     def _refresh_transparent(self, widget):
@@ -3112,9 +3053,6 @@ class App(ctk.CTk):
         self.glass_lbl.configure(text=f"{self.cfg.glass_opacity:.0%}")
         if self._glass_on():
             style.set_glass(self, True, self.cfg.glass_opacity)
-            w = self._compact
-            if w is not None and w.winfo_exists():
-                style.set_glass(w, True, self.cfg.glass_opacity)
         if getattr(self, "_glass_save", None):
             self.after_cancel(self._glass_save)
         self._glass_save = self.after(500, self._save_cfg)
@@ -3167,7 +3105,7 @@ class App(ctk.CTk):
             self._pb_set(self.loop_pb, lp["frac"])
         if not self.loop_bar.winfo_manager():
             self.loop_bar.pack(side="right", padx=(8, 0))
-        self._refresh_compact()
+        self._refresh_hud()
 
     def _pb_set(self, pb, frac: float):
         """Barre de progression : glisse vers la nouvelle valeur au lieu de sauter."""
@@ -3197,13 +3135,13 @@ class App(ctk.CTk):
             self.engine.stop_requested = True
             self.loop_stop.configure(text="Arrêt…", state="disabled")
             self._log("[Boucle] Arrêt demandé : fin après la ligne en cours.", "WARN")
-            self._refresh_compact()
+            self._refresh_hud()
 
     def _loop_end(self, res: Optional[core.Result]):
         lp, self._loop = self._loop, None
         self.loop_pb.stop()
         self.loop_bar.pack_forget()
-        self._refresh_compact()
+        self._refresh_hud()
         self._tray_update()
         if lp is not None and res is not None and res.level == "ok":
             core.beep("done", self.cfg)
@@ -3215,7 +3153,7 @@ class App(ctk.CTk):
         except Exception:
             game, mine = True, True
         if game or mine:
-            return                       # le résultat est déjà visible (bandeau / fenêtre)
+            return                       # le résultat est déjà visible (HUD / fenêtre)
         name = self.LOOP_NAMES.get(lp["kind"], "Parcours")
         if res is None:
             body = "Interrompu par une erreur : voir le journal."
@@ -3284,7 +3222,7 @@ class App(ctk.CTk):
         self._cheat = None
 
     def _overlay_anchor(self):
-        """Où afficher bandeau et aide-mémoire : au-dessus de l'HDV si on sait où il est."""
+        """Où afficher l'aide-mémoire : au-dessus de l'HDV si on sait où il est."""
         c = self.cfg
         if c.anchor_region:
             return c.anchor_region[0] - 40, c.anchor_region[1] - 50
@@ -3330,116 +3268,6 @@ class App(ctk.CTk):
         d.after(250, lambda: d.winfo_exists() and (d.grab_set(), d.focus_force()))
         self.wait_window(d)
         return res["ok"]
-
-    # ---- mode compact : petite fenêtre au premier plan pendant le jeu
-    def _open_compact(self):
-        w = self._compact
-        if w is not None and w.winfo_exists():
-            w.lift()
-            return
-        w = ctk.CTkToplevel(self)
-        brand(w)
-        self._compact = w
-        w.title("Dofus Price Helper")
-        w.attributes("-topmost", True)
-        w.resizable(False, False)
-        g = self.cfg.compact_geometry
-        try:
-            ok = bool(g) and geometry_on_screen(g, core.screen_bounds())
-        except Exception:
-            ok = False
-        pos = g[g.index("+"):] if ok and "+" in g else ""   # position gardée, taille fixe
-        w.geometry("340x170" + pos)
-        if self._glass_on():
-            w.configure(fg_color=style.GLASS_BG)
-        top = ctk.CTkFrame(w, fg_color="transparent")
-        top.pack(fill="x", padx=10, pady=(10, 4))
-        self._cmp_chips = {}
-        for key in ("state", "calib", "hdv"):
-            lbl = ctk.CTkLabel(top, text="", corner_radius=11, height=22, fg_color=BTN2,
-                               font=ctk.CTkFont(size=11, weight="bold"))
-            lbl.pack(side="left", padx=2, ipadx=6)
-            self._cmp_chips[key] = lbl
-        self._cmp_head = ctk.CTkLabel(w, text="", anchor="w", font=ctk.CTkFont(size=15, weight="bold"))
-        self._cmp_head.pack(fill="x", padx=12)
-        self._cmp_sub = ctk.CTkLabel(w, text="", anchor="w", wraplength=300, justify="left")
-        self._cmp_sub.pack(fill="x", padx=12)
-        self._cmp_pb = ctk.CTkProgressBar(w, height=6, progress_color=P["accent"])   # pendant une boucle
-        bar = ctk.CTkFrame(w, fg_color="transparent")
-        bar.pack(fill="x", padx=10, pady=(6, 10), side="bottom")
-        self._cmp_pause = ctk.CTkButton(bar, text="", width=120, command=self._toggle_pause)
-        self._cmp_pause.pack(side="left")
-        ctk.CTkButton(bar, text="Agrandir ⤢", width=100, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._close_compact
-                      ).pack(side="right")
-        w.protocol("WM_DELETE_WINDOW", self._close_compact)
-        self.withdraw()
-        self._refresh_compact()
-        if self._glass_on():
-            w.after(300, lambda: w.winfo_exists() and style.set_glass(w, True, self.cfg.glass_opacity))
-
-    def _compact_geometry(self) -> str:
-        w = self._compact
-        try:
-            return w.geometry() if w is not None and w.winfo_exists() else ""
-        except tk.TclError:
-            return ""
-
-    def _close_compact(self):
-        w = self._compact
-        if w is not None and w.winfo_exists():
-            self.cfg.compact_geometry = self._compact_geometry()
-            w.destroy()
-        self._compact = None
-        self.deiconify()
-        self._apply_topmost()
-        try:
-            self.cfg.save()
-        except OSError:
-            pass
-
-    def _refresh_compact(self):
-        self._refresh_hud()
-        w = self._compact
-        if w is None or not w.winfo_exists():
-            return
-        chips = self._chip_values()
-        short = {"Calibration OK": "Calib. OK", "Calibration à faire": "Calib. à faire",
-                 "HDV introuvable": "HDV ✗"}
-        for key, lbl in self._cmp_chips.items():
-            text, color = chips[key]
-            if key == "hdv" and text not in short:
-                text = "HDV ✓" if self.hdv_state == "ok" else "HDV ?"
-            bg, fg = style.CHIP[color]
-            lbl.configure(text=short.get(text, text), fg_color=bg, text_color=fg)
-        lp = self._loop
-        if lp is not None:                       # boucle en cours : progression + Arrêter
-            self._cmp_head.configure(text=self.LOOP_NAMES.get(lp["kind"], "En cours") + "…")
-            self._cmp_sub.configure(text=lp["text"], text_color=P["text"])
-            if lp["frac"] is None:
-                if self._cmp_pb.cget("mode") != "indeterminate":
-                    self._cmp_pb.configure(mode="indeterminate")
-                    self._cmp_pb.start()
-            else:
-                if self._cmp_pb.cget("mode") != "determinate":
-                    self._cmp_pb.stop()
-                    self._cmp_pb.configure(mode="determinate")
-                    self._cmp_pb.set(0)
-                self._pb_set(self._cmp_pb, lp["frac"])
-            if not self._cmp_pb.winfo_manager():
-                self._cmp_pb.pack(fill="x", padx=12, pady=(4, 0))
-            stopping = self.engine.stop_requested
-            self._cmp_pause.configure(text="Arrêt…" if stopping else "■ Arrêter", command=self._stop_loop,
-                                      fg_color=style.CHIP["red"][0], hover_color=P["red_hover"],
-                                      text_color=style.CHIP["red"][1])
-            return
-        self._cmp_pb.stop()
-        self._cmp_pb.pack_forget()
-        head, sub, color = self.last_action
-        self._cmp_head.configure(text=head)
-        self._cmp_sub.configure(text=sub, text_color=color)
-        self._cmp_pause.configure(text="▶ Reprendre" if self.engine.paused else "⏸ Pause",
-                                  command=self._toggle_pause, fg_color=P["accent"],
-                                  hover_color=P["accent_hover"], text_color=P["on_accent"])
 
     # ---- mises à jour / journal
     def _on_update(self, up):
@@ -3625,8 +3453,7 @@ class App(ctk.CTk):
         self._log(msg, "CAL")
         self._refresh_status()
         self._refresh_character()
-        if self.cfg.toast:
-            self._toast(f"Profil « {self.cfg.profile} »", self._char or "", P["cyan"], ms=1500)
+        self._hud_message(f"Profil « {self.cfg.profile} »", self._char or "", P["cyan"])
 
     def _refresh_character(self):
         lbl = getattr(self, "char_lbl", None)
@@ -3743,9 +3570,32 @@ class App(ctk.CTk):
             self._hud_head.configure(text=self.LOOP_NAMES.get(lp["kind"], ""))
             self._hud_sub.configure(text=lp["text"], text_color=P["text"])
         else:
-            head, sub, col = self.last_action
+            note = self._hud_note
+            head, sub, col = note[:3] if note and time.time() < note[3] else self.last_action
             self._hud_head.configure(text="" if head.startswith("En attente") else head)
             self._hud_sub.configure(text=sub, text_color=col)
+
+    def _hud_flash(self, color: str, ms: int = 1800):
+        """Nouveau résultat : le bord du HUD prend sa couleur un instant."""
+        w = self._hud
+        if w is None or not w.winfo_exists() or self._hud_moving:
+            return
+        self._hud_card.configure(border_color=color, border_width=2)
+        if getattr(self, "_hud_flash_after", None):
+            self.after_cancel(self._hud_flash_after)
+
+        def back():
+            self._hud_flash_after = None
+            if self._hud is not None and self._hud.winfo_exists() and not self._hud_moving:
+                self._hud_card.configure(border_color=P["border"], border_width=1)
+        self._hud_flash_after = self.after(ms, back)
+
+    def _hud_message(self, head: str, sub: str, color: str, ms: int = 2500):
+        """Message temporaire dans le HUD (ex. changement de profil), puis la dernière action."""
+        self._hud_note = (head, sub, color, time.time() + ms / 1000)
+        self._refresh_hud()
+        self._hud_flash(color, ms)
+        self.after(ms + 50, self._refresh_hud)
 
     def _hud_visibility(self):
         w = self._hud
@@ -3814,8 +3664,6 @@ class App(ctk.CTk):
             self.tray.stop()
 
     def _show_main(self):
-        if self._compact is not None and self._compact.winfo_exists():
-            self._close_compact()
         self.deiconify()
         self.lift()
         self._apply_topmost()
@@ -3827,8 +3675,6 @@ class App(ctk.CTk):
     def _on_tray(self, action: str):
         if action == "open":
             self._show_main()
-        elif action == "compact":
-            self._open_compact()
         elif action == "pause":
             self._toggle_pause()
         elif action == "cheatsheet":
@@ -3866,10 +3712,7 @@ class App(ctk.CTk):
         return None
 
     def _on_escape(self, _e=None):
-        for t in self._toasts:
-            close_popup(t)
-        self._toasts = []
-        for name in ("_banner_win", "_cheat", "_summary_win"):
+        for name in ("_cheat", "_summary_win"):
             w = getattr(self, name, None)
             if w is not None and w.winfo_exists():
                 if name == "_summary_win":
@@ -3881,8 +3724,6 @@ class App(ctk.CTk):
     def _on_close(self):
         self.closing = True
         self.tray.stop()
-        if self._compact is not None and self._compact.winfo_exists():
-            self.cfg.compact_geometry = self._compact_geometry()
         try:
             self.cfg.window_geometry = "zoomed" if self.state() == "zoomed" else self.geometry()
         except tk.TclError:

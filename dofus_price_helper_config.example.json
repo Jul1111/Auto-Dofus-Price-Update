@@ -1,5 +1,5 @@
 {
-  "CONFIG_VERSION": 5,
+  "CONFIG_VERSION": 6,
   "TESSERACT_CMD": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
   "LOTS": [
     1,
@@ -53,7 +53,6 @@
   "AUTO_VALIDATE": false,
   "VERIFY_BEFORE_ENTER": true,
   "SMART_F1": true,
-  "BANNER": true,
   "ALWAYS_ON_TOP": true,
   "CHECK_UPDATES": true,
   "VALIDATE_METHOD": "enter",
@@ -62,13 +61,11 @@
   "WINDOW_TITLE": " - Release",
   "REQUIRE_FOCUS": true,
   "SOUND": true,
-  "TOAST": true,
   "CALIB_COUNTDOWN": 3,
   "UI_SCALE": 1.0,
   "UI_STYLE": "classic",
   "GLASS_OPACITY": 0.6,
   "WINDOW_GEOMETRY": "",
-  "COMPACT_GEOMETRY": "",
   "NOTIFY": true,
   "FIRST_STEPS": [],
   "SOUND_VOLUME": 0.5,
@@ -81,7 +78,7 @@
   "CHEATSHEET_POS": null,
   "AUTO_PROFILE": true,
   "CHARACTER_PROFILES": {},
-  "HUD": false,
+  "HUD": true,
   "HUD_POS": null,
   "HOTKEYS": {
     "sell": "f1",

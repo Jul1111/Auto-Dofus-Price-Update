@@ -106,7 +106,7 @@ def test_scale_label():
 def test_new_config_fields_round_trip(tmp_path):
     path = tmp_path / "cfg.json"
     cfg = core.Config()
-    cfg.ui_scale, cfg.window_geometry, cfg.compact_geometry = 1.25, "1200x850+10+20", "340x150+5+5"
+    cfg.ui_scale, cfg.window_geometry = 1.25, "1200x850+10+20"
     cfg.save(path)
     back = core.Config.load(path)
-    assert (back.ui_scale, back.window_geometry, back.compact_geometry) == (1.25, "1200x850+10+20", "340x150+5+5")
+    assert (back.ui_scale, back.window_geometry) == (1.25, "1200x850+10+20")
