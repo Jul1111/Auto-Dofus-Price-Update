@@ -1831,11 +1831,86 @@ def click_at(p: Point) -> None:
 WHEEL_DELTA = 120  # un cran de molette sous Windows
 
 
+SCROLL_HOVER = 0.04       # s entre l'arrivée de la souris sur la liste et la molette
+SCROLL_RETRY_WAIT = 0.3   # s : liste immobile -> on laisse le jeu finir avant de réessayer
+SCROLL_ZEROS = 3          # crans sans mouvement (avec attente) avant de conclure « en bas »
+
+
+SCROLLBAR_BRIGHT = 90     # poignée de la barre de défilement : ~128 ; piste ~44 ; fond ~33
+
+
+def find_scrollbar(gray: np.ndarray, min_len: int = 20) -> Optional[Tuple[int, int, int, int]]:
+    """Barre de défilement verticale de la liste dans une image en niveaux de gris :
+    (haut poignée, bas poignée, haut piste, bas piste) en px de l'image, ou None (pas de
+    barre : la liste tient sur une page). Poignée = bande claire de 3 à 14 px de large ;
+    la plus à droite (le cadre jaune de la ligne choisie ne fait que 1-2 px)."""
+    g = gray.astype(int)
+    h, w = g.shape
+    runs = []                     # (x, début, fin) du plus long segment clair de chaque colonne
+    for x in range(w):
+        col = np.concatenate(([False], g[:, x] > SCROLLBAR_BRIGHT, [False]))
+        d = np.diff(col.astype(int))
+        starts, ends = np.where(d == 1)[0], np.where(d == -1)[0] - 1
+        if len(starts):
+            i = int(np.argmax(ends - starts))
+            if ends[i] - starts[i] + 1 >= min_len:
+                runs.append((x, int(starts[i]), int(ends[i])))
+    bands, cur = [], []
+    for r in runs:                # colonnes voisines avec le même segment = une bande
+        if cur and r[0] == cur[-1][0] + 1 and abs(r[1] - cur[0][1]) <= 2 and abs(r[2] - cur[0][2]) <= 2:
+            cur.append(r)
+        else:
+            if cur:
+                bands.append(cur)
+            cur = [r]
+    if cur:
+        bands.append(cur)
+    bands = [b for b in bands if 3 <= len(b) <= 14]
+    if not bands:
+        return None
+    band = bands[-1]
+    xc = band[len(band) // 2][0]
+    t0, t1 = band[0][1], band[0][2]
+    out = g[:, min(w - 1, band[-1][0] + 2)]          # fond juste à droite de la barre
+    track = (g[:, xc] - out >= 5) | (g[:, xc] > SCROLLBAR_BRIGHT)
+    a, b = t0, t1
+    while a > 0 and track[a - 1]:
+        a -= 1
+    while b < h - 1 and track[b + 1]:
+        b += 1
+    return t0, t1, a, b
+
+
+def scrollbar_at_bottom(cfg: "Config") -> Optional[bool]:
+    """Poignée de la barre de défilement en bas de sa piste ? None = barre introuvable."""
+    if not cfg.relist_row or cfg.relist_step <= 0:
+        return None
+    x0, y0 = cfg.relist_row
+    step = cfg.relist_step
+    region = (x0 + 2 * step, y0 - step, 4 * step, step * (cfg.relist_rows + 2))
+    try:
+        img = grab_screen(region)
+    except Exception:
+        return None
+    gray = img if img.ndim == 2 else __import__("cv2").cvtColor(img, __import__("cv2").COLOR_BGR2GRAY)
+    sb = find_scrollbar(gray, min_len=max(8, step // 3))
+    if sb is None:
+        return None
+    t0, t1, a, b = sb
+    return t1 >= b - 2
+
+
 def scroll_at(p: Point, notches: int) -> None:
     """Molette vers le bas de `notches` crans. Sous Windows, pyautogui.scroll(n) envoie n
     BRUT (1 = 1/120 de cran) : il faut multiplier par 120, sinon la liste bouge à peine."""
     import pyautogui
-    pyautogui.moveTo(*p)
+    x, y = p
+    # Petit mouvement puis pause : le jeu (Unity) doit « voir » la souris sur la liste avant la
+    # molette. Souris téléportée puis molette aussitôt, ou liste redessinée après « Modifier » :
+    # la molette était parfois ignorée, et Ctrl+F3 croyait la liste finie.
+    pyautogui.moveTo(x, y + 3)
+    pyautogui.moveTo(x, y)
+    time.sleep(SCROLL_HOVER)
     pyautogui.scroll(-abs(notches) * (WHEEL_DELTA if IS_WINDOWS else 1))
 
 
@@ -2884,8 +2959,10 @@ class PriceEngine:
             prev = img
             if d == 0:
                 zeros += 1
-                if zeros >= 2:
+                if zeros >= SCROLL_ZEROS:
                     break
+                time.sleep(SCROLL_RETRY_WAIT)    # jeu occupé (liste redessinée) : on réessaie
+                prev = grab_screen(box)
                 continue
             zeros, total = 0, total + d
             per_notch = per_notch or d / n
@@ -2897,6 +2974,21 @@ class PriceEngine:
         if d is None:
             return total, "défilement non suivi (animation)"
         return total + d, None
+
+    def _rows_left(self, seen: int, total: Optional[int]) -> int:
+        """Ventes restant à voir d'après le compteur (0 si inconnu ou presque fini : la
+        mesure du défilement peut être décalée d'une ou deux lignes)."""
+        cfg = self.cfg
+        if total is None and cfg.count_region:
+            try:
+                c = read_counter(cfg)
+                total = c[0] if c else None
+            except Exception:
+                total = None
+        if not total:
+            return 0
+        left = total - (seen + 1)
+        return left if left > 2 else 0
 
     def _relist_all(self) -> Result:
         """Parcourt la liste « mes ventes » : clic sur chaque ligne visible, mise à jour,
@@ -3050,7 +3142,27 @@ class PriceEngine:
                     stop = err
                     break
                 if moved <= 0:
-                    break  # la liste ne bouge plus : en bas
+                    # La liste ne bouge plus : en bas… sauf si le compteur « X/Y lots en vente »
+                    # dit qu'il reste des ventes à voir (molette ignorée par le jeu).
+                    # La barre de défilement (si visible) tranche : poignée en bas = vraie fin.
+                    at_bottom = scrollbar_at_bottom(cfg)
+                    left = 0 if at_bottom else self._rows_left(seen, total)
+                    if at_bottom is False and not left:
+                        left = -1                 # barre pas en bas, compteur muet
+                    if left:
+                        time.sleep(0.5)
+                        moved, err = self._scroll_page(box, target)
+                        self._tick("défilement", t0)
+                        if err:
+                            stop = err
+                            break
+                    if moved <= 0:
+                        if left:
+                            more = (f"encore ~{left} vente(s) après la dernière ligne vue" if left > 0
+                                    else "la barre de défilement n'est pas en bas")
+                            stop = (f"défilement bloqué : la liste ne descend plus, {more}. Relance "
+                                    "Ctrl+F3 avec la souris sur la dernière ligne traitée")
+                        break
                 shift += moved
                 seen -= 1
                 pages += 1

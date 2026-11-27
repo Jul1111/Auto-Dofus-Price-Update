@@ -825,6 +825,117 @@ def test_scroll_page_bottom(relist_engine, monkeypatch):
     assert eng._scroll_page((0, 0, 120, 400), 350) == (0, None)
 
 
+def test_scroll_page_retries_when_the_game_ignores_the_wheel(relist_engine, monkeypatch):
+    # 13:57 : la molette ignorée une fois (liste redessinée) -> avant, « fin de la liste »
+    eng, calls, st = relist_engine
+    eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = [60, 25], 50, 8
+    full = _list_image(40)
+    pos, ignored = [0], [2]
+    def wheel(p, n):
+        if ignored[0]:
+            ignored[0] -= 1
+            return
+        pos[0] = min(pos[0] + 30 * n, 1600)
+    monkeypatch.setattr(core, "scroll_at", wheel)
+    monkeypatch.setattr(core, "grab_screen", lambda r: full[pos[0]:pos[0] + 400])
+    moved, err = eng._scroll_page((0, 0, 120, 400), 350)
+    assert err is None and moved >= 350
+
+
+def _rows_test_engine(relist_engine, monkeypatch, scrolls, counter):
+    eng, calls, st = relist_engine
+    eng.cfg.relist_auto, eng.cfg.relist_row, eng.cfg.relist_step, eng.cfg.relist_rows = True, [100, 100], 50, 2
+    eng.cfg.count_region = [0, 0, 10, 10]
+    monkeypatch.setattr(core, "click_at", lambda p: None)
+    monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
+    monkeypatch.setattr(core, "read_counter", lambda c: counter)
+    moves = iter(scrolls)
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: next(moves))
+    n = [0]
+    monkeypatch.setattr(core, "grab_screen", lambda r: n.__setitem__(0, n[0] + 1) or
+                        np.random.default_rng(n[0]).integers(0, 255, (8, 8, 3)).astype(np.uint8))
+    return eng, st
+
+
+def test_relist_all_says_scroll_blocked_when_counter_shows_more(relist_engine, monkeypatch):
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None), (0, None)], (40, 100))
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "défilement bloqué" in res.message and "fin de la liste" not in res.message
+
+
+def test_relist_all_retries_scroll_then_continues(relist_engine, monkeypatch):
+    scrolls = [(0, None), (50, None), (0, None)]
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, scrolls, (5, 100))
+    st["screens"] = [scr({1: 87}), scr({1: 50})] + [scr({1: 26}) for _ in range(6)]
+    st["mine"] = [87, 50] + [26] * 6
+    calls = []
+    inner = eng._scroll_page
+    monkeypatch.setattr(eng, "_scroll_page", lambda box, target: calls.append(1) or inner(box, target))
+    res = eng.relist_all()
+    # 1er défilement ignoré, relancé (le compteur dit qu'il en reste), puis vrai bas de liste
+    assert len(calls) == 3 and "fin de la liste" in res.message and "bloqué" not in res.message
+
+
+def test_relist_all_real_bottom_with_counter(relist_engine, monkeypatch):
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None)], (2, 100))
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "fin de la liste" in res.message
+
+
+def _gray_fixture(name, crop=None):
+    import cv2
+    img = cv2.imread(str(FIX / name))
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return g if crop is None else g[crop[1]:crop[1] + crop[3], crop[0]:crop[0] + crop[2]]
+
+
+def test_find_scrollbar_on_real_captures():
+    # capture « mes ventes » : 51 ventes, poignée au milieu de sa piste
+    t0, t1, a, b = core.find_scrollbar(_gray_fixture("hdv_mesventes.png", (600, 140, 98, 540)))
+    assert a + 5 < t0 and t1 < b - 5
+    # captures du joueur : liste en haut, puis en bas
+    t0, t1, a, b = core.find_scrollbar(_gray_fixture("barre_defilement_haut.png"))
+    assert t0 <= a + 3 and t1 < b - 100
+    t0, t1, a, b = core.find_scrollbar(_gray_fixture("barre_defilement_bas.png"))
+    assert t1 >= b - 2 and t0 > a + 100
+    assert core.find_scrollbar(_gray_fixture("hdv_mesventes.png", (240, 140, 300, 540))) is None   # pas de barre
+
+
+def test_scrollbar_at_bottom(monkeypatch):
+    cfg = core.Config(relist_row=[100, 100], relist_step=50, relist_rows=10)
+    bas = np.dstack([_gray_fixture("barre_defilement_bas.png")] * 3)
+    haut = np.dstack([_gray_fixture("barre_defilement_haut.png")] * 3)
+    monkeypatch.setattr(core, "grab_screen", lambda r: bas)
+    assert core.scrollbar_at_bottom(cfg) is True
+    monkeypatch.setattr(core, "grab_screen", lambda r: haut)
+    assert core.scrollbar_at_bottom(cfg) is False
+    monkeypatch.setattr(core, "grab_screen", lambda r: np.full((300, 200, 3), 33, np.uint8))
+    assert core.scrollbar_at_bottom(cfg) is None
+
+
+def test_relist_all_scrollbar_not_at_bottom_means_blocked(relist_engine, monkeypatch):
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None), (0, None)], None)
+    eng.cfg.count_region = None
+    monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: False)
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "défilement bloqué" in res.message and "barre de défilement" in res.message
+
+
+def test_relist_all_scrollbar_at_bottom_wins_over_counter(relist_engine, monkeypatch):
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None)], (40, 100))
+    monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: True)
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "fin de la liste" in res.message
+
+
 def test_relist_panel_cleared_means_done(relist_engine):
     # le jeu désélectionne la vente après « Modifier » : plus rien à lire = accepté
     eng, calls, st = relist_engine
