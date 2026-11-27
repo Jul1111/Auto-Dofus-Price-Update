@@ -107,6 +107,7 @@
     "pause": "ctrl+alt+p",
     "cheatsheet": "ctrl+alt+h",
     "hud": "ctrl+alt+u",
+    "toggle_window": "ctrl+alt+o",
     "quit": "ctrl+alt+q"
   }
 }

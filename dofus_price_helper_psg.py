@@ -87,6 +87,7 @@ HOTKEY_LABELS = {
     "show_zones": "Afficher les zones calibrées",
     "cheatsheet": "Aide-mémoire des touches par-dessus le jeu",
     "hud": "HUD discret par-dessus le jeu (afficher / cacher)",
+    "toggle_window": "Afficher / cacher la fenêtre de l'outil",
     "calibrate_auto": "Calibration automatique (HDV ouvert, onglet Vente)",
     "calibrate_anchor": "Repère : titre « Hôtel de vente » (×2)",
     "calibrate_table": "Tableau « Actuellement en vente » (×2)",
@@ -584,6 +585,12 @@ WHATS_NEW = {
         "(détail au survol).",
         "Sauvegarder et restaurer réglages, profils et calibration en un seul fichier (onglet Options).",
     ],
+    "1.10.0": [
+        "Renommer un profil (onglet Calibration) : ses personnages associés, sa couleur et son repère suivent.",
+        "{window} affiche ou cache la fenêtre de l'outil, même depuis le jeu.",
+        "Quand la mise en vente automatique est coupée, le HUD rappelle « Entrée pour valider » une fois "
+        "le prix saisi (ou « Ctrl+V puis Entrée » s'il est seulement copié).",
+    ],
 }
 
 
@@ -618,6 +625,20 @@ def reading_quality(reading, min_conf: float) -> tuple:
              "bad": "lecture douteuse : l'outil ne collera pas ce prix tout seul"}[level]
     raw = f" · lu « {reading.raw} »" if reading.raw and reading.raw != str(reading.value) else ""
     return level, f"Fiabilité {conf:.0f} % : {words}{raw}"
+
+
+def validate_reminder(res, cfg) -> Optional[str]:
+    """Rappel pour le HUD quand le prix est prêt mais pas mis en vente (validation automatique
+    coupée) : « Entrée pour valider », ou « Ctrl+V puis Entrée » s'il est seulement copié."""
+    msg = res.message.lstrip()
+    if res.level != "ok" or not msg.startswith(("[VENTE]", "[OPT]")) or res.new_price is None:
+        return None
+    done = msg.rsplit(" | ", 1)[-1]
+    if done.startswith("saisi") and "mis en vente" not in done:
+        return "Prix saisi · Entrée pour valider"
+    if done.startswith("copié"):
+        return "Prix copié · Ctrl+V puis Entrée"
+    return None
 
 
 HUD_SIZES = {"small": ("Petit", 11), "normal": ("Normal", 12), "large": ("Grand", 15)}
@@ -1242,7 +1263,7 @@ class App(ctk.CTk):
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
         b = self._section(page, "Divers")
         self._hotkey_line(b, None, "Forcer une lecture jugée suspecte", literal="même touche ×2")
-        for name in ("pause", "show_zones", "cheatsheet", "hud"):
+        for name in ("pause", "show_zones", "cheatsheet", "hud", "toggle_window"):
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
         b = self._section(page, "Dans la fenêtre de l'outil", "Quand c'est l'outil qui a le focus (pas le jeu).")
         self._hotkey_line(b, None, "Changer d'onglet : Accueil, Prix, Mes ventes, Calibration, Raccourcis, "
@@ -1497,6 +1518,8 @@ class App(ctk.CTk):
         self.profile_menu.pack(side="left")
         ctk.CTkButton(r, text="Nouveau", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._new_profile
                       ).pack(side="left", padx=(8, 4))
+        ctk.CTkButton(r, text="Renommer", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      command=self._rename_profile).pack(side="left", padx=4)
         ctk.CTkButton(r, text="Supprimer", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._delete_profile
                       ).pack(side="left", padx=4)
         self._switch(pb, "Changer de profil tout seul selon le personnage", "auto_profile",
@@ -1893,6 +1916,24 @@ class App(ctk.CTk):
         self._after_profile_change(f"[Profil] « {self.cfg.profile} » créé (copie) et actif : recalibre "
                                    "ce qui change dans cet HDV.")
 
+    def _rename_profile(self):
+        if self._busy():
+            return
+        old = self.cfg.profile
+        name = ctk.CTkInputDialog(title="Renommer le profil",
+                                  text=f"Nouveau nom pour « {old} » :").get_input()
+        if name is None or name.strip() == old:
+            return
+        with self._profile_lock:
+            try:
+                self.cfg.rename_profile(old, name)
+            except (ValueError, KeyError) as e:
+                self._log(f"[Profil] {e}.", "ERROR")
+                return
+            except OSError as e:
+                self._log(f"[Profil] Repère non renommé ({e}) : recalibre le repère de ce profil.", "WARN")
+        self._after_profile_change(f"[Profil] « {old} » renommé en « {self.cfg.profile} ».")
+
     def _delete_profile(self):
         names = self.cfg.profile_names()
         if len(names) <= 1:
@@ -2221,6 +2262,7 @@ class App(ctk.CTk):
             core.HOTKEYS.add(hk["pause"], lambda: self.ui_events.put(("pause", None)))
             core.HOTKEYS.add(hk["cheatsheet"], lambda: self.ui_events.put(("cheatsheet", None)))
             core.HOTKEYS.add(hk["hud"], lambda: self.ui_events.put(("hud", None)))
+            core.HOTKEYS.add(hk["toggle_window"], lambda: self.ui_events.put(("toggle_window", None)))
         except Exception as e:
             self._log(f"[Hotkeys] Erreur d'enregistrement: {e}", "ERROR")
             return
@@ -2349,6 +2391,8 @@ class App(ctk.CTk):
             self._toggle_cheatsheet()
         elif name == "hud":
             self._toggle_hud()
+        elif name == "toggle_window":
+            self._toggle_window()
         elif name == "profile_auto":
             self._on_auto_profile(arg)
         elif name == "anchor":
@@ -2420,12 +2464,15 @@ class App(ctk.CTk):
         head = (f"Lot {res.lot} → {fmt(res.new_price)}" if res.new_price is not None
                 else "Liste mise à jour" if res.message.startswith("[MAJ TOUT]") else "Pas de prix")
         self.last_action = (head, res.hint or res.level, LEVEL_COLORS[res.level])
+        remind = validate_reminder(res, self.cfg)
+        if remind:                                   # prix prêt mais pas mis en vente : à toi de valider
+            self.last_action = (head, remind, P["gold"])
         self._add_activity(res)
         if res.level == "ok" and res.message.startswith(("[VENTE]", "[OPT]", "[TOUT]", "[MAJ]")) \
                 and ("mis en vente" in res.message or "modifié" in res.message or res.message.startswith("[TOUT]")):
             self._mark_step("sell")
         self._refresh_hud()
-        self._hud_flash(LEVEL_COLORS[res.level])     # le HUD remplace l'ancien popup / bandeau
+        self._hud_flash(P["gold"] if remind else LEVEL_COLORS[res.level])   # le HUD remplace l'ancien popup
 
     # ---- résumé de fin de Ctrl+F3
     def _relist_summary(self, res: core.Result):
@@ -3863,7 +3910,8 @@ class App(ctk.CTk):
         ctk.CTkLabel(hr, text="", image=self._logo_img).pack(side="left", padx=(0, 10))
         ctk.CTkLabel(hr, text=f"Quoi de neuf dans la {cur}", font=ctk.CTkFont(size=17, weight="bold")
                      ).pack(side="left")
-        keys = {"pause": c.hotkeys["pause"].upper(), "hud": c.hotkeys["hud"].upper()}
+        keys = {"pause": c.hotkeys["pause"].upper(), "hud": c.hotkeys["hud"].upper(),
+                "window": c.hotkeys["toggle_window"].upper()}
         for version, lines in reversed(items):
             if len(items) > 1:
                 ctk.CTkLabel(w, text=f"v{version}", text_color=P["gold"], anchor="w",
@@ -3965,6 +4013,19 @@ class App(ctk.CTk):
             self.focus_force()
         except tk.TclError:
             pass
+
+    def _toggle_window(self):
+        """Touche « afficher / cacher » : depuis le jeu, sans passer par la barre des tâches."""
+        try:
+            hidden = self.state() in ("withdrawn", "iconic")
+        except tk.TclError:
+            return
+        if hidden:
+            self._show_main()
+        elif self.tray.icon is not None:
+            self.withdraw()                        # l'icône près de l'horloge permet aussi de la rouvrir
+        else:
+            self.iconify()
 
     def _on_tray(self, action: str):
         if action == "open":

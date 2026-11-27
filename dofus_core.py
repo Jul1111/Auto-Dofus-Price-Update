@@ -239,6 +239,7 @@ DEFAULT_HOTKEYS = {
     "pause": "ctrl+alt+p",
     "cheatsheet": "ctrl+alt+h",      # aide-mémoire des touches par-dessus le jeu
     "hud": "ctrl+alt+u",             # afficher / cacher le HUD discret par-dessus le jeu
+    "toggle_window": "ctrl+alt+o",   # afficher / cacher la fenêtre de l'outil (depuis le jeu)
     "quit": "ctrl+alt+q",
 }
 
@@ -448,6 +449,28 @@ class Config:
         self.profile = name
         if src_anchor.exists():
             shutil.copy2(src_anchor, anchor_path(self))
+
+    def rename_profile(self, old: str, new: str) -> None:
+        """Renomme un profil : ses zones, son repère, ses personnages associés et sa couleur suivent."""
+        new = (new or "").strip()
+        if old not in self.profile_names():
+            raise KeyError(f"profil inconnu : {old}")
+        if new == old:
+            return
+        problem = profile_name_problem(new, [n for n in self.profile_names() if n != old])
+        if problem:
+            raise ValueError(problem)
+        src, dst = anchor_path(self, old), anchor_path(self, new)
+        self.profiles[self.profile] = self.profile_data()        # profil actif à jour
+        self.profiles[new] = self.profiles.pop(old)
+        if self.profile == old:
+            self.profile = new
+        self.character_profiles = {c: (new if p == old else p) for c, p in self.character_profiles.items()}
+        if old in self.profile_colors:
+            self.profile_colors[new] = self.profile_colors.pop(old)
+        if src.exists() and src != dst:
+            dst.unlink(missing_ok=True)
+            src.replace(dst)
 
     def delete_profile(self, name: str) -> None:
         if name == self.profile:
