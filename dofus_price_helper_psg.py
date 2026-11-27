@@ -40,6 +40,7 @@ import dofus_update  # noqa: E402
 import customtkinter as ctk
 
 import dofus_backup
+import dofus_icons
 import dofus_logo
 import dofus_style as style
 from dofus_style import P
@@ -135,6 +136,34 @@ POINT_LABELS = {"price_field": "Champ « Prix du lot »", "sell_button": "Bouton
 
 def fmt(n: Optional[int]) -> str:
     return "-" if n is None else f"{n:,}".replace(",", " ")
+
+
+def ico(name: str, color: Optional[str] = None, size: int = 16):
+    """Icône du jeu d'icônes de l'outil (dofus_icons), de la couleur du texte par défaut."""
+    return dofus_icons.ctk_icon(name, color or P["text"], size)
+
+
+def mix_color(a: str, b: str, t: float) -> str:
+    """Mélange de deux couleurs #rrggbb (t = 0 -> a, 1 -> b)."""
+    ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
+
+
+def faded(img, alpha: float):
+    """Image PIL RGBA rendue plus transparente (états vides)."""
+    out = img.copy()
+    out.putalpha(out.getchannel("A").point(lambda v: int(v * alpha)))
+    return out
+
+
+def price_delta(old: Optional[int], new: Optional[int]) -> Optional[tuple]:
+    """Écart entre l'ancien et le nouveau prix : (texte « ▼ 4 % », "down" | "up"), None sans écart."""
+    if not old or new is None or old == new:
+        return None
+    pct = (new - old) / old * 100
+    shown = f"{abs(pct):.0f}" if abs(pct) >= 1 else "<1"
+    return (f"▼ {shown} %" if pct < 0 else f"▲ {shown} %"), ("down" if pct < 0 else "up")
 
 
 # ---------------------------------------------------------------- aperçu des prix (onglet Prix)
@@ -377,9 +406,12 @@ def action_entry(res, when: float = None) -> dict:
         text = f"{kind} · lot {res.lot or '?'} → {fmt(res.new_price)}"
     else:
         text = kind + (f" · lot {res.lot}" if res.lot else "")
+    delta = None if msg.startswith("[MAJ TOUT]") else price_delta(res.old_price, res.new_price)
+    icon = "tag" if kind.startswith("Vente") or msg.startswith(("[VENTE]", "[TOUT]")) else \
+        "edit" if msg.startswith(("[MAJ]", "[OPT]")) else "dot"
     return {"time": time.strftime("%H:%M", time.localtime(when or time.time())), "text": text,
             "hint": res.hint or {"ok": "ok", "warn": "à vérifier", "error": "erreur"}.get(res.level, ""),
-            "level": res.level}
+            "level": res.level, "delta": delta, "icon": icon}
 
 
 # ---------------------------------------------------------------- progression des boucles (F2, Ctrl+F3)
@@ -474,12 +506,16 @@ def logo_ico() -> Optional[str]:
 
 def brand(window) -> None:
     """Met le logo comme icône de la fenêtre (barre de titre, barre des tâches)."""
-    ico = logo_ico()
-    if ico:
+    path = logo_ico()
+    if path:
         try:
-            window.iconbitmap(ico)     # avant le délai de CustomTkinter : il ne remet pas son icône
+            window.iconbitmap(path)    # avant le délai de CustomTkinter : il ne remet pas son icône
         except tk.TclError:
             pass
+    try:                               # barre de titre de la couleur du fond (Windows 11), après CustomTkinter
+        window.after(350, lambda: style.set_titlebar(window, P["bg"], P["text"], P["border"]))
+    except tk.TclError:
+        pass
 
 
 class Tray:
@@ -615,6 +651,8 @@ WHATS_NEW = {
         "HUD : la pastille passe à l'orange quand la calibration semble décalée (fenêtre du jeu "
         "redimensionnée, écran changé, HDV introuvable). Maintiens Alt : « Recalibrer » la refait sans "
         "quitter le jeu.",
+        "Nouveau look : en-tête redessiné, icônes maison à la place des emojis, barre de titre aux couleurs "
+        "du thème (Windows 11). Le panneau Activité montre l'écart de prix (▼ 4 %).",
     ],
 }
 
@@ -981,7 +1019,8 @@ class App(ctk.CTk):
             w.destroy()
             self._open_wizard()
 
-        ctk.CTkButton(w, text="✨ Calibration automatique", height=40, font=ctk.CTkFont(size=14, weight="bold"),
+        ctk.CTkButton(w, text="Calibration automatique", height=40, font=ctk.CTkFont(size=14, weight="bold"),
+                      image=ico("spark", P["on_accent"], 18),
                       command=auto).pack(fill="x", padx=18, pady=(18, 6))
         bar = ctk.CTkFrame(w, fg_color="transparent")
         bar.pack(fill="x", padx=18)
@@ -1114,17 +1153,30 @@ class App(ctk.CTk):
         # ---------------- en-tête
         wrap = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
         wrap.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        head = ctk.CTkFrame(wrap, fg_color="transparent")
-        head.pack(fill="x")
-        self._logo_img = ctk.CTkImage(light_image=dofus_logo.logo_image(64), dark_image=dofus_logo.logo_image(64),
-                                      size=(28, 28))
-        ctk.CTkLabel(head, text="", image=self._logo_img).pack(side="left", padx=(14, 8), pady=8)
-        ctk.CTkLabel(head, text="Dofus Price Helper", font=ctk.CTkFont(size=19, weight="bold")
+        band = ctk.CTkFrame(wrap, fg_color=CARD, corner_radius=14, border_width=1, border_color=P["border"])
+        band.pack(fill="x", padx=12, pady=(8, 4))
+        self.head_band = band
+        head = ctk.CTkFrame(band, fg_color="transparent")
+        head.pack(fill="x", padx=(10, 8), pady=(8, 0))
+        logo = dofus_logo.logo_image(128, glow=style.is_dark())   # halo doré : seulement sur fond sombre
+        self._logo_img = ctk.CTkImage(light_image=logo, dark_image=logo, size=(50, 50))
+        ctk.CTkLabel(head, text="", image=self._logo_img).pack(side="left", padx=(0, 8))
+        titles = ctk.CTkFrame(head, fg_color="transparent")
+        titles.pack(side="left")
+        tl = ctk.CTkFrame(titles, fg_color="transparent")
+        tl.pack(anchor="w")
+        ctk.CTkLabel(tl, text="Dofus Price Helper", font=ctk.CTkFont(size=20, weight="bold"), height=26
                      ).pack(side="left")
-        ctk.CTkLabel(head, text=core.app_version(), text_color=MUTED, font=ctk.CTkFont(size=12)
-                     ).pack(side="left", padx=(8, 10), pady=(6, 0))
-        info = ctk.CTkFrame(wrap, fg_color="transparent")
-        info.pack(fill="x", padx=12, pady=(0, 6))
+        ctk.CTkLabel(tl, text=core.app_version(), text_color=MUTED, fg_color=P["card2"], corner_radius=8,
+                     height=20, font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(10, 0), ipadx=4)
+        ctk.CTkLabel(titles, text="Tes prix au plus juste à l'hôtel de vente", text_color=MUTED,
+                     font=ctk.CTkFont(size=12), height=18).pack(anchor="w")
+        info = ctk.CTkFrame(band, fg_color="transparent")
+        info.pack(fill="x", padx=8, pady=(8, 2))
+        # fin liseré dégradé (couleur d'accent -> or -> fond de la carte)
+        self._head_strip = tk.Canvas(band, height=3, highlightthickness=0, borderwidth=0, bg=CARD)
+        self._head_strip.pack(fill="x", padx=18, pady=(6, 10))
+        self._head_strip.bind("<Configure>", lambda _e: self._draw_head_strip(), add="+")
         # barre d'état : une pastille par chose à surveiller (cliquable)
         chips = ctk.CTkFrame(info, fg_color="transparent")
         chips.pack(side="left")
@@ -1150,28 +1202,35 @@ class App(ctk.CTk):
         self.loop_lbl.pack(side="left", padx=(12, 8))
         self.loop_pb = ctk.CTkProgressBar(self.loop_bar, width=140, height=8, progress_color=P["accent"])
         self.loop_pb.pack(side="left", padx=4)
-        self.loop_stop = ctk.CTkButton(self.loop_bar, text="■ Arrêter", width=84, height=24,
+        self.loop_stop = ctk.CTkButton(self.loop_bar, text="Arrêter", width=92, height=24,
+                                       image=ico("stop", style.CHIP["red"][1], 12),
                                        fg_color=style.CHIP["red"][0], hover_color=P["red_hover"],
                                        text_color=style.CHIP["red"][1], command=self._stop_loop)
         self.loop_stop.pack(side="left", padx=(8, 4), pady=3)
         # calibration décalée (fenêtre du jeu redimensionnée, écran changé) : affiché au besoin
         ob, of = style.CHIP["orange"]
         self.drift_bar = ctk.CTkFrame(wrap, fg_color=ob, corner_radius=10)
+        ctk.CTkLabel(self.drift_bar, text="", image=ico("warn", of, 18)).pack(side="left", padx=(12, 0))
         self.drift_lbl = ctk.CTkLabel(self.drift_bar, text="", text_color=of, anchor="w", justify="left",
                                       wraplength=620, font=ctk.CTkFont(size=12, weight="bold"))
-        self.drift_lbl.pack(side="left", fill="x", expand=True, padx=12, pady=6)
+        self.drift_lbl.pack(side="left", fill="x", expand=True, padx=(8, 12), pady=6)
         ctk.CTkButton(self.drift_bar, text="Ignorer", width=80, height=26, fg_color=BTN2, hover_color=BTN2_HOVER,
                       text_color=P["text"], command=self._ignore_drift).pack(side="right", padx=(4, 8), pady=6)
-        ctk.CTkButton(self.drift_bar, text="Voir zones", width=90, height=26, fg_color=BTN2,
+        ctk.CTkButton(self.drift_bar, text="Voir zones", width=108, height=26, fg_color=BTN2, image=ico("eye"),
                       hover_color=BTN2_HOVER, text_color=P["text"], command=self._show_zones
                       ).pack(side="right", padx=4, pady=6)
-        self._tip(ctk.CTkButton(self.drift_bar, text="✨ Recalibrer", width=110, height=26,
+        self._tip(ctk.CTkButton(self.drift_bar, text="Recalibrer", width=118, height=26,
+                                image=ico("spark", P["on_accent"]),
                                 command=lambda: (self.tabs.set("Calibration"),
                                                  self._countdown("automatique", self._calib_auto_ui))),
                   "Calibration automatique : affiche l'HDV (onglet Vente) pendant le compte à rebours."
                   ).pack(side="right", padx=4, pady=6)
-        self._tip(ctk.CTkCheckBox(head, text="📌", variable=self.v["always_on_top"], width=44),
-                  "Fenêtre de l'outil toujours au-dessus du jeu.").pack(side="right", padx=(8, 14))
+        self.pin_btn = ctk.CTkButton(head, text="", width=36, height=36, corner_radius=10, border_width=1,
+                                     command=lambda: self.v["always_on_top"].set(not self.v["always_on_top"].get()))
+        self._tip(self.pin_btn, "Fenêtre de l'outil toujours au-dessus du jeu (clic = activer / couper)."
+                  ).pack(side="right", padx=(8, 4))
+        self.v["always_on_top"].trace_add("write", lambda *_: self._refresh_pin())
+        self._refresh_pin()
         self.update_btn = ctk.CTkButton(head, text="", width=150, fg_color=style.CHIP["green"][0],
                                         hover_color=P["green_hover"], text_color=style.CHIP["green"][1])   # affiché si une version plus récente existe
 
@@ -1196,33 +1255,39 @@ class App(ctk.CTk):
                      ).pack(anchor="w", padx=14, pady=(12, 2))
         self.act_box = ctk.CTkFrame(side, fg_color="transparent")
         self.act_box.pack(fill="x", padx=10)
-        self.act_empty = ctk.CTkLabel(
-            self.act_box, text="Aucune action pour l'instant.\nOuvre l'HDV, sélectionne un objet de ton "
-                               f"inventaire et appuie sur {self.cfg.hotkeys['sell'].upper()}.",
-            text_color=MUTED, justify="left", anchor="w", wraplength=360)
+        self.act_empty = self._empty_state(
+            self.act_box, "Aucune action pour l'instant",
+            f"Ouvre l'HDV, sélectionne un objet de ton inventaire et appuie sur {self.cfg.hotkeys['sell'].upper()}.")
         self.act_rows = []
         for _ in range(self.ACTIVITY_ROWS):
             r = ctk.CTkFrame(self.act_box, fg_color="transparent")
             t = ctk.CTkLabel(r, text="", text_color=MUTED, width=40, anchor="w", font=ctk.CTkFont(size=12))
             t.pack(side="left")
+            icon = ctk.CTkLabel(r, text="", width=22)
+            icon.pack(side="left", padx=(0, 4))
             hint = ctk.CTkLabel(r, text="", anchor="e", font=ctk.CTkFont(size=12))
             hint.pack(side="right", padx=(6, 2))
+            delta = ctk.CTkLabel(r, text="", height=20, corner_radius=8, fg_color=P["card2"],
+                                 font=ctk.CTkFont(size=11, weight="bold"))
             txt = ctk.CTkLabel(r, text="", anchor="w", font=ctk.CTkFont(size=12, weight="bold"))
             txt.pack(side="left", fill="x", expand=True)
-            self.act_rows.append((r, t, txt, hint))
+            self.act_rows.append((r, t, txt, hint, icon, delta))
         ctk.CTkFrame(side, fg_color=P["border"], height=1).pack(fill="x", padx=14, pady=(8, 6))
         hr = ctk.CTkFrame(side, fg_color="transparent")
         hr.pack(fill="x", padx=14)
         ctk.CTkLabel(hr, text="Dernière lecture", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
         self.read_info = ctk.CTkLabel(hr, text="", text_color=MUTED, font=ctk.CTkFont(size=12))
         self.read_info.pack(side="right")
-        self.read_empty = ctk.CTkLabel(side, text="Pas encore de lecture. Elle s'affiche ici à chaque "
-                                                  "vente, ou avec « Lire (test) » (onglet Calibration).",
-                                       text_color=MUTED, justify="left", anchor="w", wraplength=360)
+        self.read_empty = self._empty_state(side, "Pas encore de lecture",
+                                            "Les prix lus s'affichent ici à chaque vente, ou avec « Lire (test) » "
+                                            "(onglet Calibration).", icon="eye")
         self.read_grid = grid = ctk.CTkFrame(side, fg_color=P["card2"], corner_radius=8)
         # pastille devant chaque prix : vert = lecture sûre, orange = moyenne, rouge = douteuse
+        coin = dofus_logo.logo_image(64)
+        self._coin_img = ctk.CTkImage(light_image=coin, dark_image=coin, size=(14, 14))
         for c, t in ((0, "Lot"), (2, "Prix"), (3, "Par objet")):
-            ctk.CTkLabel(grid, text=t, text_color=MUTED, height=22).grid(
+            ctk.CTkLabel(grid, text=(" " + t) if c == 2 else t, text_color=MUTED, height=22,
+                         image=self._coin_img if c == 2 else None, compound="left").grid(
                 row=0, column=c, sticky="w" if c == 0 else "e", padx=10, pady=(4, 0))
         self.read_dots, self.read_tips = {}, {}
         for i, lot in enumerate(self.cfg.lots, start=1):
@@ -1252,9 +1317,11 @@ class App(ctk.CTk):
         ctk.CTkLabel(top, text="Journal", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=4)
         ctk.CTkSegmentedButton(top, values=list(LOG_FILTERS), variable=self.log_filter, height=24,
                                command=lambda _v: self._render_log()).pack(side="left", padx=10)
-        ctk.CTkButton(top, text="Effacer", width=70, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+        ctk.CTkButton(top, text="Effacer", width=88, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      image=ico("trash", size=14),
                       command=self._clear_log).pack(side="right")
-        self.copy_btn = self._tip(ctk.CTkButton(top, text="Copier", width=70, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+        self.copy_btn = self._tip(ctk.CTkButton(top, text="Copier", width=86, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                                                image=ico("copy", size=14),
                                                 command=self._copy_log),
                                   "Copie les lignes affichées (selon le filtre) : à coller dans un message "
                                   "quand tu signales un problème.")
@@ -1378,7 +1445,7 @@ class App(ctk.CTk):
         for key, (mark, btn) in self.step_rows.items():
             done = self._step_done(key)
             all_done = all_done and done
-            mark.configure(text="✓" if done else "○", text_color=P["green"] if done else MUTED)
+            mark.configure(text="", image=ico("check", P["green"], 18) if done else ico("circle", MUTED, 16))
             if btn is not None:
                 btn.configure(fg_color=BTN2 if done else P["accent"],
                               hover_color=BTN2_HOVER if done else P["accent_hover"],
@@ -1406,12 +1473,19 @@ class App(ctk.CTk):
         else:
             self.act_empty.pack_forget()
         colors = {"ok": P["green"], "warn": P["orange"], "error": P["red"]}
-        for i, (r, t, txt, hint) in enumerate(self.act_rows):
+        for i, (r, t, txt, hint, icon, delta) in enumerate(self.act_rows):
             if i < len(self.activity):
                 e = self.activity[i]
                 t.configure(text=e["time"])
                 txt.configure(text=e["text"])
                 hint.configure(text=e["hint"], text_color=colors.get(e["level"], MUTED))
+                icon.configure(image=ico(e.get("icon", "dot"), colors.get(e["level"], MUTED), 14))
+                d = e.get("delta")
+                if d:                       # baisse = cyan (le cas normal), hausse = or
+                    delta.configure(text=d[0], text_color=P["cyan"] if d[1] == "down" else P["gold"])
+                    delta.pack(side="right", padx=(6, 0), ipadx=4, after=hint)
+                else:
+                    delta.pack_forget()
                 r.pack(fill="x", padx=4, pady=1)
             else:
                 r.pack_forget()
@@ -1627,7 +1701,9 @@ class App(ctk.CTk):
         for w in box.winfo_children():
             w.destroy()
         if not self.runs:
-            ctk.CTkLabel(box, text="Aucun parcours pour l'instant.", text_color=MUTED).pack(anchor="w", pady=2)
+            self._empty_state(box, "Aucun parcours pour l'instant",
+                              "Lance « Toute la liste » : chaque parcours s'ajoute ici avec son récap.",
+                              icon="refresh").pack(fill="x", pady=2)
             return
         for run in reversed(self.runs):
             bad = any(not c.modified for c in run["changes"])
@@ -1661,14 +1737,15 @@ class App(ctk.CTk):
                                "sur la même version du jeu que le modèle de l'outil : sinon, calibration "
                                "manuelle dans « Avancé ».")
         r = self._row(ab)
-        ctk.CTkButton(r, text="✨ Calibration automatique", width=300, height=46,
+        ctk.CTkButton(r, text="Calibration automatique", width=300, height=46, image=ico("spark", P["on_accent"], 20),
                       font=ctk.CTkFont(size=15, weight="bold"),
                       command=lambda: self._countdown("automatique", self._calib_auto_ui)
                       ).pack(side="left", pady=4)
         self._hk_label(r, "calibrate_auto", text_color=MUTED,
                        font=ctk.CTkFont(family="Consolas")).pack(side="left", padx=12)
         r = self._row(ab)
-        self._tip(ctk.CTkButton(r, text="Voir zones", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._show_zones),
+        self._tip(ctk.CTkButton(r, text="Voir zones", width=108, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                                image=ico("eye"), command=self._show_zones),
                   "Vérifie où les zones ont été placées.").pack(side="left", padx=(0, 8))
         self._tip(ctk.CTkButton(r, text="Lire (test)", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                                 command=lambda: self.jobs.put(("read", None))),
@@ -1717,7 +1794,7 @@ class App(ctk.CTk):
         adv = self._collapsible(page, "Avancé : assistant et zones manuelles",
                                 "Seulement si la calibration automatique échoue ou place mal une zone.")
         top = self._section(adv, "Assistant", "Pas à pas, avec une vérification à la fin.")
-        ctk.CTkButton(top, text="🧭 Ouvrir l'assistant de calibration", width=260,
+        ctk.CTkButton(top, text="Ouvrir l'assistant de calibration", width=260, image=ico("compass", P["on_accent"]),
                       command=self._open_wizard).pack(anchor="w", pady=2)
         b = self._section(adv, "Zones et points",
                           f"« Calibrer » = compte à rebours de {self.cfg.calib_countdown} s pour placer la "
@@ -1757,7 +1834,7 @@ class App(ctk.CTk):
             self._hk_label(r, *hot, text_color=MUTED, width=120, anchor="w",
                            font=ctk.CTkFont(family="Consolas")).pack(side="left")
             if not required:
-                ctk.CTkButton(r, text="✕", width=28, height=26, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                ctk.CTkButton(r, text="", width=28, height=26, fg_color=BTN2, image=ico("close", size=14), hover_color=BTN2_HOVER,
                               command=lambda k=key: self._clear_zone(k)).pack(side="right", padx=(0, 4))
             ctk.CTkButton(r, text="Calibrer", width=80, height=26, command=cmd).pack(side="right", padx=4)
             self.calib_labels[key] = (st, required)
@@ -1779,7 +1856,8 @@ class App(ctk.CTk):
         self.vol_lbl = ctk.CTkLabel(r, text=f"{self.cfg.sound_volume:.0%}", text_color=MUTED, width=44)
         self.vol_lbl.pack(side="left", padx=6)
         self.sound_test = [0]
-        ctk.CTkButton(r, text="▶ Tester", width=80, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+        ctk.CTkButton(r, text="Tester", width=84, height=24, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      image=ico("play", size=12),
                       command=self._test_sound).pack(side="left", padx=4)
         self._switch(b, "Notification Windows à la fin d'un long parcours", "notify",
                      tip="Tout vendre ou toute la liste de plus de 20 s : une notification Windows "
@@ -1794,7 +1872,7 @@ class App(ctk.CTk):
                   "premier plan. Touche : "
                   f"{self.cfg.hotkeys['hud'].upper()}.")
         self.hud_switch.pack(side="left")
-        self.hud_move_btn = ctk.CTkButton(r, text="Déplacer", width=90, height=24, fg_color=BTN2,
+        self.hud_move_btn = ctk.CTkButton(r, text="Déplacer", width=104, height=24, fg_color=BTN2, image=ico("move", size=14),
                                           text_color=P["text"], hover_color=BTN2_HOVER, command=self._hud_move)
         self.hud_move_btn.pack(side="left", padx=10)
         r = self._row(b)
@@ -1922,7 +2000,8 @@ class App(ctk.CTk):
                           tip="Pour changer de PC ou réinstaller. Restaurer remplace les réglages actuels "
                               "(ils sont d'abord gardés dans le dossier « sauvegardes ») puis redémarre l'outil.")
         r = self._row(b)
-        ctk.CTkButton(r, text="💾 Sauvegarder…", width=150, command=self._backup).pack(side="left")
+        ctk.CTkButton(r, text="Sauvegarder…", width=150, image=ico("save", P["on_accent"]),
+                      command=self._backup).pack(side="left")
         ctk.CTkButton(r, text="Restaurer…", width=120, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._restore).pack(side="left", padx=8)
         b = self._section(page, "Mises à jour et journal", f"Version {core.app_version()}.",
@@ -1941,7 +2020,7 @@ class App(ctk.CTk):
         ctk.CTkButton(r, text="Page des versions", width=150, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=lambda: self._open_url(core.RELEASES_URL)).pack(side="left", padx=8)
         r = self._row(b)
-        self._tip(ctk.CTkButton(r, text="📦 Rapport de problème", width=200,
+        self._tip(ctk.CTkButton(r, text="Rapport de problème", width=200, image=ico("package", P["on_accent"]),
                                 command=lambda: self._countdown("rapport", self._make_report)),
                   "Crée un zip à envoyer quand quelque chose ne marche pas : journal, réglages, captures "
                   "de diagnostic et une image de l'HDV (affiche-le pendant le compte à rebours). Rien "
@@ -3023,7 +3102,7 @@ class App(ctk.CTk):
                                command=lambda k=i: self._wiz_jump(k))
             sb.pack(fill="x", padx=6, pady=1)
             self._wiz_steps.append(sb)
-        auto = ctk.CTkButton(side, text="✨ Tout placer automatiquement", height=34,
+        auto = ctk.CTkButton(side, text="Tout placer automatiquement", height=34, image=ico("spark", P["on_accent"]),
                              command=lambda: self._countdown("automatique", self._calib_auto_ui))
         auto.pack(side="bottom", fill="x", padx=10, pady=10)
         self._tip(auto, "HDV ouvert sur l'onglet « Vente » : l'outil place toutes les zones, puis tu "
@@ -3045,7 +3124,8 @@ class App(ctk.CTk):
         ctk.CTkLabel(hr, text="Ce que l'outil voit", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
         self._wiz_state = ctk.CTkLabel(hr, text="", font=ctk.CTkFont(weight="bold"))
         self._wiz_state.pack(side="right")
-        ctk.CTkButton(hr, text="↻ Relire", width=70, height=22, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+        ctk.CTkButton(hr, text="Relire", width=80, height=22, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      image=ico("refresh", size=13),
                       command=self._wiz_zone_check).pack(side="right", padx=8)
         self._wiz_cap = ctk.CTkLabel(self._wiz_check, text="")
         self._wiz_cap.pack(padx=12, pady=4)
@@ -3056,10 +3136,12 @@ class App(ctk.CTk):
         self._wiz_report = ctk.CTkTextbox(main, height=150, font=(style.MONO, 11))
         bar = ctk.CTkFrame(main, fg_color="transparent")
         bar.pack(side="bottom", fill="x", pady=(8, 0))
-        self._wiz_back = ctk.CTkButton(bar, text="← Retour", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+        self._wiz_back = ctk.CTkButton(bar, text="Retour", width=96, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                                       image=ico("back", size=14),
                                        command=lambda: self._wiz_go(-1))
         self._wiz_back.pack(side="left")
-        ctk.CTkButton(bar, text="Voir zones", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+        ctk.CTkButton(bar, text="Voir zones", width=108, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                      image=ico("eye"),
                       command=self._show_zones).pack(side="left", padx=8)
         self._wiz_next = ctk.CTkButton(bar, text="Suivant →", width=110, command=lambda: self._wiz_go(1))
         self._wiz_next.pack(side="right")
@@ -3486,6 +3568,47 @@ class App(ctk.CTk):
             self.configure(fg_color=bg)
             self._refresh_transparent(self)
         self._update_glass_controls()
+        style.set_titlebar(self, P["bg"], P["text"], P["border"])
+
+    def _draw_head_strip(self):
+        """Liseré dégradé sous l'en-tête : accent -> or -> fond de la carte."""
+        cv = self._head_strip
+        w = cv.winfo_width()
+        cv.delete("all")
+        if w < 4:
+            return
+        stops = ((0.0, P["accent"]), (0.55, P["gold"]), (1.0, CARD))
+        for x in range(0, w, 2):
+            f = x / max(1, w - 1)
+            for (a, ca), (b, cb) in zip(stops, stops[1:]):
+                if a <= f <= b:
+                    cv.create_line(x, 0, x, 4, fill=mix_color(ca, cb, (f - a) / (b - a)), width=2)
+                    break
+
+    def _refresh_pin(self):
+        on = bool(self.v["always_on_top"].get())
+        self.pin_btn.configure(image=ico("pin", P["on_accent"] if on else MUTED, 18),
+                               fg_color=P["accent"] if on else "transparent",
+                               hover_color=P["accent_hover"] if on else BTN2_HOVER,
+                               border_color=P["accent"] if on else P["border"])
+
+    def _empty_state(self, parent, title: str, text: str, icon: Optional[str] = None):
+        """Bloc « rien ici pour l'instant » : pièce du logo estompée (ou icône), titre, aide."""
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        if icon is None:
+            if getattr(self, "_faded_logo", None) is None:
+                img = faded(dofus_logo.logo_image(96), 0.45)
+                self._faded_logo = ctk.CTkImage(light_image=img, dark_image=img, size=(40, 40))
+            image = self._faded_logo
+        else:
+            image = ico(icon, MUTED, 30)
+        ctk.CTkLabel(f, text="", image=image).pack(side="left", padx=(4, 12), pady=6)
+        col = ctk.CTkFrame(f, fg_color="transparent")
+        col.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(col, text=title, anchor="w", font=ctk.CTkFont(size=13, weight="bold")).pack(fill="x")
+        ctk.CTkLabel(col, text=text, anchor="w", justify="left", wraplength=300, text_color=MUTED,
+                     font=ctk.CTkFont(size=12)).pack(fill="x")
+        return f
 
     def _refresh_transparent(self, widget):
         """Après un changement du fond de la fenêtre : les zones « transparentes » de
@@ -3538,7 +3661,7 @@ class App(ctk.CTk):
     def _loop_start(self, kind: str):
         self._loop = {"kind": kind, "t0": time.time(), "frac": None,
                       "text": "Démarrage…" if kind == "relist_all" else "en cours…"}
-        self.loop_stop.configure(text="■ Arrêter", state="normal")
+        self.loop_stop.configure(text="Arrêter", state="normal")
         self._hud_bump()
         self._loop_show()
         self._tray_update()
@@ -3646,8 +3769,8 @@ class App(ctk.CTk):
         head.pack(fill="x", padx=(14, 8), pady=(8, 4))
         ctk.CTkLabel(head, text="◆  Raccourcis", text_color=P["gold"], anchor="w",
                      font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
-        ctk.CTkButton(head, text="✕", width=24, height=22, fg_color="transparent", hover_color=P["btn2_hover"],
-                      text_color=MUTED, command=lambda: self._cheat_close(t)).pack(side="right")
+        ctk.CTkButton(head, text="", width=24, height=22, fg_color="transparent", hover_color=P["btn2_hover"],
+                      image=ico("close", MUTED, 14), command=lambda: self._cheat_close(t)).pack(side="right")
         ctk.CTkLabel(head, text="⠿ déplacer", text_color=MUTED, font=ctk.CTkFont(size=11)
                      ).pack(side="right", padx=6)
         g = ctk.CTkFrame(card, fg_color="transparent")
@@ -3878,7 +4001,7 @@ class App(ctk.CTk):
             self.after(CALIB_WATCH_MS, self._check_calibration)
 
     def _show_drift(self, text: str):
-        self.drift_lbl.configure(text="⚠  " + text)
+        self.drift_lbl.configure(text=text)
         if text != self._drift_text:
             self._drift_text = text
             self._calib_alert_t = time.time()
@@ -4027,12 +4150,15 @@ class App(ctk.CTk):
         self._hud_bar = ctk.CTkProgressBar(card, height=4, corner_radius=2, progress_color=P["cyan"])
         self._hud_actions = ctk.CTkFrame(card, fg_color="transparent")    # Alt maintenu
         small = ctk.CTkFont(size=max(11, size - 1))
-        self._hud_btn_stop = ctk.CTkButton(self._hud_actions, text="■ Arrêter le parcours", height=24, width=10,
+        self._hud_btn_stop = ctk.CTkButton(self._hud_actions, text="Arrêter le parcours", height=24, width=10,
+                                           image=ico("stop", P["on_accent"], 12),
                                            font=small, fg_color=P["red"], hover_color=P["red_hover"],
                                            text_color=P["on_accent"], command=self._stop_loop)
         self._hud_btn_copy = ctk.CTkButton(self._hud_actions, text="Copier le prix", height=24, width=10, font=small,
+                                           image=ico("copy", P["on_accent"], 14),
                                            command=self._hud_copy_price)
-        self._hud_btn_recal = ctk.CTkButton(self._hud_actions, text="✨ Recalibrer", height=24, width=10,
+        self._hud_btn_recal = ctk.CTkButton(self._hud_actions, text="Recalibrer", height=24, width=10,
+                                            image=ico("spark", style.CHIP["orange"][1], 14),
                                             font=small, fg_color=style.CHIP["orange"][0],
                                             hover_color=P["card2"], text_color=style.CHIP["orange"][1],
                                             command=self._hud_recalibrate)
@@ -4485,7 +4611,8 @@ class App(ctk.CTk):
         ctk.CTkButton(bar, text="Terminer" if last else "Suivant →", width=100, height=28,
                       command=self._tour_end if last else lambda: self._tour_show(i + 1)).pack(side="right")
         if i > 0:
-            ctk.CTkButton(bar, text="← Précédent", width=100, height=28, fg_color=BTN2, text_color=P["text"],
+            ctk.CTkButton(bar, text="Précédent", width=108, height=28, fg_color=BTN2, text_color=P["text"],
+                          image=ico("back", size=14),
                           hover_color=BTN2_HOVER, command=lambda: self._tour_show(i - 1)).pack(side="right", padx=6)
         self.after(120, self._tour_place)          # onglet changé : attendre qu'il soit dessiné
 

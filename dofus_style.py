@@ -266,6 +266,35 @@ def set_click_through(window, on: bool, activate: bool = True) -> bool:
         return False
 
 
+def colorref(color: str) -> int:
+    """#rrggbb -> COLORREF Windows (0x00BBGGRR)."""
+    c = color.lstrip("#")
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    return (b << 16) | (g << 8) | r
+
+
+def set_titlebar(window, caption: str, text: str, border: str) -> bool:
+    """Barre de titre et bordure de la fenêtre aux couleurs du thème, coins arrondis.
+    Windows 11 seulement (build 22000+) ; ailleurs, rien ne change."""
+    if sys.platform != "win32":
+        return False
+    try:
+        if sys.getwindowsversion().build < 22000:
+            return False
+        import ctypes
+        from ctypes import byref, c_int, sizeof
+        hwnd = _hwnd(window)
+        dwm = ctypes.windll.dwmapi
+        ok = True
+        for attr, value in ((33, 2),                                  # DWMWA_WINDOW_CORNER_PREFERENCE : arrondi
+                            (34, colorref(border)), (35, colorref(caption)), (36, colorref(text))):
+            v = c_int(value)
+            ok = dwm.DwmSetWindowAttribute(hwnd, attr, byref(v), sizeof(v)) == 0 and ok
+        return ok
+    except Exception:
+        return False
+
+
 def set_glass(window, on: bool, opacity: float = 0.6) -> bool:
     """Active / coupe le flou derrière `window` (fenêtre Tk). True si Windows l'a accepté."""
     if not glass_supported():
