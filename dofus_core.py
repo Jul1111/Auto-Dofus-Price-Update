@@ -248,6 +248,20 @@ def _copy(obj):
     return json.loads(json.dumps(obj))
 
 
+_CONFIG_LOCK = threading.RLock()
+
+
+def keep_unreadable(path: Path) -> Optional[Path]:
+    """Copie d'un fichier de réglages illisible (« …illisible-20261127-1530.json »), pour
+    pouvoir le réparer ou l'envoyer. None si impossible."""
+    try:
+        keep = path.with_name(f"{path.stem}.illisible-{time.strftime('%Y%m%d-%H%M%S')}{path.suffix}")
+        shutil.copy2(path, keep)
+        return keep
+    except OSError:
+        return None
+
+
 @dataclass
 class Config:
     # Les noms en MAJUSCULES dans le JSON = nom du champ en majuscules.
@@ -370,8 +384,14 @@ class Config:
             return cfg
         try:
             data = json.loads(path.read_text(encoding="utf-8")) or {}
-        except (OSError, json.JSONDecodeError) as e:
-            print(f"[Config] Lecture impossible ({e}), valeurs par défaut.")
+            if not isinstance(data, dict):
+                raise ValueError("contenu inattendu")
+        except (OSError, ValueError) as e:      # JSONDecodeError en fait partie
+            # Valeurs par défaut… qui seraient enregistrées par-dessus à la fermeture : calibration
+            # et profils perdus pour de bon. Le fichier illisible est donc gardé de côté.
+            keep = keep_unreadable(path)
+            print(f"[Config] Lecture impossible ({e}), valeurs par défaut."
+                  + (f" Ancien fichier gardé : {keep.name}." if keep else ""))
             return cfg
         old = int(data.get("CONFIG_VERSION", 1)) < 2  # v1 seulement : raccourcis incompatibles
         for name in cfg.__dataclass_fields__:
@@ -394,9 +414,17 @@ class Config:
                 continue
             setattr(cfg, name, value)
         hk = _copy(DEFAULT_HOTKEYS)
-        hk.update({k: v for k, v in (cfg.hotkeys or {}).items() if isinstance(v, str)})
+        if isinstance(cfg.hotkeys, dict):       # fichier modifié à la main : jamais de plantage
+            hk.update({k: v for k, v in cfg.hotkeys.items() if isinstance(v, str)})
         cfg.hotkeys = hk
-        cfg.lots = sorted({int(l) for l in cfg.lots})
+        lots = set()
+        for l in cfg.lots if isinstance(cfg.lots, list) else []:
+            try:
+                if int(l) > 0:
+                    lots.add(int(l))
+            except (TypeError, ValueError):
+                pass
+        cfg.lots = sorted(lots) or cls().lots
         if "WINDOW_PROCESS" not in data and cfg.window_title == "Dofus":
             cfg.window_title = cls.window_title  # ancien défaut v1, faux
         if int(data.get("CONFIG_VERSION", 1)) < 4:
@@ -496,11 +524,24 @@ class Config:
             path.unlink(missing_ok=True)
 
     def save(self, path: Path = CONFIG_PATH) -> None:
-        self.profiles[self.profile] = self.profile_data()   # profil actif toujours à jour
-        data = {name.upper(): getattr(self, name) for name in self.__dataclass_fields__}
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)  # écriture atomique
+        # La fenêtre ET le fil de travail enregistrent (HDV déplacé, recalibration, fermeture) :
+        # un à la fois. Avant, deux enregistrements simultanés partageaient le même fichier
+        # temporaire et pouvaient laisser un fichier tronqué (illisible au lancement suivant).
+        with _CONFIG_LOCK:
+            self.profiles[self.profile] = self.profile_data()   # profil actif toujours à jour
+            data = {name.upper(): getattr(self, name) for name in self.__dataclass_fields__}
+            text = json.dumps(data, indent=2, ensure_ascii=False)
+            tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp")
+            tmp.write_text(text, encoding="utf-8")
+            for attempt in range(5):           # antivirus / indexation : fichier ouvert un instant
+                try:
+                    os.replace(tmp, path)      # écriture atomique
+                    return
+                except PermissionError:
+                    if attempt == 4:
+                        tmp.unlink(missing_ok=True)
+                        raise
+                    time.sleep(0.1)
 
 
 # --------------------------------------------------------------------------
