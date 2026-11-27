@@ -83,7 +83,7 @@ HOTKEY_LABELS = {
     "optimize": "Meilleur lot (prix par objet le plus haut)",
     "relist": "Remettre la vente sélectionnée sous le moins cher",
     "relist_all": "Toute la liste (interrupteur dans « Mes ventes »)",
-    "pause": "Pause / reprise (arrête aussi les boucles)",
+    "pause": "Pause / reprise ; pendant un parcours, l'arrête (sans pause)",
     "show_zones": "Afficher les zones calibrées",
     "cheatsheet": "Aide-mémoire des touches par-dessus le jeu",
     "hud": "HUD discret par-dessus le jeu (afficher / cacher)",
@@ -594,6 +594,8 @@ WHATS_NEW = {
         "le prix saisi (ou « Ctrl+V puis Entrée » s'il est seulement copié).",
     ],
     "1.11.0": [
+        "Pendant Tout vendre ou Toute la liste, {pause} arrête le parcours sans mettre l'outil en pause : "
+        "les touches restent actives. Hors parcours, elle fait toujours pause / reprise.",
         "HUD : option « 3 derniers prix sous la ligne » (onglet Options) pour vérifier les derniers lots "
         "d'un coup d'œil, aussi pendant un parcours.",
         "Fin de Toute la liste : le résumé commence par un récap (modifiés, à revoir, déjà au bon prix, "
@@ -2535,7 +2537,7 @@ class App(ctk.CTk):
         elif name == "zones":
             self._show_zones()
         elif name == "pause":
-            self._toggle_pause()
+            self._on_pause_key()
         elif name == "refresh":
             self._refresh_status()
         elif name == "wizard_test":
@@ -3302,6 +3304,14 @@ class App(ctk.CTk):
         self._refresh_status()
 
     # ---------------------------------------------------------------- misc
+    def _on_pause_key(self):
+        """Touche pause : pendant un parcours (Tout vendre, Toute la liste), l'arrête seulement,
+        comme « Arrêter » ; l'outil reste actif. Sinon : pause / reprise."""
+        if self._loop is not None and not self.engine.paused:
+            self._stop_loop()
+        else:
+            self._toggle_pause()
+
     def _toggle_pause(self):
         self.engine.paused = not self.engine.paused
         self._log("[Hotkeys] " + ("En pause." if self.engine.paused else "Actifs."), "WARN")
@@ -3533,7 +3543,7 @@ class App(ctk.CTk):
     CHEAT_KEYS = ("sell", "sell_all", "optimize", "relist", "relist_all", "pause", "cheatsheet")
     CHEAT_TEXT = {"sell": "Vendre / mettre à jour", "sell_all": "Tout vendre", "optimize": "Meilleur lot",
                   "relist": "Remettre sous le moins cher", "relist_all": "Toute la liste",
-                  "pause": "Pause / reprise", "cheatsheet": "Fermer cet aide-mémoire"}
+                  "pause": "Pause · arrête un parcours", "cheatsheet": "Fermer cet aide-mémoire"}
 
     def _toggle_cheatsheet(self, ms: int = 10000):
         w = self._cheat
