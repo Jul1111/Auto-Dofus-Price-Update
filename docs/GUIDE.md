@@ -17,7 +17,7 @@ Le [README](../README.md) donne l'essentiel. Ce guide détaille chaque fonction.
 
 ## Calibration
 
-Au tout premier lancement, une **visite guidée** en 5 bulles montre la calibration, les touches, la pause, le HUD et le journal. Elle se relance avec **Visite guidée** dans l'onglet **Accueil** (ou depuis l'onglet **Options**), et `Échap` l'arrête. La calibration automatique est proposée juste après.
+Au tout premier lancement, une **visite guidée** en 5 bulles montre la calibration, les touches, l'arrêt d'un parcours, le HUD et le journal. Elle se relance avec **Visite guidée** dans l'onglet **Accueil** (ou depuis l'onglet **Options**), et `Échap` l'arrête. La calibration automatique est proposée juste après.
 
 L'outil doit savoir où se trouvent les zones de l'HDV à l'écran.
 
@@ -57,7 +57,7 @@ Quand le titre « Hôtel de vente » est calibré, les zones suivent la fenêtre
 - **Ctrl+F3** met à jour toute la liste de vos ventes, avec défilement automatique. Fonction désactivée par défaut : activez-la dans l'onglet **Mes ventes**.
 - **F4** choisit le meilleur lot (prix par objet le plus élevé).
 
-Pendant un parcours **F2** ou **Ctrl+F3**, la progression s'affiche en haut de la fenêtre et dans le HUD (« Ligne 34 / 87 · 12 modifiées » ; le total est connu si le compteur « x/100 lots » est calibré). Le bouton **Arrêter**, ou **Arrêter le parcours** dans le menu de l'icône de la zone de notification, interrompt le parcours sans mettre l'outil en pause. En jeu, `Ctrl+Alt+P` l'arrête aussi, sans mettre l'outil en pause. Hors parcours, cette touche fait pause / reprise.
+Pendant un parcours **F2** ou **Ctrl+F3**, la progression s'affiche en haut de la fenêtre et dans le HUD (« Ligne 34 / 87 · 12 modifiées » ; le total est connu si le compteur « x/100 lots » est calibré). Le bouton **Arrêter**, ou **Arrêter le parcours** dans le menu de l'icône de la zone de notification, interrompt le parcours sans mettre l'outil en pause. En jeu, `Ctrl+Alt+P` l'arrête aussi (tout comme un clic sur la pastille **■ Arrêter le parcours**). L'outil n'a pas de pause : les touches restent actives.
 
 À la fin d'un Ctrl+F3, un résumé s'ouvre. En tête, un récap : prix modifiés, lignes à revoir, lignes déjà au bon prix, durée, et la raison de l'arrêt si la liste n'a pas été parcourue jusqu'au bout. Dessous, le détail des prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et des lignes à revoir. Un clic sur une ligne la retrouve et la surligne dans le journal. Les 10 derniers résumés restent consultables dans l'onglet **Mes ventes**.
 
@@ -90,7 +90,7 @@ La lecture des chiffres repose sur un modèle de la police du jeu, appris automa
 | `Ctrl+F3` | Mettre à jour toute la liste |
 | `F4` | Meilleur lot |
 | Même touche deux fois | Forcer une lecture jugée suspecte |
-| `Ctrl+Alt+P` | Pause et reprise ; pendant un parcours, l'arrête (sans pause) |
+| `Ctrl+Alt+P` | Arrêter le parcours en cours (Tout vendre, Toute la liste) |
 | `Ctrl+Alt+V` | Afficher les zones calibrées |
 | `Ctrl+Alt+H` | Aide-mémoire des touches par-dessus le jeu |
 | `Ctrl+Alt+U` | Afficher ou cacher le HUD |
@@ -105,7 +105,7 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
 
 **Accueil.** Les premiers pas se cochent tout seuls (calibrer, tester une lecture, première vente). L'onglet affiche aussi les touches principales et le bilan de la session.
 
-**Barre d'état.** Des pastilles indiquent la pause, le profil, la calibration (OK ou à faire) et l'HDV (vu ou introuvable). Un clic sur une pastille mène à l'endroit utile.
+**Barre d'état.** Des pastilles indiquent l'état (actif, ou parcours en cours à arrêter), le profil, la calibration (OK ou à faire) et l'HDV (vu ou introuvable). Un clic sur une pastille mène à l'endroit utile.
 
 **Journal.** Filtres **Tout**, **Ventes** et **Problèmes**, bouton **Copier**, une icône par type de ligne. Chaque parcours F2 ou Ctrl+F3 est regroupé dans un bloc repliable. Un clic sur une ligne qui contient un prix copie ce prix.
 
@@ -119,7 +119,7 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
   - Option **3 derniers prix sous la ligne** : les trois derniers lots traités (prix lu → prix mis), le plus récent en couleur, aussi pendant un parcours.
 - **Aide-mémoire** (`Ctrl+Alt+H`) : déplaçable ; il reste alors affiché à cet endroit jusqu'au ✕.
 
-**Zone de notification.** Un clic ouvre l'outil. Un clic droit donne accès à la pause, au HUD, à l'aide-mémoire ou à la fermeture, et pendant un parcours à **Arrêter le parcours**. La pastille de l'icône montre l'état : vert actif, orange pause, bleu parcours en cours, rouge calibration à faire. En option, réduire la fenêtre la cache à cet endroit.
+**Zone de notification.** Un clic ouvre l'outil. Un clic droit donne accès au HUD, à l'aide-mémoire ou à la fermeture, et pendant un parcours à **Arrêter le parcours**. La pastille de l'icône montre l'état : vert actif, bleu parcours en cours, rouge calibration à faire. En option, réduire la fenêtre la cache à cet endroit.
 
 **Notifications et sons.** Une notification Windows signale la fin d'un long parcours quand vous êtes dans une autre fenêtre. Des sons discrets accompagnent succès, avertissements, erreurs et fin de parcours, avec volume réglable et bouton **Tester**. Tout se désactive dans **Options**.
 

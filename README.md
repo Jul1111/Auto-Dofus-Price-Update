@@ -19,6 +19,11 @@
   <a href="https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions"><b>Discussions</b></a>
 </p>
 
+> [!NOTE]
+> Le projet est encore en développement actif. Les fonctionnalités, l'interface, les raccourcis et le format des réglages peuvent évoluer fréquemment d'une version à l'autre. Consultez les [notes de version](https://github.com/Jul1111/Auto-Dofus-Price-Update/releases) avant chaque mise à jour ; vos réglages et votre calibration sont conservés lors des mises à jour.
+>
+> **Vos retours sont les bienvenus.** Le projet étant en cours de développement, chaque retour aide à l'améliorer : un bug, une lecture de prix incorrecte, une idée ou une suggestion sur l'interface. Partagez-les dans les [Discussions](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions) ou en ouvrant une [issue](https://github.com/Jul1111/Auto-Dofus-Price-Update/issues).
+
 > [!WARNING]
 > Les conditions d'utilisation d'Ankama interdisent en général les logiciels tiers qui interagissent avec le client de jeu. La mise en vente automatique et la mise à jour de toute la liste sont désactivées par défaut. Leur utilisation se fait à vos risques.
 
@@ -64,7 +69,7 @@ Rien d'autre à installer : Tesseract est inclus. L'outil se met ensuite à jour
 | `F1` | Vendre ou mettre à jour le prix de l'objet sélectionné |
 | `F2` | Tout vendre au même prix |
 | `Ctrl+F3` | Mettre à jour toute la liste (à activer dans **Mes ventes**) |
-| `Ctrl+Alt+P` | Pause ; pendant un parcours, l'arrête |
+| `Ctrl+Alt+P` | Arrêter le parcours en cours |
 
 La calibration automatique fonctionne avec Dofus 3 en français. Pour les autres cas, la calibration manuelle, les autres raccourcis et tous les réglages sont décrits dans le [guide d'utilisation](docs/GUIDE.md).
 
