@@ -242,8 +242,9 @@ def _hwnd(window) -> int:
     return ctypes.windll.user32.GetParent(window.winfo_id())
 
 
-def set_click_through(window, on: bool) -> bool:
-    """Les clics traversent la fenêtre (HUD par-dessus le jeu). Windows seulement."""
+def set_click_through(window, on: bool, activate: bool = True) -> bool:
+    """Les clics traversent la fenêtre (HUD par-dessus le jeu). Windows seulement.
+    on=False, activate=False : cliquable, mais un clic ne lui donne pas le focus (le jeu le garde)."""
     if sys.platform != "win32":
         return False
     import ctypes
@@ -253,7 +254,12 @@ def set_click_through(window, on: bool) -> bool:
         hwnd = _hwnd(window)
         ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         flags = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
-        ex = (ex | flags) if on else (ex & ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE))
+        if on:
+            ex |= flags
+        elif activate:
+            ex &= ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE)
+        else:
+            ex = (ex & ~WS_EX_TRANSPARENT) | WS_EX_LAYERED | WS_EX_NOACTIVATE
         user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
         return True
     except Exception:

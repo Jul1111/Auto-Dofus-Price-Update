@@ -601,6 +601,11 @@ WHATS_NEW = {
         "durée, raison de l'arrêt). Un clic sur une ligne la retrouve dans le journal.",
         "Visite guidée en 5 bulles au premier lancement. Elle se relance avec « Visite guidée » "
         "(onglet Accueil).",
+        "HUD pendant un parcours : barre de progression et temps restant estimé.",
+        "HUD : contenu « Pastille » (un simple rond qui s'agrandit à chaque action), et option « Masquer » "
+        "pour qu'il s'estompe sans action.",
+        "Dans le jeu, maintiens Alt : le HUD devient cliquable (Arrêter le parcours, Copier le dernier prix, "
+        "Ouvrir l'outil) ; Alt + glisser le déplace.",
     ],
 }
 
@@ -726,7 +731,37 @@ def tour_place(target, size, area, gap: int = 12) -> tuple:
 
 
 HUD_SIZES = {"small": ("Petit", 11), "normal": ("Normal", 12), "large": ("Grand", 15)}
-HUD_CONTENTS = {"state": "État", "action": "Action", "both": "Les deux"}
+HUD_CONTENTS = {"state": "État", "action": "Action", "both": "Les deux", "dot": "Pastille"}
+HUD_AUTOHIDE = {0: "Jamais", 10: "10 s", 30: "30 s", 60: "1 min"}
+HUD_EXPAND_S = 2.5    # mode pastille : le HUD s'agrandit ce temps-là à chaque action
+ALT_HOLD_S = 0.25     # Alt maintenu ce temps-là (seul) : HUD cliquable
+
+
+def eta_text(elapsed: float, frac: Optional[float]) -> Optional[str]:
+    """Temps restant d'un parcours, d'après le rythme jusqu'ici ; None trop tôt pour estimer."""
+    if frac is None or frac < 0.05 or elapsed < 5:
+        return None
+    left = elapsed * (1 - frac) / frac
+    if left < 10:
+        return "presque fini"
+    if left < 60:
+        return f"≈ {max(10, int(round(left / 5) * 5))} s restantes"
+    return f"≈ {-int(-left // 60)} min restantes"
+
+
+def alt_alone_down() -> bool:
+    """Alt enfoncé seul (sans Ctrl, Maj, Windows ni Tab : pas un raccourci ni Alt+Tab). Windows."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        state = ctypes.windll.user32.GetAsyncKeyState
+
+        def down(vk):
+            return bool(state(vk) & 0x8000)
+        return down(0x12) and not any(down(vk) for vk in (0x11, 0x10, 0x5B, 0x5C, 0x09))
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------- accueil : premiers pas
@@ -815,6 +850,13 @@ class App(ctk.CTk):
         self._loop: Optional[dict] = None   # boucle en cours (F2 / Ctrl+F3) : type, début
         self.activity: list = []             # panneau Activité : dernières actions (récentes d'abord)
         self.hud_recent: list = []           # HUD : derniers prix traités (récents d'abord)
+        self._last_price: Optional[int] = None   # HUD cliquable : « Copier »
+        self._hud_active = time.time()       # dernière activité (masquage automatique)
+        self._hud_expand_until = 0.0         # mode pastille : agrandi jusqu'à
+        self._hud_alt = False                # Alt maintenu : HUD cliquable
+        self._alt_since: Optional[float] = None
+        self._hud_layout_key = None
+        self._hud_fading = False
         self._cheat = None                   # aide-mémoire affiché par-dessus le jeu
         self._hud_note = None                # message temporaire du HUD : (titre, détail, couleur, fin)
         self._log_seq = 0
@@ -858,6 +900,7 @@ class App(ctk.CTk):
         if self.cfg.tray:
             self.tray.start()
         self.after(400, self._apply_hud)          # HUD activé : créé dès le lancement (caché hors du jeu)
+        self.after(1500, self._hud_alt_poll)
         self.after(1800, self._whats_new)         # 1er lancement d'une nouvelle version
         self.after(1200, self._watch_game)
         self.bind("<Control-KeyPress>", self._on_ctrl_key)
@@ -1727,14 +1770,29 @@ class App(ctk.CTk):
         seg = ctk.CTkSegmentedButton(r, values=list(HUD_CONTENTS.values()), command=self._set_hud_content)
         seg.set(HUD_CONTENTS.get(self.cfg.hud_content, HUD_CONTENTS["both"]))
         seg.pack(side="left")
-        self._tip(seg, "État : actif, pause… seulement. Action : la dernière action seulement. Pendant un "
-                       "parcours, la progression s'affiche toujours.")
+        self._tip(seg, "État : actif, calibration à faire… seulement. Action : la dernière action seulement. "
+                       "Pastille : un simple rond de couleur, qui s'agrandit 2 s à chaque action. Pendant un "
+                       "parcours, la progression s'affiche toujours (sauf en pastille).")
         r = self._row(b)
         self.hud_hist_var = ctk.BooleanVar(value=self.cfg.hud_history)
         self._tip(ctk.CTkSwitch(r, text="3 derniers prix sous la ligne", variable=self.hud_hist_var,
                                 command=self._set_hud_history),
                   "Les trois derniers lots traités (prix lu → prix mis), le plus récent en couleur : "
                   "pour vérifier d'un coup d'œil, aussi pendant un parcours.").pack(side="left", padx=(42, 0))
+        r = self._row(b)
+        ctk.CTkLabel(r, text="Masquer", width=70, anchor="w").pack(side="left", padx=(42, 0))
+        seg = ctk.CTkSegmentedButton(r, values=list(HUD_AUTOHIDE.values()), command=self._set_hud_autohide)
+        seg.set(HUD_AUTOHIDE.get(self.cfg.hud_autohide, "Jamais"))
+        seg.pack(side="left")
+        self._tip(seg, "Sans action pendant ce temps, le HUD s'estompe. Il revient à la prochaine action, "
+                       "pendant un parcours, ou en maintenant Alt.")
+        r = self._row(b)
+        self.hud_alt_var = ctk.BooleanVar(value=self.cfg.hud_alt)
+        self._tip(ctk.CTkSwitch(r, text="Alt maintenu : HUD cliquable", variable=self.hud_alt_var,
+                                command=self._set_hud_alt_opt),
+                  "Dans le jeu, maintiens Alt (seul) : le HUD propose Arrêter le parcours, Copier le dernier "
+                  "prix et Ouvrir l'outil. Alt + glisser le déplace. Relâche Alt : les clics le traversent à "
+                  "nouveau.").pack(side="left", padx=(42, 0))
         r = self._row(b)
         ctk.CTkLabel(r, text="Opacité", width=70, anchor="w").pack(side="left", padx=(42, 0))
         sl = ctk.CTkSlider(r, from_=0.5, to=1.0, number_of_steps=10, width=180, command=self._set_hud_opacity)
@@ -3437,6 +3495,7 @@ class App(ctk.CTk):
         self._loop = {"kind": kind, "t0": time.time(), "frac": None,
                       "text": "Démarrage…" if kind == "relist_all" else "en cours…"}
         self.loop_stop.configure(text="■ Arrêter", state="normal")
+        self._hud_bump()
         self._loop_show()
         self._tray_update()
         self._refresh_status()               # pastille d'état : « ■ Arrêter le parcours »
@@ -3446,6 +3505,7 @@ class App(ctk.CTk):
             return
         text, frac = progress_text(d)
         self._loop.update(text=text, frac=frac)
+        self._hud_bump()
         self._loop_show()
 
     def _loop_show(self):
@@ -3889,7 +3949,10 @@ class App(ctk.CTk):
         self._hud, self._hud_card = t, card
         row = ctk.CTkFrame(card, fg_color="transparent")
         row.pack(padx=(10, 14), pady=max(3, size // 2 - 1))
-        ctk.CTkLabel(row, text="", image=self._logo_img_small()).pack(side="left", padx=(0, 8))
+        self._hud_row = row
+        self._hud_layout_key = None
+        self._hud_logo = ctk.CTkLabel(row, text="", image=self._logo_img_small())
+        self._hud_logo.pack(side="left", padx=(0, 8))
         self._hud_profile = ctk.CTkLabel(row, text="", corner_radius=8, height=size + 6, text_color=style.ON_PROFILE,
                                          font=ctk.CTkFont(size=size - 1, weight="bold"))
         self._hud_state = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=size, weight="bold"))
@@ -3898,6 +3961,17 @@ class App(ctk.CTk):
         self._hud_head.pack(side="left", padx=(10, 0))
         self._hud_sub = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=size))
         self._hud_sub.pack(side="left", padx=(8, 0))
+        self._hud_bar = ctk.CTkProgressBar(card, height=4, corner_radius=2, progress_color=P["cyan"])
+        self._hud_actions = ctk.CTkFrame(card, fg_color="transparent")    # Alt maintenu
+        small = ctk.CTkFont(size=max(11, size - 1))
+        self._hud_btn_stop = ctk.CTkButton(self._hud_actions, text="■ Arrêter le parcours", height=24, width=10,
+                                           font=small, fg_color=P["red"], hover_color=P["red_hover"],
+                                           text_color=P["on_accent"], command=self._stop_loop)
+        self._hud_btn_copy = ctk.CTkButton(self._hud_actions, text="Copier le prix", height=24, width=10, font=small,
+                                           command=self._hud_copy_price)
+        self._hud_btn_open = ctk.CTkButton(self._hud_actions, text="Ouvrir l'outil", height=24, width=10, font=small,
+                                           fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
+                                           command=self._show_main)
         self._hud_hist = ctk.CTkFrame(card, fg_color="transparent")       # derniers prix (option)
         self._hud_hist_lbls = [ctk.CTkLabel(self._hud_hist, text="", anchor="w", height=size + 4,
                                             font=ctk.CTkFont(family=style.MONO, size=size - 1))
@@ -3913,7 +3987,7 @@ class App(ctk.CTk):
             x, y = self.winfo_screenwidth() // 2 - 170, 8
         t.geometry(f"+{int(x)}+{int(y)}")
         make_draggable(t, self._hud_dropped)
-        t.after(150, lambda: t.winfo_exists() and style.set_click_through(t, not self._hud_moving))
+        t.after(150, self._hud_apply_click)
         t.withdraw()
 
     def _logo_img_small(self):
@@ -3927,37 +4001,90 @@ class App(ctk.CTk):
         if w is None or not w.winfo_exists():
             return
         c = self.cfg
+        now = time.time()
         state = "loop" if self._loop is not None else "calib" if not self._calibrated() else "ok"
         color, text = TRAY_STATES[state]
         chip = {"ok": "green", "loop": "grey", "calib": "red"}[state]
-        if len(c.profile_names()) > 1:          # multi-compte : profil actif dans sa couleur
+        multi = len(c.profile_names()) > 1          # multi-compte : profil actif dans sa couleur
+        dot = (c.hud_content == "dot" and not self._hud_moving and not self._hud_alt
+               and now >= self._hud_expand_until)
+        self._hud_layout(dot, multi)
+        if multi:
             self._hud_profile.configure(text=f" {c.profile} ", fg_color=self._profile_color())
-            if not self._hud_profile.winfo_ismapped():
-                self._hud_profile.pack(side="left", padx=(0, 8), before=self._hud_state)
-        else:
-            self._hud_profile.pack_forget()
-        show_state = c.hud_content != "action" or self._hud_moving
+        show_state = c.hud_content not in ("action", "dot") or self._hud_moving
         show_action = c.hud_content != "state" or self._loop is not None or self._hud_moving
-        self._hud_state.configure(text=f"● {text}" if show_state else "●",
+        self._hud_state.configure(text=f"● {text}" if show_state and not dot else "●",
                                   text_color=P["cyan"] if state == "loop" else style.CHIP[chip][1])
         lp = self._loop
+        frac = None
         if self._hud_moving:
             head, sub, col = "Glisse-moi où tu veux", "(lâche pour terminer)", MUTED
-        elif lp is not None:                    # parcours : progression + comment l'arrêter
+        elif self._hud_alt:
+            head, sub, col = "Actions", "relâche Alt pour fermer · Alt + glisser = déplacer", MUTED
+        elif lp is not None:                    # parcours : progression, temps restant, comment l'arrêter
             stop = "arrêt demandé…" if self.engine.stop_requested else f"{c.hotkeys['pause'].upper()} = arrêter"
-            head, sub, col = self.LOOP_NAMES.get(lp["kind"], ""), f"{lp['text']} · {stop}", P["text"]
+            parts = (lp["text"], eta_text(now - lp["t0"], lp["frac"]), stop)
+            head, sub, col = self.LOOP_NAMES.get(lp["kind"], ""), " · ".join(x for x in parts if x), P["text"]
+            frac = lp["frac"]
         else:
             note = self._hud_note
-            head, sub, col = note[:3] if note and time.time() < note[3] else self.last_action
+            head, sub, col = note[:3] if note and now < note[3] else self.last_action
             if head.startswith("En attente"):
                 head = ""
-        self._hud_head.configure(text=head if show_action else "")
-        self._hud_sub.configure(text=sub if show_action else "", text_color=col)
-        self._refresh_hud_history()
+        self._hud_head.configure(text=head if show_action and not dot else "")
+        self._hud_sub.configure(text=sub if show_action and not dot else "", text_color=col)
+        self._refresh_hud_bar(None if dot else frac)
+        self._refresh_hud_actions()
+        self._refresh_hud_history(hide=dot)
 
-    def _refresh_hud_history(self):
+    def _hud_layout(self, dot: bool, multi: bool):
+        """Éléments de la ligne du HUD : tout, ou seulement le rond d'état (pastille)."""
+        key = (dot, multi)
+        if key == self._hud_layout_key:
+            return
+        self._hud_layout_key = key
+        items = [(self._hud_logo, (0, 8)), (self._hud_profile, (0, 8)), (self._hud_state, 0),
+                 (self._hud_head, (10, 0)), (self._hud_sub, (8, 0))]
+        for wdg, _pad in items:
+            wdg.pack_forget()
+        for wdg, pad in items:
+            if dot and wdg is not self._hud_state:
+                continue
+            if wdg is self._hud_profile and not multi:
+                continue
+            wdg.pack(side="left", padx=pad)
+
+    def _refresh_hud_bar(self, frac: Optional[float]):
+        bar = self._hud_bar
+        if frac is None:
+            bar.pack_forget()
+            return
+        bar.set(frac)
+        if not bar.winfo_manager():
+            bar.pack(fill="x", padx=(34, 14), pady=(0, 6), after=self._hud_row)
+
+    def _refresh_hud_actions(self):
+        box = self._hud_actions
+        if not self._hud_alt:
+            box.pack_forget()
+            return
+        for b in (self._hud_btn_stop, self._hud_btn_copy, self._hud_btn_open):
+            b.pack_forget()
+        if self._loop is not None:
+            self._hud_btn_stop.configure(state="disabled" if self.engine.stop_requested else "normal")
+            self._hud_btn_stop.pack(side="left", padx=(0, 6))
+        p = self._last_price
+        self._hud_btn_copy.configure(text=f"Copier {fmt(p)}" if p is not None else "Copier le prix",
+                                     state="normal" if p is not None else "disabled")
+        self._hud_btn_copy.pack(side="left", padx=(0, 6))
+        self._hud_btn_open.pack(side="left")
+        if not box.winfo_manager():
+            box.pack(anchor="w", padx=(34, 14), pady=(0, 8),
+                     after=self._hud_bar if self._hud_bar.winfo_manager() else self._hud_row)
+
+    def _refresh_hud_history(self, hide: bool = False):
         """Sous la ligne du HUD : les derniers prix traités (option « 3 derniers prix »)."""
-        lines = self.hud_recent if self.cfg.hud_history and not self._hud_moving else []
+        lines = self.hud_recent if self.cfg.hud_history and not self._hud_moving and not hide else []
         hist = self._hud_hist
         for i, lbl in enumerate(self._hud_hist_lbls):
             if i < len(lines):
@@ -3976,6 +4103,7 @@ class App(ctk.CTk):
         line = hud_history_line(res)
         if line is None:
             return
+        self._last_price = res.new_price
         self.hud_recent = ([line] + self.hud_recent)[:HUD_HISTORY_N]
         if refresh:
             self._refresh_hud()
@@ -4035,10 +4163,15 @@ class App(ctk.CTk):
             sw.configure(border_color=P["text"] if style.PROFILE_COLORS[key][1] == current else P["card"])
 
     def _hud_flash(self, color: str, ms: int = 1800):
-        """Nouveau résultat : le bord du HUD prend sa couleur un instant."""
+        """Nouveau résultat : le bord du HUD prend sa couleur un instant (pastille : il s'agrandit)."""
         w = self._hud
         if w is None or not w.winfo_exists() or self._hud_moving:
             return
+        self._hud_bump()
+        if self.cfg.hud_content == "dot":
+            self._hud_expand_until = time.time() + HUD_EXPAND_S
+            self._refresh_hud()
+            self.after(int(HUD_EXPAND_S * 1000) + 60, self._refresh_hud)
         self._hud_card.configure(border_color=color, border_width=2)
         if getattr(self, "_hud_flash_after", None):
             self.after_cancel(self._hud_flash_after)
@@ -4060,14 +4193,103 @@ class App(ctk.CTk):
         w = self._hud
         if w is None or not w.winfo_exists():
             return
-        want = self.cfg.hud and (self._game_fg or self._hud_moving)
+        want, idle = self._hud_wanted()
         shown = w.winfo_ismapped()
-        if want and not shown:
-            w.deiconify()
-            w.attributes("-topmost", True)
-            w.after(50, lambda: w.winfo_exists() and style.set_click_through(w, not self._hud_moving))
-        elif not want and shown:
+        if want and (not shown or self._hud_fading):
+            self._hud_fading = False
+            w.attributes("-alpha", min(1.0, max(0.5, self.cfg.hud_opacity)))
+            if not shown:
+                w.deiconify()
+                w.attributes("-topmost", True)
+                w.after(50, self._hud_apply_click)
+        elif not want and shown and not self._hud_fading:
+            if idle and ANIMATE["on"]:               # sans action depuis un moment : il s'estompe
+                self._hud_fading = True
+                style.fade(w, min(1.0, max(0.5, self.cfg.hud_opacity)), 0.0, 600, self._hud_faded)
+            else:
+                w.withdraw()
+
+    def _hud_wanted(self) -> tuple:
+        """(afficher ?, masqué faute d'activité ?)."""
+        c = self.cfg
+        idle = bool(c.hud_autohide) and self._loop is None and not self._hud_moving and not self._hud_alt \
+            and time.time() - self._hud_active > c.hud_autohide
+        return bool(c.hud and ((self._game_fg and not idle) or self._hud_moving)), idle
+
+    def _hud_faded(self):
+        w = self._hud
+        if not self._hud_fading or w is None or not w.winfo_exists():
+            return
+        self._hud_fading = False
+        if not self._hud_wanted()[0]:
             w.withdraw()
+        w.attributes("-alpha", min(1.0, max(0.5, self.cfg.hud_opacity)))
+
+    def _hud_bump(self):
+        """Activité : le HUD masqué faute d'action revient."""
+        self._hud_active = time.time()
+        if self.cfg.hud_autohide:
+            self._hud_visibility()
+
+    def _hud_apply_click(self):
+        w = self._hud
+        if w is None or not w.winfo_exists():
+            return
+        if self._hud_moving:
+            style.set_click_through(w, False)
+        elif self._hud_alt:
+            style.set_click_through(w, False, activate=False)   # cliquable, le jeu garde le focus
+        else:
+            style.set_click_through(w, True)
+
+    # ---- Alt maintenu : HUD cliquable
+    def _hud_alt_poll(self):
+        try:
+            w, c = self._hud, self.cfg
+            ok = (c.hud and c.hud_alt and w is not None and w.winfo_exists() and self._game_fg
+                  and not self._hud_moving)
+            down = ok and alt_alone_down()
+            now = time.time()
+            if not down:
+                self._alt_since = None
+            elif self._alt_since is None:
+                self._alt_since = now
+            want = bool(down and now - self._alt_since >= ALT_HOLD_S)
+            if want != self._hud_alt:
+                self._set_hud_alt(want)
+        except Exception:
+            pass
+        self.after(100, self._hud_alt_poll)
+
+    def _set_hud_alt(self, on: bool):
+        self._hud_alt = on
+        w = self._hud
+        if w is None or not w.winfo_exists():
+            return
+        if on:
+            self._hud_bump()
+            self._hud_visibility()
+        self._hud_card.configure(border_color=P["accent"] if on else P["border"], border_width=2 if on else 1)
+        self._hud_apply_click()
+        self._refresh_hud()
+
+    def _hud_copy_price(self):
+        p = self._last_price
+        if p is None:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(str(p))
+        self._hud_message(f"{fmt(p)} copié", "Ctrl+V dans le jeu", P["green"], 1500)
+
+    def _set_hud_autohide(self, label: str):
+        self.cfg.hud_autohide = next((k for k, lbl in HUD_AUTOHIDE.items() if lbl == label), 0)
+        self._hud_active = time.time()
+        self._save_cfg()
+        self._hud_visibility()
+
+    def _set_hud_alt_opt(self):
+        self.cfg.hud_alt = bool(self.hud_alt_var.get())
+        self._save_cfg()
 
     def _hud_move(self):
         """« Déplacer » : le HUD devient cliquable le temps de le poser ailleurs."""
