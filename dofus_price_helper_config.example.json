@@ -84,6 +84,8 @@
   "HUD_OPACITY": 0.9,
   "HUD_CONTENT": "both",
   "HUD_HISTORY": false,
+  "HUD_AUTOHIDE": 0,
+  "HUD_ALT": true,
   "PROFILE_COLORS": {},
   "LAST_SEEN_VERSION": "",
   "TOUR_DONE": false,

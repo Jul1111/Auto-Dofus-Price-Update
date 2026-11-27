@@ -348,6 +348,8 @@ class Config:
     hud_opacity: float = 0.9          # HUD : opacité (0.5 .. 1)
     hud_content: str = "both"         # HUD : "state" (état seul) | "action" (dernière action) | "both"
     hud_history: bool = False         # HUD : les 3 derniers prix traités, sous la ligne principale
+    hud_autohide: int = 0             # HUD : s sans action avant qu'il s'estompe (0 = jamais)
+    hud_alt: bool = True              # HUD : Alt maintenu = HUD cliquable (arrêter, copier le prix, ouvrir)
     profile_colors: Dict = field(default_factory=dict)       # profil -> couleur (HUD, pastille, icône)
     last_seen_version: str = ""       # « Quoi de neuf » déjà montré pour cette version
     tour_done: bool = False           # visite guidée vue (1er lancement) ; se relance depuis l'Accueil
@@ -406,6 +408,10 @@ class Config:
             cfg.hud = True   # v6 : le HUD remplace le popup / bandeau de résultat et le mode compact
         if int(data.get("CONFIG_VERSION", 1)) < 7:
             cfg.tour_done = True   # v7 : visite guidée réservée aux nouvelles installations
+        if cfg.hud_autohide not in (0, 10, 30, 60):
+            cfg.hud_autohide = 0
+        if cfg.hud_content not in ("state", "action", "both", "dot"):
+            cfg.hud_content = "both"
         if not isinstance(cfg.profile_colors, dict):
             cfg.profile_colors = {}
         cfg.profile_colors = {str(k): v for k, v in cfg.profile_colors.items() if isinstance(v, str)}
