@@ -1043,7 +1043,6 @@ def table_second_read(cfg: Config, first_engine: str = "") -> "ScreenRead":
 def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool = False,
                 tesseract_only: bool = False) -> ScreenRead:
     """Tableau + quantité (+ prix moyen, + ton prix) en UN appel Tesseract."""
-    import pytesseract
     if not cfg.table_region:
         return ScreenRead()
     regions = [tuple(cfg.table_region)]
@@ -1616,7 +1615,7 @@ def _take_clipboard(pyperclip, cfg: Config) -> None:
 
 
 def _schedule_restore(pyperclip, delay: float = 1.0) -> None:
-    global _clip_timer, _clip_saved
+    global _clip_timer
 
     def _restore():
         global _clip_timer, _clip_saved
@@ -1953,8 +1952,8 @@ def find_scrollbar(gray: np.ndarray, min_len: int = 20, expect_x: Optional[int] 
     return min(found, key=lambda f: abs(f[0] - expect_x))[1]
 
 
-def scrollbar_at_bottom(cfg: "Config") -> Optional[bool]:
-    """Poignée de la barre de défilement en bas de sa piste ? None = barre introuvable."""
+def _scrollbar(cfg: "Config") -> Optional[Tuple[int, int, int, int]]:
+    """Barre de défilement de la liste « mes ventes » (voir find_scrollbar), None si absente."""
     if not cfg.relist_row or cfg.relist_step <= 0:
         return None
     x0, y0 = cfg.relist_row
@@ -1969,7 +1968,18 @@ def scrollbar_at_bottom(cfg: "Config") -> Optional[bool]:
         return None
     gray = img if img.ndim == 2 else __import__("cv2").cvtColor(img, __import__("cv2").COLOR_BGR2GRAY)
     # Barre à ~4 hauteurs de ligne à droite du point de clic (mesuré : 4,0 à 4,05 lignes).
-    sb = find_scrollbar(gray, min_len=max(8, step // 3), expect_x=2 * step, min_track=3 * step)
+    return find_scrollbar(gray, min_len=max(8, step // 3), expect_x=2 * step, min_track=3 * step)
+
+
+def scrollbar_at_top(cfg: "Config") -> Optional[bool]:
+    """Poignée en haut de sa piste (liste pas défilée) ? None = barre introuvable."""
+    sb = _scrollbar(cfg)
+    return None if sb is None else sb[0] <= sb[2] + 2
+
+
+def scrollbar_at_bottom(cfg: "Config") -> Optional[bool]:
+    """Poignée de la barre de défilement en bas de sa piste ? None = barre introuvable."""
+    sb = _scrollbar(cfg)
     if sb is None:
         log_line("[MAJ TOUT] Barre de défilement introuvable.")
         return None
@@ -2527,6 +2537,28 @@ class MyPrices:
             ts = [self._short.get((k, lot, price)) for k in {key, None}]
             return any(t is not None and now - t <= short_ttl for t in ts)
 
+    def keep_only(self, listed: set) -> int:
+        """Après un parcours COMPLET de « mes ventes » : seules les ventes vues {(clé, lot, prix)}
+        existent encore. Les autres ont été vendues : oubliées, sinon un concurrent au même prix
+        passait pour toi pendant 2 jours (aligné au lieu de passer dessous).
+        Retourne le nombre de prix oubliés."""
+        removed = 0
+        with self._lock:
+            data = self._load()
+            for k, prices in list(data.items()):
+                key, _, lot = k.rpartition("|")
+                for p in list(prices):
+                    try:
+                        seen = (key, int(lot), int(p)) in listed
+                    except ValueError:
+                        seen = False
+                    if not seen:
+                        del prices[p]
+                        removed += 1
+            if removed:
+                self._save()
+        return removed
+
     def add(self, key: Optional[str], lot: int, price: Optional[int], sure: bool = True,
             replaces: Optional[int] = None) -> None:
         """Note une de tes ventes à `price`. `replaces` = son ancien prix (modifiée)."""
@@ -2810,6 +2842,7 @@ class PriceEngine:
         name_img = grab_name(cfg)  # avant « Modifier » : le panneau se vide ensuite
         key = item_key(name_img)
         self._row_ctx["img"] = name_img
+        self._row_ctx["key"] = key
         mine = sr.mine_r
         if mine is None or mine.value is None or mine.confidence < MINE_SURE:
             mine = surer(mine, read_mine(cfg))  # 2e lecture seule, plus grande : la plus sûre
@@ -3065,6 +3098,17 @@ class PriceEngine:
             return total, "défilement non suivi (animation)"
         return total + d, None
 
+    def _note_listed(self, listed: set, res: "Result") -> bool:
+        """Note la vente de cette ligne (clé, lot, prix actuel). False si on ne le sait pas
+        (nom ou prix illisible) : la liste vue est alors incomplète."""
+        key = getattr(self, "_row_ctx", {}).get("key")
+        modified = res.level == "ok" and "modifié" in res.message
+        price = res.new_price if modified else res.old_price
+        if key is None or res.lot is None or price is None:
+            return False
+        listed.add((key, res.lot, price))
+        return True
+
     def _rows_left(self, seen: int, total: Optional[int]) -> int:
         """Ventes restant à voir d'après le compteur (0 si inconnu ou presque fini : la
         mesure du défilement peut être décalée d'une ou deux lignes)."""
@@ -3109,7 +3153,7 @@ class PriceEngine:
         if rows0 and x0 - 150 <= mx <= x0 + 420 and rows0[0][0] - step // 2 <= my <= rows0[-1][0] + step // 2:
             y_s, g_s = min(rows0, key=lambda r: abs(r[0] - my))
             seen = g_s - 1
-            start_note = f", départ ligne sous la souris"
+            start_note = ", départ ligne sous la souris"
         last_click = None
         ok_rows: List[np.ndarray] = []  # images de lignes déjà au bon prix (même objet, même prix)
         bad: List[str] = []           # lignes douteuses laissées telles quelles
@@ -3124,7 +3168,18 @@ class PriceEngine:
         stop = "fin de la liste"
         self.stop_requested = False
         total = None                  # nombre de tes ventes (« 21/100 lots en vente »), si calibré
-        if cfg.count_region and self.on_loop_progress:
+        # Liste déjà défilée au départ (reprise « souris sur la dernière ligne traitée ») : les
+        # lignes sont numérotées depuis la 1re VISIBLE, le compteur ne dit donc rien de ce qui
+        # reste (avant : « défilement bloqué » à tort en fin de liste, progression fausse).
+        try:
+            from_top = scrollbar_at_top(cfg) is not False    # None : liste sur une page / pas de barre
+        except Exception:
+            from_top = True
+        if not from_top:
+            start_note += ", liste déjà défilée au départ"
+        listed: set = set()           # tes ventes vues (clé, lot, prix) : mémoire de tes prix à jour
+        listed_ok = from_top and seen < 0
+        if cfg.count_region and self.on_loop_progress and from_top:
             try:
                 c = read_counter(cfg)
                 total = c[0] if c else None
@@ -3174,6 +3229,7 @@ class PriceEngine:
                             time.sleep(0.15)          # lecture douteuse : on relit une fois
                             res = self._relist(auto=True)
                         done += 1
+                        listed_ok = listed_ok and self._note_listed(listed, res)
                         if self.progress:
                             try:
                                 self.progress(res)
@@ -3205,6 +3261,7 @@ class PriceEngine:
                             changes.append(RowChange(g + 1, res.lot, res.old_price, res.new_price, False,
                                                      "Modif. sans effet", res.item_img))
                             last_mod = None
+                            listed_ok = False             # prix réel inconnu
                             seen = max(seen, g)
                             continue
                         if "modifié" in res.message:
@@ -3236,11 +3293,12 @@ class PriceEngine:
                     # dit qu'il reste des ventes à voir (molette ignorée par le jeu).
                     # La barre de défilement (si visible) tranche : poignée en bas = vraie fin.
                     at_bottom = scrollbar_at_bottom(cfg)
-                    left = 0 if at_bottom else self._rows_left(seen, total)
+                    left = 0 if at_bottom or not from_top else self._rows_left(seen, total)
                     if at_bottom is False and not left:
                         left = -1                 # barre pas en bas, compteur muet
                     if left:
                         time.sleep(0.5)
+                        t0 = time.perf_counter()
                         moved, err = self._scroll_page(box, target)
                         self._tick("défilement", t0)
                         if err:
@@ -3270,6 +3328,13 @@ class PriceEngine:
                     pyautogui.moveTo(*back)
                 else:
                     pyautogui.moveTo(*last_click)
+            except Exception:
+                pass
+        if stop == "fin de la liste" and listed_ok and listed:
+            try:
+                n = self.my_prices.keep_only(listed)
+                if n:
+                    log_line(f"[MAJ TOUT] {n} prix de ventes terminées oubliés (plus dans la liste).")
             except Exception:
                 pass
         level = "ok" if stop == "fin de la liste" and not bad else "warn"

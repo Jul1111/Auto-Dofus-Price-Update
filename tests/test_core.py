@@ -925,6 +925,7 @@ def _rows_test_engine(relist_engine, monkeypatch, scrolls, counter):
     monkeypatch.setattr(core, "click_at", lambda p: None)
     monkeypatch.setattr(core, "mouse_position", lambda: (0, 0))
     monkeypatch.setattr(core, "read_counter", lambda c: counter)
+    monkeypatch.setattr(core, "scrollbar_at_top", lambda c: None)    # pas de barre : comme avant
     moves = iter(scrolls)
     monkeypatch.setattr(eng, "_scroll_page", lambda box, target: next(moves))
     n = [0]
@@ -1035,6 +1036,55 @@ def test_relist_all_scrollbar_at_bottom_wins_over_counter(relist_engine, monkeyp
     st["mine"] = [87, 50]
     res = eng.relist_all()
     assert "fin de la liste" in res.message
+
+
+def _named_rows(monkeypatch, n):
+    names = iter([_name(i) for i in range(n)] * 4)
+    monkeypatch.setattr(core, "grab_name", lambda c: next(names))
+    return [core.item_key(_name(i)) for i in range(n)]
+
+
+def test_complete_run_forgets_sold_sales(relist_engine, monkeypatch):
+    # vente vendue (plus dans la liste) : son prix ne doit plus faire croire qu'un concurrent, c'est toi
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None)], (2, 100))
+    monkeypatch.setattr(core, "scrollbar_at_top", lambda c: True)
+    keys = _named_rows(monkeypatch, 2)
+    eng.my_prices.add(keys[0], 1, 300)                   # ancienne vente, vendue
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "fin de la liste" in res.message
+    assert not eng.my_prices.has(keys[0], 1, 300, 0)
+    assert eng.my_prices.has(keys[0], 1, 87, 0) and eng.my_prices.has(keys[1], 1, 50, 0)
+
+
+def test_partial_view_keeps_sales(relist_engine, monkeypatch):
+    # liste déjà défilée au départ : on n'a pas tout vu, rien n'est oublié
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None)], (2, 100))
+    monkeypatch.setattr(core, "scrollbar_at_top", lambda c: False)
+    monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: True)
+    keys = _named_rows(monkeypatch, 2)
+    eng.my_prices.add(keys[0], 1, 300)
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    eng.relist_all()
+    assert eng.my_prices.has(keys[0], 1, 300, 0)
+
+
+def test_scrolled_start_ignores_counter_at_the_end(relist_engine, monkeypatch):
+    # Reprise sur une liste défilée : lignes numérotées depuis la 1re visible, le compteur
+    # (40 ventes) ne dit rien de ce qui reste. Barre introuvable ensuite : fin, pas « bloqué ».
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None)], (40, 100))
+    monkeypatch.setattr(core, "scrollbar_at_top", lambda c: False)
+    monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: None)
+    progress = []
+    eng.on_loop_progress = progress.append
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "fin de la liste" in res.message and "bloqué" not in res.message
+    assert "liste déjà défilée" in res.message
+    assert all(d["total"] is None for d in progress)     # pas de fausse progression « 2/40 »
 
 
 def test_relist_panel_cleared_means_done(relist_engine):
@@ -1329,6 +1379,24 @@ def test_my_prices_unknown_item_is_short_memory(tmp_path):
     assert not core.MyPrices(tmp_path / "p.json").has(None, 1, 75, 60)  # rien sur le disque
     mp.add("abc", 1, 80, sure=False)
     assert not core.MyPrices(tmp_path / "p.json").has("abc", 1, 80, 60)
+
+
+def test_my_prices_keep_only_listed(tmp_path):
+    mp = core.MyPrices(tmp_path / "p.json")
+    mp.add("abc", 1, 500)
+    mp.add("abc", 1, 480)                 # vendue depuis
+    mp.add("xyz", 10, 90)                 # objet entièrement vendu
+    assert mp.keep_only({("abc", 1, 500)}) == 2
+    again = core.MyPrices(tmp_path / "p.json")
+    assert again.has("abc", 1, 500, 0) and not again.has("abc", 1, 480, 0) and not again.has("xyz", 10, 90, 0)
+
+
+def test_scrollbar_at_top(monkeypatch):
+    cfg = core.Config(relist_row=[100, 100], relist_step=50, relist_rows=10)
+    for name, top in (("barre_defilement_haut.png", True), ("barre_defilement_bas.png", False)):
+        img = np.dstack([_gray_fixture(name)] * 3)
+        monkeypatch.setattr(core, "grab_screen", lambda r, img=img: img)
+        assert core.scrollbar_at_top(cfg) is top
 
 
 def test_relist_never_undercuts_own_listing_next_session(relist_engine, monkeypatch):
