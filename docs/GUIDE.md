@@ -1,0 +1,188 @@
+# Guide d'utilisation
+
+Le [README](../README.md) donne l'essentiel. Ce guide détaille chaque fonction.
+
+- [Calibration](#calibration)
+- [Vendre et mettre à jour les prix](#vendre-et-mettre-à-jour-les-prix)
+- [Sécurité des prix](#sécurité-des-prix)
+- [Raccourcis](#raccourcis)
+- [Interface](#interface)
+- [Profils et multi-compte](#profils-et-multi-compte)
+- [Mises à jour](#mises-à-jour)
+- [Signaler un problème](#signaler-un-problème)
+- [Configuration](#configuration)
+- [Version ligne de commande](#version-ligne-de-commande)
+- [Données enregistrées](#données-enregistrées)
+
+## Calibration
+
+L'outil doit savoir où se trouvent les zones de l'HDV à l'écran.
+
+### Calibration automatique
+
+1. Ouvrez l'HDV sur l'onglet **Vente** et sélectionnez une de vos ventes (ou un objet de l'inventaire).
+2. Cliquez sur **Calibration automatique** dans l'onglet **Calibration** (ou `Ctrl+Alt+F12` en jeu).
+3. Vérifiez le résultat avec **Voir zones**.
+
+L'outil trouve l'HDV quelles que soient la résolution et l'échelle de l'interface, place toutes les zones et lance un test de lecture. Elle est proposée dès le premier lancement.
+
+Limite : **Dofus 3 en français**, sur la même version du jeu que le modèle de l'outil. Si l'HDV n'est pas reconnu (autre langue, interface modifiée par une mise à jour du jeu), utilisez la calibration manuelle.
+
+Si vous changez ensuite l'échelle de l'interface ou la résolution, l'outil s'en rend compte et refait la calibration automatique (option dans l'onglet **Calibration**). Au démarrage, un bandeau prévient aussi si la calibration semble décalée, avec un bouton **Recalibrer**.
+
+### Calibration manuelle
+
+L'assistant pas à pas se trouve dans l'onglet **Calibration**, section **Avancé**. Il affiche la liste des étapes avec leur état, une capture de ce que l'outil voit dans chaque zone et ce qu'il y lit (✓ ou ✗). Il propose **Refaire cette zone** et **Tout placer automatiquement**, puis lance la vérification finale.
+
+| Zone | Statut |
+|---|---|
+| Tableau « Actuellement en vente » | Obligatoire |
+| Menu « Quantité » | Obligatoire |
+| Champ « Prix du lot » | Obligatoire |
+| Titre « Hôtel de vente » | Recommandé (suivi de la fenêtre) |
+| Prix moyen | Recommandé (prix plancher) |
+| Bouton « Modifier » | Recommandé (F1 automatique, F3) |
+| Compteur de lots, lignes de la liste | Optionnel (F2 vérifié, Ctrl+F3) |
+
+Quand le titre « Hôtel de vente » est calibré, les zones suivent la fenêtre de l'HDV si vous la déplacez.
+
+## Vendre et mettre à jour les prix
+
+- **F1** vend l'objet sélectionné dans l'inventaire, ou met à jour le prix d'une de vos ventes. Le mode est détecté automatiquement.
+- **F2** remet en vente au même prix tant que la situation le permet, et passe au lot inférieur quand le stock baisse.
+- **F3** met à jour la vente sélectionnée.
+- **Ctrl+F3** met à jour toute la liste de vos ventes, avec défilement automatique. Fonction désactivée par défaut : activez-la dans l'onglet **Mes ventes**.
+- **F4** choisit le meilleur lot (prix par objet le plus élevé).
+
+Pendant un parcours **F2** ou **Ctrl+F3**, la progression s'affiche en haut et en mode compact (« Ligne 34 / 87 · 12 modifiées » ; le total est connu si le compteur « x/100 lots » est calibré). Le bouton **Arrêter** interrompt le parcours sans mettre l'outil en pause.
+
+À la fin d'un Ctrl+F3, un résumé liste les prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et les lignes à revoir. Les 10 derniers résumés restent consultables dans l'onglet **Mes ventes**.
+
+L'onglet **Prix** affiche un aperçu en direct du calcul (« Moins cher 1 000 → ton prix 999 (plancher 700) »), recalculé à chaque réglage.
+
+## Sécurité des prix
+
+| Situation | Comportement |
+|---|---|
+| Lecture incertaine ou prix incohérent entre lots | Prix copié uniquement ; nouvel appui pour forcer |
+| Champ « Prix du lot » différent du prix calculé | Aucune validation |
+| Concurrent sous le prix plancher | Vente au plancher, conservation du prix actuel ou arrêt (onglet **Prix**) |
+| Votre prix est déjà le plus bas | Aucune baisse |
+| Le moins cher est une autre de vos ventes du même objet | Alignement sur ce prix, pas de baisse |
+| F2 : compteur de lots inchangé après une vente | Arrêt |
+
+Le prix plancher est calculé à partir du prix moyen (70 % par défaut), pour ne pas suivre un vendeur qui brade.
+
+L'outil reconnaît vos propres ventes grâce à l'image du nom de l'objet : il ne passe jamais sous votre propre prix, même d'une session à l'autre.
+
+La lecture des chiffres repose sur un modèle de la police du jeu, appris automatiquement sur votre écran (environ 5 ms par lecture). Tesseract sert de secours et de contrôle croisé.
+
+## Raccourcis
+
+| Touche | Action |
+|---|---|
+| `F1` | Vendre (objet de l'inventaire) ou mettre à jour (une de vos ventes) |
+| `F2` | Tout vendre au même prix |
+| `F3` | Mettre à jour la vente sélectionnée |
+| `Ctrl+F3` | Mettre à jour toute la liste |
+| `F4` | Meilleur lot |
+| Même touche deux fois | Forcer une lecture jugée suspecte |
+| `Ctrl+Alt+P` | Pause et reprise, arrêt des boucles |
+| `Ctrl+Alt+V` | Afficher les zones calibrées |
+| `Ctrl+Alt+H` | Aide-mémoire des touches par-dessus le jeu |
+| `Ctrl+Alt+U` | Afficher ou cacher le HUD |
+| `Ctrl+Alt+F1` à `F12` | Calibration (liste dans l'onglet **Raccourcis**, section **Avancé**) |
+
+Tous les raccourcis se changent dans l'onglet **Raccourcis** : bouton **Changer**, puis la touche voulue.
+
+Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne aussi en AZERTY), `Ctrl+L` pour vider le journal, `Échap` pour fermer les popups.
+
+## Interface
+
+**Accueil.** Les premiers pas se cochent tout seuls (calibrer, tester une lecture, première vente). L'onglet affiche aussi les touches principales et le bilan de la session.
+
+**Barre d'état.** Des pastilles indiquent la pause, le profil, la calibration (OK ou à faire) et l'HDV (vu ou introuvable). Un clic sur une pastille mène à l'endroit utile.
+
+**Journal.** Filtres **Tout**, **Ventes** et **Problèmes**, bouton **Copier**, une icône par type de ligne. Chaque parcours F2 ou Ctrl+F3 est regroupé dans un bloc repliable. Un clic sur une ligne qui contient un prix copie ce prix.
+
+**Activité.** Les dernières actions (ancien → nouveau prix, statut en couleur) et la dernière lecture.
+
+**Par-dessus le jeu.**
+- Un bandeau de résultat s'affiche au-dessus de l'HDV.
+- **Mode compact** (bouton 🗗 Compact) : petite fenêtre toujours au premier plan, avec la dernière action, l'état et la pause.
+- **HUD** (`Ctrl+Alt+U`) : une ligne avec l'état, la dernière action ou la progression. Les clics le traversent et il n'apparaît que quand Dofus est au premier plan. **Déplacer** (onglet **Options**) permet de le placer ailleurs.
+- **Aide-mémoire** (`Ctrl+Alt+H`) : déplaçable ; il reste alors affiché à cet endroit jusqu'au ✕.
+
+**Zone de notification.** Un clic ouvre l'outil, un clic droit donne accès à la pause, au mode compact, à l'aide-mémoire ou à la fermeture. La pastille de l'icône montre l'état : vert actif, orange pause, bleu parcours en cours, rouge calibration à faire. En option, réduire la fenêtre la cache à cet endroit.
+
+**Notifications et sons.** Une notification Windows signale la fin d'un long parcours quand vous êtes dans une autre fenêtre. Des sons discrets accompagnent succès, avertissements, erreurs et fin de parcours, avec volume réglable et bouton **Tester**. Tout se désactive dans **Options**.
+
+**Apparence** (onglet **Options**).
+- Thème **Sombre**, **Clair** ou **Comme Windows**, et six couleurs d'accent, avec aperçu avant d'appliquer.
+- Style **Verre** : le jeu derrière l'outil apparaît flouté, comme une vitre teintée, avec une teinte réglable. Nécessite Windows 10 (1803+) ou 11 et le thème sombre. Le style **Classique** reste opaque.
+- Taille du texte réglable, aide au survol sur les options, fondus désactivables.
+- Taille et position de la fenêtre mémorisées.
+
+## Profils et multi-compte
+
+Les profils de calibration (onglet **Calibration**) permettent d'en garder un par HDV ou par personnage. On passe de l'un à l'autre en un clic. **Nouveau** copie le profil actuel : il ne reste qu'à recalibrer ce qui change.
+
+Le profil suit aussi le personnage joué, lu dans le titre de la fenêtre du jeu :
+- choisir un profil pendant que vous jouez un personnage associe ce profil au personnage ;
+- un profil qui porte le nom du personnage est pris automatiquement.
+
+## Mises à jour
+
+Au démarrage, l'outil vérifie sur GitHub si une version plus récente est publiée. Si c'est le cas, il affiche un bouton **⬆ Installer vX.Y.Z** : un clic télécharge la version, vérifie le fichier, puis l'outil redémarre dans la nouvelle version.
+
+Réglages, calibration et profils sont conservés. Si la copie échoue, l'ancienne version est remise en place.
+
+La vérification se désactive dans l'onglet **Options**.
+
+## Signaler un problème
+
+1. Onglet **Options** › **📦 Rapport de problème** : l'outil crée un zip contenant le journal, les réglages, les captures de diagnostic et l'image de l'HDV. Rien n'est envoyé automatiquement et l'historique des ventes n'est pas inclus.
+2. Ouvrez une discussion dans [Bugs](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/bugs) en joignant le zip.
+
+Le journal seul se trouve dans `%APPDATA%\Dofus Price Helper\journaux\journal.log`.
+
+## Configuration
+
+Les réglages se modifient dans l'interface. Ils sont enregistrés dans `dofus_price_helper_config.json`, dans `%APPDATA%\Dofus Price Helper` pour la version Windows. Toutes les options sont listées dans [`dofus_price_helper_config.example.json`](../dofus_price_helper_config.example.json).
+
+| Option | Description | Défaut |
+|---|---|---|
+| `UNDERCUT_MODE` / `UNDERCUT_VALUE` | Baisse appliquée (kamas ou pourcentage) | `fixed` / `1` |
+| `FLOOR_RATIO` | Prix plancher, en fraction du prix moyen | `0.7` |
+| `FLOOR_MODE` | Comportement sous le plancher (`floor`, `keep`, `stop`) | `floor` |
+| `VERIFY_BEFORE_ENTER` | Relecture du champ avant validation | `true` |
+| `AUTO_VALIDATE` | Mise en vente automatique après saisie | `false` |
+| `RELIST_AUTO` | Autoriser Ctrl+F3 | `false` |
+| `HOTKEYS` | Raccourcis clavier | voir l'exemple |
+| `TESSERACT_CMD` | Chemin de Tesseract, si non installé à l'emplacement standard | — |
+
+## Version ligne de commande
+
+`python dofus_price_helperV2.py` a les mêmes raccourcis que l'interface. Ses options sont enregistrées dans la configuration :
+
+```bash
+python dofus_price_helperV2.py --plancher 70 --sous-plancher plancher   # plancher à 70 % du prix moyen
+python dofus_price_helperV2.py --plancher 0                             # plancher désactivé
+python dofus_price_helperV2.py --f1-simple                              # F1 vend toujours
+python dofus_price_helperV2.py --help
+```
+
+## Données enregistrées
+
+Tout reste sur votre PC, dans `%APPDATA%\Dofus Price Helper` (ou dans le dossier du projet si vous le lancez depuis le code source) :
+
+| Fichier | Contenu |
+|---|---|
+| `dofus_price_helper_config.json` | Réglages et calibration |
+| `dofus_price_history.csv` | Historique des ventes |
+| `dofus_my_prices.json` | Prix de vos ventes, conservés 2 jours |
+| `digit_templates.npz` | Modèle des chiffres du jeu, appris sur votre écran |
+| `hdv_anchor.png` | Image du titre « Hôtel de vente », servant de repère |
+| `journaux/` | Journal de fonctionnement |
+
+La seule connexion réseau est la vérification des mises à jour sur GitHub, désactivable.

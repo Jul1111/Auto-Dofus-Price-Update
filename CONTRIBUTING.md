@@ -43,6 +43,15 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+Lancement :
+
+```bash
+python dofus_price_helper_psg.py   # interface graphique
+python dofus_price_helperV2.py     # ligne de commande
+```
+
+Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indique son chemin dans `TESSERACT_CMD` (fichier de configuration). Le module `keyboard` peut demander les droits administrateur.
+
 ### Où se trouve quoi
 
 | Fichier | Rôle |
@@ -53,7 +62,15 @@ pytest
 | `dofus_digits.py` | Reconnaissance rapide des chiffres du jeu |
 | `dofus_autocal.py` | Calibration automatique |
 | `dofus_update.py` | Mise à jour de l'outil |
+| `dofus_style.py` | Thèmes, couleurs d'accent, effet verre, fondus |
+| `dofus_logo.py` | Logo (dessiné par le code) et icônes |
+| `modele_hdv/` | Modèle de l'HDV pour la calibration automatique (`packaging/build_hdv_model.py`) |
+| `packaging/` | Construction du zip (`build.py`) et de l'installeur (`installer.iss`) |
+| `.github/workflows/` | Tests, construction et publication automatiques |
 | `tests/` | Tests unitaires et tests OCR sur captures réelles |
+| `docs/` | Guide d'utilisation et captures d'écran |
+
+Fichiers générés localement et non versionnés : `dofus_price_helper_config.json`, `dofus_price_history.csv`, `digit_templates.npz`, `hdv_anchor.png`, `dofus_my_prices.json`.
 
 ### Étapes
 
@@ -69,6 +86,25 @@ pytest
 - **Fonctions automatiques désactivées par défaut** : la mise en vente automatique et Ctrl+F3 restent des options à activer soi-même.
 - **Interface et messages en français**, en phrases courtes et claires.
 - Pas de nouvelle dépendance sans en avoir parlé avant.
+
+## Construire et publier une version
+
+Chaque pull request vers `main` lance les tests et construit le zip et l'installeur, téléchargeables dans l'onglet **Actions** de l'exécution.
+
+Publication dans les Releases (mainteneur) :
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Construction locale (Windows, Tesseract installé) :
+
+```bash
+pip install pyinstaller
+python packaging/build.py --version v1.0.0          # zip dans dist/
+iscc /DAppVersion=v1.0.0 /DNumVersion=1.0.0 packaging\installer.iss   # installeur (Inno Setup 6)
+```
 
 ## Comportement
 
