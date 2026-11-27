@@ -1831,11 +1831,22 @@ def click_at(p: Point) -> None:
 WHEEL_DELTA = 120  # un cran de molette sous Windows
 
 
+SCROLL_HOVER = 0.04       # s entre l'arrivée de la souris sur la liste et la molette
+SCROLL_RETRY_WAIT = 0.3   # s : liste immobile -> on laisse le jeu finir avant de réessayer
+SCROLL_ZEROS = 3          # crans sans mouvement (avec attente) avant de conclure « en bas »
+
+
 def scroll_at(p: Point, notches: int) -> None:
     """Molette vers le bas de `notches` crans. Sous Windows, pyautogui.scroll(n) envoie n
     BRUT (1 = 1/120 de cran) : il faut multiplier par 120, sinon la liste bouge à peine."""
     import pyautogui
-    pyautogui.moveTo(*p)
+    x, y = p
+    # Petit mouvement puis pause : le jeu (Unity) doit « voir » la souris sur la liste avant la
+    # molette. Souris téléportée puis molette aussitôt, ou liste redessinée après « Modifier » :
+    # la molette était parfois ignorée, et Ctrl+F3 croyait la liste finie.
+    pyautogui.moveTo(x, y + 3)
+    pyautogui.moveTo(x, y)
+    time.sleep(SCROLL_HOVER)
     pyautogui.scroll(-abs(notches) * (WHEEL_DELTA if IS_WINDOWS else 1))
 
 
@@ -2884,8 +2895,10 @@ class PriceEngine:
             prev = img
             if d == 0:
                 zeros += 1
-                if zeros >= 2:
+                if zeros >= SCROLL_ZEROS:
                     break
+                time.sleep(SCROLL_RETRY_WAIT)    # jeu occupé (liste redessinée) : on réessaie
+                prev = grab_screen(box)
                 continue
             zeros, total = 0, total + d
             per_notch = per_notch or d / n
@@ -2897,6 +2910,21 @@ class PriceEngine:
         if d is None:
             return total, "défilement non suivi (animation)"
         return total + d, None
+
+    def _rows_left(self, seen: int, total: Optional[int]) -> int:
+        """Ventes restant à voir d'après le compteur (0 si inconnu ou presque fini : la
+        mesure du défilement peut être décalée d'une ou deux lignes)."""
+        cfg = self.cfg
+        if total is None and cfg.count_region:
+            try:
+                c = read_counter(cfg)
+                total = c[0] if c else None
+            except Exception:
+                total = None
+        if not total:
+            return 0
+        left = total - (seen + 1)
+        return left if left > 2 else 0
 
     def _relist_all(self) -> Result:
         """Parcourt la liste « mes ventes » : clic sur chaque ligne visible, mise à jour,
@@ -3050,7 +3078,22 @@ class PriceEngine:
                     stop = err
                     break
                 if moved <= 0:
-                    break  # la liste ne bouge plus : en bas
+                    # La liste ne bouge plus : en bas… sauf si le compteur « X/Y lots en vente »
+                    # dit qu'il reste des ventes à voir (molette ignorée par le jeu).
+                    left = self._rows_left(seen, total)
+                    if left:
+                        time.sleep(0.5)
+                        moved, err = self._scroll_page(box, target)
+                        self._tick("défilement", t0)
+                        if err:
+                            stop = err
+                            break
+                    if moved <= 0:
+                        if left:
+                            stop = (f"défilement bloqué : la liste ne descend plus, encore ~{left} vente(s) "
+                                    "après la dernière ligne vue. Relance Ctrl+F3 avec la souris sur "
+                                    "la dernière ligne traitée")
+                        break
                 shift += moved
                 seen -= 1
                 pages += 1
