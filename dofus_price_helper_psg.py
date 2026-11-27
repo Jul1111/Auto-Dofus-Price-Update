@@ -977,6 +977,7 @@ class App(ctk.CTk):
             "sound": ctk.BooleanVar(value=c.sound),
             "relist_auto": ctk.BooleanVar(value=c.relist_auto),
             "relist_confirm_enter": ctk.BooleanVar(value=c.relist_confirm_enter),
+            "relist_force_suspect": ctk.BooleanVar(value=c.relist_force_suspect),
             "relist_summary": ctk.BooleanVar(value=c.relist_summary),
             "auto_recalibrate": ctk.BooleanVar(value=c.auto_recalibrate),
             "fast_digits": ctk.BooleanVar(value=c.fast_digits),
@@ -1559,6 +1560,10 @@ class App(ctk.CTk):
         self._switch(b, "Valider la fenêtre de confirmation avec Entrée", "relist_confirm_enter",
                      tip="Après « Modifier », si une fenêtre de confirmation reste ouverte, l'outil appuie "
                          "sur Entrée.")
+        self._switch(b, "Modifier même si le prix est suspect ⚠️", "relist_force_suspect", progress_color=ORANGE,
+                     tip="Pour un marché qui chute d'un jour à l'autre : une forte baisse ou un prix loin "
+                         "du prix moyen ne bloque plus la mise à jour. Le prix est d'abord relu une 2e fois "
+                         "(Tesseract seul) et doit être identique. Une lecture peu fiable reste bloquée.")
         self._switch(b, "Fenêtre de résumé à la fin du parcours", "relist_summary",
                      tip="Prix modifiés et lignes à revoir, avec l'image du nom de chaque objet. Le résumé "
                          "reste aussi dans « Derniers parcours » ci-dessous.")
@@ -2336,7 +2341,7 @@ class App(ctk.CTk):
         c.floor_mode = {lbl: k for k, lbl in FLOOR_LABELS.items()}.get(v["floor_mode"].get(), "floor")
         was_auto = c.relist_auto
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound",
-                     "relist_auto", "relist_confirm_enter", "relist_summary", "fast_digits", "auto_recalibrate",
+                     "relist_auto", "relist_confirm_enter", "relist_force_suspect", "relist_summary", "fast_digits", "auto_recalibrate",
                      "verify_before_enter", "smart_f1", "always_on_top", "check_updates", "notify",
                      "animations", "tray", "tray_minimize", "auto_profile", "hud"):
             setattr(c, name, bool(v[name].get()))

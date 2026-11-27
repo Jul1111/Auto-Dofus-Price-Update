@@ -302,6 +302,7 @@ class Config:
     relist_max: int = 400             # garde-fou : lignes lues max par appui (boucle infinie impossible)
     relist_delay: float = 0.5         # s après un clic sur une ligne / une modification
     relist_confirm_enter: bool = True # « Modifier » : Entrée si une fenêtre de confirmation reste ouverte
+    relist_force_suspect: bool = False  # mes ventes : modifier même si le PRIX est suspect (marché qui chute)
     relist_summary: bool = True       # Ctrl+F3 : fenêtre de résumé (prix modifiés, lignes douteuses)
     auto_recalibrate: bool = True     # repère perdu (taille de l'HDV changée) : calibration automatique
 
@@ -988,7 +989,13 @@ def parse_number(data: Dict[str, list], bounds: Tuple[int, int]) -> Reading:
     return Reading(int("".join(w[1] for w in ws)), min(w[2] for w in ws), " ".join(w[1] for w in ws))
 
 
-def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool = False) -> ScreenRead:
+def table_second_read(cfg: Config) -> "ScreenRead":
+    """2e lecture du tableau, Tesseract seul (sans la lecture rapide) : contrôle indépendant."""
+    return read_screen(cfg, tesseract_only=True)
+
+
+def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool = False,
+                tesseract_only: bool = False) -> ScreenRead:
     """Tableau + quantité (+ prix moyen, + ton prix) en UN appel Tesseract."""
     import pytesseract
     if not cfg.table_region:
@@ -1010,7 +1017,7 @@ def read_screen(cfg: Config, debug_dir: Optional[Path] = None, with_mine: bool =
         import cv2
         debug_dir.mkdir(exist_ok=True)
         cv2.imwrite(str(debug_dir / f"ocr_{int(time.time() * 1000)}.png"), comp)
-    data, engine = _ocr(comp, bounds, cfg)
+    data, engine = _ocr(comp, bounds, cfg, force_tesseract=tesseract_only)
     inner_w = imgs[0].shape[1] - 2 * BORDER
     res = _parse_screen(data, bounds, inner_w, cfg, len(regions), mine_img is not None)
     if engine == "chiffres" and (not res.prices or (cfg.qty_region and res.selected is None)):
@@ -2727,6 +2734,17 @@ class PriceEngine:
 
         prefix = (f"{head} -> {new_p}{' (aligné sur ton autre vente)' if own else ''}"
                   f"{f' (plancher {cfg.floor_ratio:.0%} du prix moyen {sr.avg})' if floored else ''}")
+        if problems and cfg.relist_force_suspect and not any(p.startswith("confiance OCR") for p in problems):
+            # Option « modifier même si suspect » : le marché peut chuter d'un jour à l'autre.
+            # Seuls les doutes sur le PRIX sont levés (jamais une lecture peu fiable), et
+            # seulement si une 2e lecture indépendante redonne exactement le même prix.
+            sr2 = table_second_read(cfg)
+            top2 = sr2.prices.get(lot)
+            if sr2.selected == lot and top2 is not None and top2.value == top.value:
+                prefix += f" [suspect accepté : {'; '.join(problems)}]"
+                problems = []
+            else:
+                problems.append(f"2e lecture différente ({top2.value if top2 else '?'})")
         now = time.time()
         forced = (not auto and self._pending is not None and self._pending[:2] == (-lot, new_p)
                   and now - self._pending[2] <= cfg.confirm_window)
