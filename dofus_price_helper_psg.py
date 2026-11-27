@@ -216,7 +216,7 @@ MAX_RUNS = 10
 
 def runs_to_json(runs: list) -> list:
     """Parcours -> JSON (sans les images des noms, gardées en mémoire seulement)."""
-    return [{"time": r["time"], "changes": [
+    return [{"time": r["time"], "summary": r.get("summary") or {}, "changes": [
         {"row": c.row, "lot": c.lot, "old": c.old, "new": c.new, "modified": c.modified, "note": c.note}
         for c in r["changes"]]} for r in runs]
 
@@ -225,7 +225,9 @@ def runs_from_json(data) -> list:
     runs = []
     for r in data if isinstance(data, list) else []:
         try:
-            runs.append({"time": float(r["time"]), "changes": [core.RowChange(
+            summary = r.get("summary")
+            runs.append({"time": float(r["time"]), "summary": summary if isinstance(summary, dict) else {},
+                         "changes": [core.RowChange(
                 row=int(c["row"]), lot=c.get("lot"), old=c.get("old"), new=c.get("new"),
                 modified=bool(c.get("modified")), note=str(c.get("note", ""))) for c in r["changes"]]})
         except (KeyError, TypeError, ValueError):
@@ -591,6 +593,12 @@ WHATS_NEW = {
         "Quand la mise en vente automatique est coupée, le HUD rappelle « Entrée pour valider » une fois "
         "le prix saisi (ou « Ctrl+V puis Entrée » s'il est seulement copié).",
     ],
+    "1.11.0": [
+        "HUD : option « 3 derniers prix sous la ligne » (onglet Options) pour vérifier les derniers lots "
+        "d'un coup d'œil, aussi pendant un parcours.",
+        "Fin de Toute la liste : le résumé commence par un récap (modifiés, à revoir, déjà au bon prix, "
+        "durée, raison de l'arrêt). Un clic sur une ligne la retrouve dans le journal.",
+    ],
 }
 
 
@@ -639,6 +647,28 @@ def validate_reminder(res, cfg) -> Optional[str]:
     if done.startswith("copié"):
         return "Prix copié · Ctrl+V puis Entrée"
     return None
+
+
+HUD_HISTORY_N = 3
+HUD_MARKS = {"ok": "✓", "warn": "!", "error": "✕"}
+
+
+def hud_history_line(res) -> Optional[tuple]:
+    """Ligne « derniers prix » du HUD pour un résultat : (texte, niveau, heure), ou None quand
+    aucun prix n'a été mis ou proposé (lecture seule, « rien à faire », fin de parcours)."""
+    msg = res.message.lstrip()
+    if res.lot is None or res.new_price is None or not msg.startswith(("[VENTE]", "[OPT]", "[MAJ]")):
+        return None
+    if "rien à faire" in msg:
+        return None
+    old = res.old_price
+    price = f"{fmt(old)} → {fmt(res.new_price)}" if old and old != res.new_price else fmt(res.new_price)
+    return (f"{HUD_MARKS.get(res.level, '·')} Lot {res.lot}  {price}", res.level, time.strftime("%H:%M"))
+
+
+def duration_text(seconds) -> str:
+    s = max(0, int(round(seconds or 0)))
+    return f"{s} s" if s < 60 else f"{s // 60} min {s % 60:02d}"
 
 
 HUD_SIZES = {"small": ("Petit", 11), "normal": ("Normal", 12), "large": ("Grand", 15)}
@@ -712,8 +742,7 @@ class App(ctk.CTk):
         self._restore_geometry()
 
         self.engine = core.PriceEngine(self.cfg)
-        self.engine.progress = lambda r: self.ui_events.put(
-            ("log", ("   " + r.message, {"warn": "WARN", "error": "ERROR"}.get(r.level, "OK"), r.new_price)))
+        self.engine.progress = lambda r: self.ui_events.put(("row", r))   # une ligne d'un parcours
         self.engine.on_loop_progress = lambda d: self.ui_events.put(("loop_progress", d))
         self.jobs: "queue.Queue[tuple]" = queue.Queue()
         self.ui_events: "queue.Queue[tuple]" = queue.Queue()
@@ -731,6 +760,7 @@ class App(ctk.CTk):
         self.last_action = ("En attente d'une action…", "", MUTED)
         self._loop: Optional[dict] = None   # boucle en cours (F2 / Ctrl+F3) : type, début
         self.activity: list = []             # panneau Activité : dernières actions (récentes d'abord)
+        self.hud_recent: list = []           # HUD : derniers prix traités (récents d'abord)
         self._cheat = None                   # aide-mémoire affiché par-dessus le jeu
         self._hud_note = None                # message temporaire du HUD : (titre, détail, couleur, fin)
         self._log_seq = 0
@@ -1638,6 +1668,12 @@ class App(ctk.CTk):
         self._tip(seg, "État : actif, pause… seulement. Action : la dernière action seulement. Pendant un "
                        "parcours, la progression s'affiche toujours.")
         r = self._row(b)
+        self.hud_hist_var = ctk.BooleanVar(value=self.cfg.hud_history)
+        self._tip(ctk.CTkSwitch(r, text="3 derniers prix sous la ligne", variable=self.hud_hist_var,
+                                command=self._set_hud_history),
+                  "Les trois derniers lots traités (prix lu → prix mis), le plus récent en couleur : "
+                  "pour vérifier d'un coup d'œil, aussi pendant un parcours.").pack(side="left", padx=(42, 0))
+        r = self._row(b)
         ctk.CTkLabel(r, text="Opacité", width=70, anchor="w").pack(side="left", padx=(42, 0))
         sl = ctk.CTkSlider(r, from_=0.5, to=1.0, number_of_steps=10, width=180, command=self._set_hud_opacity)
         sl.set(min(1.0, max(0.5, self.cfg.hud_opacity)))
@@ -2035,6 +2071,7 @@ class App(ctk.CTk):
         for kind, color in self.ICON_COLORS.items():
             t.tag_configure(f"I_{kind}", foreground=P[color])
         t.tag_configure("HDR", foreground=P["cyan"], font=(style.MONO, self._log_font_size(), "bold"))
+        t.tag_configure("FOCUS", background=P["track"])
         t.tag_bind("PRICE", "<Button-1>", self._on_log_click)
         t.tag_bind("PRICE", "<Enter>", lambda _e: t.configure(cursor="hand2"))
         t.tag_bind("PRICE", "<Leave>", lambda _e: t.configure(cursor=""))
@@ -2098,7 +2135,8 @@ class App(ctk.CTk):
             t.insert("end", e["t"] + "  ", ("TIME",))
             kind = e.get("kind", "info")
             t.insert("end", ("   " if e["block"] is not None else "") + LOG_ICONS[kind] + " ", (f"I_{kind}",))
-            tags = (e["tag"],) + (("PRICE", f"e{e['id']}") if e.get("price") is not None else ())
+            tags = (e["tag"],) + ((f"e{e['id']}",) if e.get("id") else ()) + (
+                ("PRICE",) if e.get("price") is not None else ())
             t.insert("end", e["msg"].lstrip() + "\n", tags)
         t.see("end")
         t.configure(state="disabled")
@@ -2377,6 +2415,9 @@ class App(ctk.CTk):
     def _handle_ui_event(self, name, arg):
         if name == "result":
             self._on_result(arg)
+        elif name == "row":
+            self._log("   " + arg.message, {"warn": "WARN", "error": "ERROR"}.get(arg.level, "OK"), arg.new_price)
+            self._push_history(arg)
         elif name == "block_start":
             self._block_start(arg or "relist_all")
         elif name == "block_end":
@@ -2468,6 +2509,7 @@ class App(ctk.CTk):
         if remind:                                   # prix prêt mais pas mis en vente : à toi de valider
             self.last_action = (head, remind, P["gold"])
         self._add_activity(res)
+        self._push_history(res, refresh=False)
         if res.level == "ok" and res.message.startswith(("[VENTE]", "[OPT]", "[TOUT]", "[MAJ]")) \
                 and ("mis en vente" in res.message or "modifié" in res.message or res.message.startswith("[TOUT]")):
             self._mark_step("sell")
@@ -2478,18 +2520,19 @@ class App(ctk.CTk):
     def _relist_summary(self, res: core.Result):
         """Journal : une ligne par prix modifié / ligne à revoir. Historique (onglet Mes ventes) et
         fenêtre : la même chose avec l'image du nom de chaque objet (le nom n'est pas lu en texte)."""
+        ids = []                                     # lignes du journal : clic dans le récap = y aller
         for c in res.changes:
             self._log("   " + c.text(), "OK" if c.modified else "WARN", c.new if c.modified else None)
-        if not res.changes:
-            return
-        run = {"time": time.time(), "changes": list(res.changes)}
-        self.runs = (self.runs + [run])[-MAX_RUNS:]
-        try:
-            save_runs(self.runs)
-        except OSError as e:
-            self._log(f"[Résumé] Historique non enregistré : {e}", "WARN")
-        self._refresh_runs()
-        if self.cfg.relist_summary:
+            ids.append(self._log_seq)
+        run = {"time": time.time(), "changes": list(res.changes), "summary": dict(res.summary), "log_ids": ids}
+        if res.changes:
+            self.runs = (self.runs + [run])[-MAX_RUNS:]
+            try:
+                save_runs(self.runs)
+            except OSError as e:
+                self._log(f"[Résumé] Historique non enregistré : {e}", "WARN")
+            self._refresh_runs()
+        if self.cfg.relist_summary and (res.changes or res.summary):
             self._summary_window(run)
 
     def _summary_window(self, run: dict):
@@ -2504,14 +2547,26 @@ class App(ctk.CTk):
         self._summary_win = w
         w.title("Résumé de la mise à jour (Ctrl+F3) · "
                 + time.strftime("%d/%m %H:%M", time.localtime(run["time"])))
-        w.geometry("560x520")
+        w.geometry("560x560")
         w.attributes("-topmost", True)
-        ctk.CTkLabel(w, text=f"{len(mod)} prix modifié{'s' if len(mod) > 1 else ''}"
-                             + (f"  ·  {len(bad)} ligne{'s' if len(bad) > 1 else ''} à revoir avec "
-                                f"{self.cfg.hotkeys['relist'].upper()}" if bad else ""),
-                     font=ctk.CTkFont(size=15, weight="bold")).pack(anchor="w", padx=14, pady=(12, 4))
+        summary = run.get("summary") or {}
+        if summary:
+            self._summary_tiles(w, summary, len(mod), len(bad))
+        else:                                        # ancien parcours (avant le récap)
+            ctk.CTkLabel(w, text=f"{len(mod)} prix modifié{'s' if len(mod) > 1 else ''}"
+                                 + (f"  ·  {len(bad)} ligne{'s' if len(bad) > 1 else ''} à revoir avec "
+                                    f"{self.cfg.hotkeys['relist'].upper()}" if bad else ""),
+                         font=ctk.CTkFont(size=15, weight="bold")).pack(anchor="w", padx=14, pady=(12, 4))
+        ids = dict(zip(map(id, changes), run.get("log_ids") or []))
+        hint = ctk.CTkLabel(w, text="Clic sur une ligne = la retrouver dans le journal" if ids else "",
+                            text_color=MUTED, font=ctk.CTkFont(size=11))
+        if ids:
+            hint.pack(anchor="w", padx=14)
         body = ctk.CTkScrollableFrame(w, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=8, pady=4)
+        if not changes:
+            ctk.CTkLabel(body, text="Rien à modifier : tes ventes sont déjà au bon prix.",
+                         text_color=MUTED).pack(anchor="w", padx=8, pady=8)
         self._summary_imgs = []                     # garder les images (sinon effacées par Tk)
         for c in bad + mod:                          # à revoir en premier
             r = ctk.CTkFrame(body, fg_color=CARD)
@@ -2520,6 +2575,8 @@ class App(ctk.CTk):
             if img is not None:
                 self._summary_imgs.append(img)
                 ctk.CTkLabel(r, text="", image=img).pack(side="left", padx=6, pady=4)
+            if id(c) in ids:
+                self._clickable(r, lambda k=ids[id(c)]: self._jump_to_log(k, w, hint))
             lot = f"lot {c.lot}" if c.lot else "lot ?"
             if c.modified:
                 txt = f"{lot}   {fmt(c.old)} → {fmt(c.new)}"
@@ -2534,6 +2591,75 @@ class App(ctk.CTk):
             ctk.CTkLabel(r, text=f"ligne {c.row}", text_color=MUTED).pack(side="right", padx=8)
         ctk.CTkButton(w, text="Fermer", width=100, command=w.destroy).pack(pady=(4, 12))
         w.bind("<Escape>", lambda _e: w.destroy())
+
+    def _summary_tiles(self, w, s: dict, mod: int, bad: int):
+        """Récap en tête du résumé : modifiés, à revoir, déjà au bon prix, durée, et pourquoi ça s'est arrêté."""
+        row = ctk.CTkFrame(w, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=(12, 2))
+        tiles = ((mod, "modifiés" if mod > 1 else "modifié", P["green"] if mod else MUTED),
+                 (bad, "à revoir", P["orange"] if bad else MUTED),
+                 (s.get("same", 0), "déjà au bon prix", P["text"]),
+                 (duration_text(s.get("seconds")), "durée", P["text"]))
+        for i, (value, label, color) in enumerate(tiles):
+            row.grid_columnconfigure(i, weight=1, uniform="tile")
+            t = ctk.CTkFrame(row, fg_color=CARD, corner_radius=10)
+            t.grid(row=0, column=i, sticky="ew", padx=4)
+            ctk.CTkLabel(t, text=str(value), text_color=color,
+                         font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(6, 0))
+            ctk.CTkLabel(t, text=label, text_color=MUTED, font=ctk.CTkFont(size=11)).pack(pady=(0, 6))
+        seen = s.get("seen", 0)
+        if s.get("complete", True):
+            end, color = f"{seen} ligne{'s' if seen > 1 else ''} vue{'s' if seen > 1 else ''} · toute la liste", MUTED
+        else:
+            end, color = f"{seen} ligne{'s' if seen > 1 else ''} vue{'s' if seen > 1 else ''} · arrêté : " \
+                         f"{s.get('stop', '?')}", P["orange"]
+        if bad:
+            end += f"  ·  lignes à revoir : {self.cfg.hotkeys['relist'].upper()} une par une"
+        ctk.CTkLabel(w, text=end, text_color=color, anchor="w", justify="left",
+                     wraplength=520).pack(anchor="w", padx=14, pady=(4, 2))
+
+    @staticmethod
+    def _clickable(frame, command):
+        """Tout le cadre (et ce qu'il contient) réagit au clic."""
+        for wdg in [frame] + list(frame.winfo_children()):
+            try:
+                wdg.configure(cursor="hand2")
+            except (tk.TclError, ValueError):
+                pass
+            wdg.bind("<Button-1>", lambda _e: command())
+
+    def _jump_to_log(self, entry_id: int, win=None, hint=None) -> bool:
+        """Résumé -> journal : la ligne est affichée (bloc déplié, filtre « Tout » si besoin) et surlignée."""
+        entry = next((e for e in self.log_entries if e.get("id") == entry_id), None)
+        if entry is None:
+            if hint is not None:
+                hint.configure(text="Cette ligne n'est plus dans le journal (effacé).", text_color=P["orange"])
+            return False
+        b = self.log_blocks.get(entry["block"]) if entry["block"] is not None else None
+        if b is not None:
+            b["collapsed"] = False
+        if not self._entry_visible(entry):
+            self.log_filter.set("Tout")
+        self._render_log()
+        t = self.log_text
+        rng = t.tag_ranges(f"e{entry_id}")
+        if not rng:
+            return False
+        t.tag_remove("FOCUS", "1.0", "end")
+        t.tag_add("FOCUS", f"{rng[0]} linestart", f"{rng[-1]} lineend")
+        t.tag_raise("FOCUS")
+        t.see(rng[0])
+        if getattr(self, "_focus_after", None):
+            self.after_cancel(self._focus_after)
+        self._focus_after = self.after(3000, lambda: t.tag_remove("FOCUS", "1.0", "end"))
+        if win is not None:
+            try:
+                win.attributes("-topmost", False)      # le journal passe devant le résumé
+            except tk.TclError:
+                pass
+        self._show_main()
+        self.lift()
+        return True
 
     @staticmethod
     def _name_thumb(img):
@@ -3712,6 +3838,10 @@ class App(ctk.CTk):
         self._hud_head.pack(side="left", padx=(10, 0))
         self._hud_sub = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=size))
         self._hud_sub.pack(side="left", padx=(8, 0))
+        self._hud_hist = ctk.CTkFrame(card, fg_color="transparent")       # derniers prix (option)
+        self._hud_hist_lbls = [ctk.CTkLabel(self._hud_hist, text="", anchor="w", height=size + 4,
+                                            font=ctk.CTkFont(family=style.MONO, size=size - 1))
+                               for _ in range(HUD_HISTORY_N)]
         pos = self.cfg.hud_pos
         try:
             ok = bool(pos) and geometry_on_screen(f"300x40+{pos[0]}+{pos[1]}", core.screen_bounds())
@@ -3764,6 +3894,37 @@ class App(ctk.CTk):
                 head = ""
         self._hud_head.configure(text=head if show_action else "")
         self._hud_sub.configure(text=sub if show_action else "", text_color=col)
+        self._refresh_hud_history()
+
+    def _refresh_hud_history(self):
+        """Sous la ligne du HUD : les derniers prix traités (option « 3 derniers prix »)."""
+        lines = self.hud_recent if self.cfg.hud_history and not self._hud_moving else []
+        hist = self._hud_hist
+        for i, lbl in enumerate(self._hud_hist_lbls):
+            if i < len(lines):
+                text, level, hhmm = lines[i]
+                lbl.configure(text=f"{hhmm}  {text}", text_color=LEVEL_COLORS.get(level, MUTED) if i == 0 else MUTED)
+                if not lbl.winfo_ismapped():
+                    lbl.pack(anchor="w", fill="x")
+            else:
+                lbl.pack_forget()
+        if lines and not hist.winfo_ismapped():
+            hist.pack(anchor="w", fill="x", padx=(34, 14), pady=(0, 6))
+        elif not lines:
+            hist.pack_forget()
+
+    def _push_history(self, res, refresh: bool = True):
+        line = hud_history_line(res)
+        if line is None:
+            return
+        self.hud_recent = ([line] + self.hud_recent)[:HUD_HISTORY_N]
+        if refresh:
+            self._refresh_hud()
+
+    def _set_hud_history(self):
+        self.cfg.hud_history = bool(self.hud_hist_var.get())
+        self._save_cfg()
+        self._refresh_hud()
 
     def _hud_rebuild(self):
         """Taille / contenu changés : le HUD est recréé."""

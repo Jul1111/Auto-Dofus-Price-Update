@@ -347,6 +347,7 @@ class Config:
     hud_size: str = "normal"          # HUD : "small" | "normal" | "large"
     hud_opacity: float = 0.9          # HUD : opacité (0.5 .. 1)
     hud_content: str = "both"         # HUD : "state" (état seul) | "action" (dernière action) | "both"
+    hud_history: bool = False         # HUD : les 3 derniers prix traités, sous la ligne principale
     profile_colors: Dict = field(default_factory=dict)       # profil -> couleur (HUD, pastille, icône)
     last_seen_version: str = ""       # « Quoi de neuf » déjà montré pour cette version
 
@@ -2394,6 +2395,7 @@ class Result:
     old_price: Optional[int] = None    # mes ventes : ton prix avant la mise à jour
     item_img: Optional[np.ndarray] = None   # image du nom de l'objet (résumé Ctrl+F3)
     changes: List["RowChange"] = field(default_factory=list)   # Ctrl+F3 : résumé ligne par ligne
+    summary: Dict = field(default_factory=dict)   # Ctrl+F3 : lignes vues, modifiées, au bon prix, arrêt, durée
 
 
 @dataclass
@@ -3064,10 +3066,13 @@ class PriceEngine:
         detail += " | " + timing_text(time.perf_counter() - t_start, done, self.timing)
         if bad:
             detail += f" | {len(bad)} ligne(s) douteuse(s) NON modifiée(s), à faire avec F3 : " + " / ".join(bad[:5])
+        summary = {"seen": done + skipped, "changed": changed, "same": same, "bad": len(bad),
+                   "stop": stop, "complete": stop == "fin de la liste",
+                   "seconds": round(time.perf_counter() - t_start, 1)}
         return Result(None, level, f"[MAJ TOUT] {done + skipped} lignes vues ({pages + 1} pages, "
                       f"{skipped} identiques sautées{start_note}) : "
                       f"{changed} modifiées, {same} déjà au bon prix | arrêt : {stop}{detail}",
-                      hint=f"{changed} modifiées", changes=changes)
+                      hint=f"{changed} modifiées", changes=changes, summary=summary)
 
     # ---- actions ----
     def sell(self, optimize: bool = False) -> Result:
