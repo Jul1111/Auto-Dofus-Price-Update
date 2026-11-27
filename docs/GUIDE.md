@@ -31,7 +31,7 @@ L'outil trouve l'HDV quelles que soient la résolution et l'échelle de l'interf
 
 Limite : **Dofus 3 en français**, sur la même version du jeu que le modèle de l'outil. Si l'HDV n'est pas reconnu (autre langue, interface modifiée par une mise à jour du jeu), utilisez la calibration manuelle.
 
-Si vous changez ensuite l'échelle de l'interface ou la résolution, l'outil s'en rend compte et refait la calibration automatique (option dans l'onglet **Calibration**). Au démarrage, un bandeau prévient aussi si la calibration semble décalée, avec un bouton **Recalibrer**.
+Si vous changez ensuite l'échelle de l'interface ou la résolution, l'outil s'en rend compte et refait la calibration automatique (option dans l'onglet **Calibration**). L'outil vérifie aussi toutes les 5 secondes que la calibration colle encore à la fenêtre du jeu. Si elle semble décalée (fenêtre redimensionnée, écran changé) ou si l'HDV est introuvable, un bandeau apparaît avec un bouton **Recalibrer**, et la pastille du HUD passe à l'orange (« ⚠ Calibration décalée »). En jeu, maintenez `Alt` : **✨ Recalibrer** dans le HUD refait la calibration automatique sans quitter le jeu (l'HDV doit être ouvert, onglet Vente). L'alerte disparaît d'elle-même une fois réglé.
 
 ### Calibration manuelle
 
