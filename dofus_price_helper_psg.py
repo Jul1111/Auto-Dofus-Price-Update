@@ -658,6 +658,10 @@ WHATS_NEW = {
         "HUD : le nouveau prix défile jusqu'à sa valeur, le HUD change de taille en douceur, le rond respire "
         "pendant un parcours. Formes au choix (Carte, Pilule, Minimal) ; en multi-compte, son bord prend la "
         "couleur du personnage.",
+        "HUD : l'option sous la ligne montre maintenant les prix (lots 1, 10, 100) de l'objet sélectionné dans "
+        "l'HDV, mis à jour quand tu changes d'objet.",
+        "Réduire la fenêtre la range toujours près de l'horloge, et la fenêtre s'adapte à sa taille : plus "
+        "étroite, le panneau Activité se retire.",
     ],
 }
 
@@ -709,21 +713,32 @@ def validate_reminder(res, cfg) -> Optional[str]:
     return None
 
 
-HUD_HISTORY_N = 3
-HUD_MARKS = {"ok": "✓", "warn": "!", "error": "✕"}
+HUD_SEL_N = 3          # lignes « objet sélectionné » du HUD (lots 1, 10, 100)
+SEL_WATCH_MS = 500     # surveillance du tableau de l'HDV (simple capture, aucune action dans le jeu)
 
 
-def hud_history_line(res) -> Optional[tuple]:
-    """Ligne « derniers prix » du HUD pour un résultat : (texte, niveau, heure), ou None quand
-    aucun prix n'a été mis ou proposé (lecture seule, « rien à faire », fin de parcours)."""
-    msg = res.message.lstrip()
-    if res.lot is None or res.new_price is None or not msg.startswith(("[VENTE]", "[OPT]", "[MAJ]")):
-        return None
-    if "rien à faire" in msg:
-        return None
-    old = res.old_price
-    price = f"{fmt(old)} → {fmt(res.new_price)}" if old and old != res.new_price else fmt(res.new_price)
-    return (f"{HUD_MARKS.get(res.level, '·')} Lot {res.lot}  {price}", res.level, time.strftime("%H:%M"))
+def hud_selected_lines(prices: dict, selected: Optional[int] = None) -> list:
+    """Lignes du HUD pour l'objet sélectionné : (texte, couleur ou None), une par lot.
+    prices : {lot: prix le moins cher ou None} ; selected : quantité sélectionnée (mise en avant)."""
+    out = []
+    for lot in sorted(prices)[:HUD_SEL_N]:
+        v = prices[lot]
+        unit = f"  {fmt(round(v / lot))}/u" if v and lot > 1 else ""
+        text = f"x{lot:<4}{fmt(v) if v else '—':>10}{unit}"
+        out.append((("◆ " if lot == selected else "  ") + text, "gold" if lot == selected and v else None))
+    return out
+
+
+def layout_for(width: float, height: float) -> dict:
+    """Mise en page selon la taille de la fenêtre (en unités d'interface, hors mise à l'échelle)."""
+    return {"side": width >= 1000, "subtitle": width >= 760, "log_hint": width >= 860,
+            "log_lines": 6 if height >= 760 else 5 if height >= 640 else 4}
+
+
+def table_signature(img) -> bytes:
+    """Empreinte légère d'une capture du tableau : change quand un autre objet est sélectionné."""
+    small = img[::6, ::6]
+    return (small // 24).tobytes()
 
 
 def duration_text(seconds) -> str:
@@ -915,7 +930,7 @@ class App(ctk.CTk):
         brand(self)
         ctk.set_widget_scaling(self.cfg.ui_scale if 0.5 <= self.cfg.ui_scale <= 2 else 1.0)
         self.geometry("1120x800")
-        self.minsize(980, 680)
+        self.minsize(640, 540)
         self._restore_geometry()
 
         self.engine = core.PriceEngine(self.cfg)
@@ -937,7 +952,9 @@ class App(ctk.CTk):
         self.last_action = ("En attente d'une action…", "", MUTED)
         self._loop: Optional[dict] = None   # boucle en cours (F2 / Ctrl+F3) : type, début
         self.activity: list = []             # panneau Activité : dernières actions (récentes d'abord)
-        self.hud_recent: list = []           # HUD : derniers prix traités (récents d'abord)
+        self.hud_sel: Optional[dict] = None   # HUD : prix (lots 1, 10, 100) de l'objet sélectionné
+        self._sel_sig = None                  # empreinte du tableau de l'HDV (changement d'objet)
+        self._sel_pending = False
         self._last_price: Optional[int] = None   # HUD cliquable : « Copier »
         self._hud_active = time.time()       # dernière activité (masquage automatique)
         self._hud_expand_until = 0.0         # mode pastille : agrandi jusqu'à
@@ -995,16 +1012,19 @@ class App(ctk.CTk):
         elif not self._calibrated():
             self.after(800, self._first_launch)   # 1er lancement : calibration automatique proposée
         self.after(2500, self._check_calibration)   # fenêtre du jeu / écran changés ? (toutes les 5 s)
-        if self.cfg.tray:
-            self.tray.start()
+        self.tray.start()                         # icône près de l'horloge : toujours (réduire l'y range)
         self.after(400, self._apply_hud)          # HUD activé : créé dès le lancement (caché hors du jeu)
         self.after(1500, self._hud_alt_poll)
         self.after(1600, self._hud_anim_tick)
+        self.after(2000, self._sel_watch)
         self.after(1800, self._whats_new)         # 1er lancement d'une nouvelle version
         self.after(1200, self._watch_game)
         self.bind("<Control-KeyPress>", self._on_ctrl_key)
         self.bind("<Escape>", self._on_escape)
         self.bind("<Unmap>", self._on_unmap)
+        self._layout = None
+        self.bind("<Configure>", self._on_resize, add="+")
+        self.after(600, self._autowrap_all)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _calibrated(self) -> bool:
@@ -1087,8 +1107,6 @@ class App(ctk.CTk):
             "check_updates": ctk.BooleanVar(value=c.check_updates),
             "notify": ctk.BooleanVar(value=c.notify),
             "animations": ctk.BooleanVar(value=c.animations),
-            "tray": ctk.BooleanVar(value=c.tray),
-            "tray_minimize": ctk.BooleanVar(value=c.tray_minimize),
             "auto_profile": ctk.BooleanVar(value=c.auto_profile),
             "hud": ctk.BooleanVar(value=c.hud),
         }
@@ -1199,8 +1217,9 @@ class App(ctk.CTk):
                      ).pack(side="left")
         ctk.CTkLabel(tl, text=core.app_version(), text_color=MUTED, fg_color=P["card2"], corner_radius=8,
                      height=20, font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(10, 0), ipadx=4)
-        ctk.CTkLabel(titles, text="Tes prix au plus juste à l'hôtel de vente", text_color=MUTED,
-                     font=ctk.CTkFont(size=12), height=18).pack(anchor="w")
+        self.head_sub = ctk.CTkLabel(titles, text="Tes prix au plus juste à l'hôtel de vente", text_color=MUTED,
+                                     font=ctk.CTkFont(size=12), height=18)
+        self.head_sub.pack(anchor="w")
         info = ctk.CTkFrame(band, fg_color="transparent")
         info.pack(fill="x", padx=8, pady=(8, 2))
         # fin liseré dégradé (couleur d'accent -> or -> fond de la carte)
@@ -1282,6 +1301,7 @@ class App(ctk.CTk):
         # ---------------- activité : dernières actions + dernière lecture
         side = ctk.CTkFrame(self, fg_color=CARD, border_width=1, border_color=P["border"], corner_radius=12)
         side.grid(row=1, column=1, sticky="nsew", padx=(4, 12), pady=(14, 4))
+        self.side = side
         ctk.CTkLabel(side, text="Activité", font=ctk.CTkFont(size=15, weight="bold")
                      ).pack(anchor="w", padx=14, pady=(12, 2))
         self.act_box = ctk.CTkFrame(side, fg_color="transparent")
@@ -1918,7 +1938,8 @@ class App(ctk.CTk):
         seg = ctk.CTkSegmentedButton(r, values=list(HUD_SHAPES.values()), command=self._set_hud_shape)
         seg.set(HUD_SHAPES.get(self.cfg.hud_shape, HUD_SHAPES["card"]))
         seg.pack(side="left")
-        ctk.CTkLabel(r, text="Contenu", width=70, anchor="w").pack(side="left", padx=(16, 0))
+        r = self._row(b)
+        ctk.CTkLabel(r, text="Contenu", width=70, anchor="w").pack(side="left", padx=(42, 0))
         seg = ctk.CTkSegmentedButton(r, values=list(HUD_CONTENTS.values()), command=self._set_hud_content)
         seg.set(HUD_CONTENTS.get(self.cfg.hud_content, HUD_CONTENTS["both"]))
         seg.pack(side="left")
@@ -1927,7 +1948,8 @@ class App(ctk.CTk):
                        "parcours, la progression s'affiche toujours (sauf en pastille).")
         r = self._row(b)
         self.hud_hist_var = ctk.BooleanVar(value=self.cfg.hud_history)
-        self._tip(ctk.CTkSwitch(r, text="3 derniers prix sous la ligne", variable=self.hud_hist_var,
+        self._tip(ctk.CTkSwitch(r, text="Prix de l'objet sélectionné sous la ligne (lots 1, 10, 100)",
+                                variable=self.hud_hist_var,
                                 command=self._set_hud_history),
                   "Les trois derniers lots traités (prix lu → prix mis), le plus récent en couleur : "
                   "pour vérifier d'un coup d'œil, aussi pendant un parcours.").pack(side="left", padx=(42, 0))
@@ -1952,16 +1974,6 @@ class App(ctk.CTk):
         sl.pack(side="left")
         self.hud_op_lbl = ctk.CTkLabel(r, text=f"{self.cfg.hud_opacity:.0%}", text_color=MUTED, width=44)
         self.hud_op_lbl.pack(side="left", padx=6)
-        tr = self._switch(b, "Icône dans la zone de notification (près de l'horloge)", "tray",
-                          tip="Clic = ouvrir l'outil. Clic droit : pause, HUD, aide-mémoire, quitter. "
-                              "La pastille montre l'état : vert actif, bleu parcours en cours, "
-                              "rouge calibration à faire.")
-        tm = self._switch(b, "… réduire la fenêtre l'y cache (plus rien dans la barre des tâches)",
-                          "tray_minimize", tip="Le bouton « réduire » de la fenêtre cache l'outil près de "
-                                               "l'horloge. Clic sur l'icône pour le retrouver.")
-        if not TRAY_AVAILABLE:
-            tr.configure(state="disabled")
-            tm.configure(state="disabled")
         b = self._section(page, "Apparence")
         self._look = {"theme": self.cfg.theme if self.cfg.theme in style.THEMES else "dark",
                       "accent": self.cfg.accent if self.cfg.accent in style.ACCENTS else "blue",
@@ -2579,7 +2591,7 @@ class App(ctk.CTk):
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound",
                      "relist_auto", "relist_confirm_enter", "relist_force_suspect", "relist_summary", "fast_digits", "auto_recalibrate",
                      "verify_before_enter", "smart_f1", "always_on_top", "check_updates", "notify",
-                     "animations", "tray", "tray_minimize", "auto_profile", "hud"):
+                     "animations", "auto_profile", "hud"):
             setattr(c, name, bool(v[name].get()))
         ANIMATE["on"] = c.animations
         self._apply_hud()
@@ -2715,6 +2727,8 @@ class App(ctk.CTk):
                     self.ui_events.put(("calib_rows", self.engine.calibrate_rows()))
                 elif name == "read":
                     self.ui_events.put(("screen", self.engine.read_only()))
+                elif name == "peek":
+                    self.ui_events.put(("peek", self.engine.peek()))
                 elif name == "wizard_test":
                     self.ui_events.put(("wizard_test", self._wizard_checks()))
                 elif name == "wiz_zone":
@@ -2772,6 +2786,10 @@ class App(ctk.CTk):
     def _handle_ui_event(self, name, arg):
         if name == "result":
             self._on_result(arg)
+        elif name == "peek":
+            self._sel_pending = False
+            if arg is not None and any(v is not None for v in arg.values.values()):
+                self._set_hud_selected(arg)
         elif name == "row":
             self._log("   " + arg.message, {"warn": "WARN", "error": "ERROR"}.get(arg.level, "OK"), arg.new_price)
             self._push_history(arg)
@@ -3060,6 +3078,8 @@ class App(ctk.CTk):
     def _show_screen(self, sr: core.ScreenRead):
         if not sr.prices and sr.selected is None:
             return
+        if any(v is not None for v in sr.values.values()):
+            self._set_hud_selected(sr)
         if any(r and r.value is not None for r in sr.prices.values()):
             self._set_hdv("ok")
             self._mark_step("read")
@@ -3622,6 +3642,7 @@ class App(ctk.CTk):
         if state != self.hdv_state:
             self.hdv_state = state
             if state == "lost":
+                self.hud_sel = None
                 self._calib_alert_t = time.time()
                 self._hud_flash(style.CHIP["orange"][1], 2500)
             if state == "ok":
@@ -4380,7 +4401,7 @@ class App(ctk.CTk):
         self._hud_hist = ctk.CTkFrame(card, fg_color="transparent")       # derniers prix (option)
         self._hud_hist_lbls = [ctk.CTkLabel(self._hud_hist, text="", anchor="w", height=size + 4,
                                             font=ctk.CTkFont(family=style.MONO, size=size - 1))
-                               for _ in range(HUD_HISTORY_N)]
+                               for _ in range(HUD_SEL_N)]
         pos = self.cfg.hud_pos
         try:
             ok = bool(pos) and geometry_on_screen(f"300x40+{pos[0]}+{pos[1]}", core.screen_bounds())
@@ -4577,13 +4598,16 @@ class App(ctk.CTk):
                      after=self._hud_bar if self._hud_bar.winfo_manager() else self._hud_row)
 
     def _refresh_hud_history(self, hide: bool = False):
-        """Sous la ligne du HUD : les derniers prix traités (option « 3 derniers prix »)."""
-        lines = self.hud_recent if self.cfg.hud_history and not self._hud_moving and not hide else []
+        """Sous la ligne du HUD : les prix de l'objet sélectionné, lots 1 / 10 / 100
+        (option « Prix de l'objet sélectionné »). Mis à jour quand tu changes d'objet dans l'HDV."""
+        sel = self.hud_sel
+        lines = (hud_selected_lines(sel["prices"], sel.get("selected"))
+                 if sel and self.cfg.hud_history and not self._hud_moving and not hide else [])
         hist = self._hud_hist
         for i, lbl in enumerate(self._hud_hist_lbls):
             if i < len(lines):
-                text, level, hhmm = lines[i]
-                lbl.configure(text=f"{hhmm}  {text}", text_color=LEVEL_COLORS.get(level, MUTED) if i == 0 else MUTED)
+                text, color = lines[i]
+                lbl.configure(text=text, text_color=P[color] if color else MUTED)
                 if not lbl.winfo_ismapped():
                     lbl.pack(anchor="w", fill="x")
             else:
@@ -4594,13 +4618,40 @@ class App(ctk.CTk):
             hist.pack_forget()
 
     def _push_history(self, res, refresh: bool = True):
-        line = hud_history_line(res)
-        if line is None:
-            return
-        self._last_price = res.new_price
-        self.hud_recent = ([line] + self.hud_recent)[:HUD_HISTORY_N]
+        """Résultat avec un prix : il devient le « dernier prix » (bouton Copier du HUD) et, s'il porte
+        une lecture du tableau, les prix de l'objet sélectionné sont mis à jour."""
+        if res.new_price is not None and "rien à faire" not in res.message:
+            self._last_price = res.new_price
+        sr = getattr(res, "screen", None)
+        if sr is not None and any(v is not None for v in sr.values.values()):
+            self._set_hud_selected(sr, refresh=False)
         if refresh:
             self._refresh_hud()
+
+    def _set_hud_selected(self, sr, refresh: bool = True):
+        self.hud_sel = {"prices": dict(sr.values), "selected": sr.selected, "t": time.time()}
+        if refresh:
+            self._refresh_hud()
+
+    def _sel_watch(self):
+        """Toutes les 0,5 s, si l'option est active et le jeu au premier plan : le tableau de l'HDV
+        a-t-il changé (autre objet sélectionné) ? Une fois l'image stable, lecture discrète
+        (capture d'écran + lecture des chiffres, aucun clic ni touche)."""
+        try:
+            c = self.cfg
+            if (c.hud and c.hud_history and self._game_fg and self._loop is None and not self._sel_pending
+                    and c.table_region and not self.engine._lock.locked() and self.jobs.empty()):
+                sig = table_signature(core.grab_screen(tuple(c.table_region)))
+                if sig != self._sel_sig:
+                    if getattr(self, "_sel_candidate", None) == sig:     # stable depuis 0,5 s : on lit
+                        self._sel_sig = sig
+                        self._sel_pending = True
+                        self.jobs.put(("peek", None))
+                    self._sel_candidate = sig
+        except Exception:
+            pass
+        if not self.closing:
+            self.after(SEL_WATCH_MS, self._sel_watch)
 
     def _set_hud_history(self):
         self.cfg.hud_history = bool(self.hud_hist_var.get())
@@ -5119,11 +5170,8 @@ class App(ctk.CTk):
                          profile=self.cfg.profile if multi else "")
 
     def _apply_tray(self):
-        if self.cfg.tray:
-            self.tray.start()
-            self._tray_update()
-        else:
-            self.tray.stop()
+        self.tray.start()
+        self._tray_update()
 
     def _show_main(self):
         self.deiconify()
@@ -5160,8 +5208,8 @@ class App(ctk.CTk):
             self._on_close()
 
     def _on_unmap(self, e):
-        """Fenêtre réduite + option « réduire dans la zone de notification » : on la cache."""
-        if e.widget is not self or not self.cfg.tray_minimize or self.tray.icon is None:
+        """Fenêtre réduite : elle se range près de l'horloge (icône de la zone de notification)."""
+        if e.widget is not self or self.tray.icon is None:
             return
 
         def hide():
@@ -5174,6 +5222,78 @@ class App(ctk.CTk):
             except tk.TclError:
                 pass
         self.after(50, hide)
+
+    # ---- mise en page qui s'adapte à la taille de la fenêtre
+    def _on_resize(self, e):
+        if e.widget is not self:
+            return
+        if getattr(self, "_resize_after", None):
+            self.after_cancel(self._resize_after)
+        self._resize_after = self.after(60, self._apply_layout)
+
+    def _apply_layout(self):
+        """Fenêtre étroite : le panneau Activité se retire et les onglets prennent toute la largeur ;
+        très étroite : sous-titre et aide du journal masqués ; peu haute : journal plus court."""
+        self._resize_after = None
+        try:
+            scale = ctk.ScalingTracker.get_window_scaling(self) or 1.0
+        except Exception:
+            scale = 1.0
+        w, h = self.winfo_width() / scale, self.winfo_height() / scale
+        layout = layout_for(w, h)
+        if layout == self._layout:
+            return
+        old, self._layout = self._layout or {}, layout
+        if layout["side"] != old.get("side"):
+            if layout["side"]:
+                self.side.grid()
+                self.tabs.grid_configure(columnspan=1, padx=(8, 4))
+            else:
+                self.side.grid_remove()
+                self.tabs.grid_configure(columnspan=2, padx=(8, 12))
+        if layout["subtitle"] != old.get("subtitle"):
+            if layout["subtitle"]:
+                self.head_sub.pack(anchor="w")
+            else:
+                self.head_sub.pack_forget()
+        if layout["log_hint"] != old.get("log_hint"):
+            self.log_hint.configure(text="Clic sur une ligne avec un prix = le copier" if layout["log_hint"] else "")
+        if layout["log_lines"] != old.get("log_lines"):
+            self.log_text.configure(height=layout["log_lines"])
+
+    def _autowrap_all(self):
+        """Les textes sur toute la largeur de leur carte se replient selon la largeur réelle
+        (au lieu d'une largeur fixe) : rien n'est coupé quand la fenêtre rétrécit."""
+        def walk(wdg):
+            for c in wdg.winfo_children():
+                if isinstance(c, ctk.CTkLabel):
+                    self._autowrap(c)
+                walk(c)
+        walk(self)
+
+    def _autowrap(self, label):
+        try:
+            if not label.cget("wraplength") or label.winfo_manager() != "pack":
+                return
+            info = label.pack_info()
+        except (tk.TclError, ValueError):
+            return
+        if info.get("fill") not in ("x", "both"):
+            return
+        padx = info.get("padx", 0)
+        pad = sum(padx) if isinstance(padx, (tuple, list)) else int(padx) * 2
+        master = label.master
+
+        def fit(_e=None):
+            try:
+                scale = ctk.ScalingTracker.get_widget_scaling(label) or 1.0
+                width = master.winfo_width()
+                if width > 50:
+                    label.configure(wraplength=max(140, int((width - pad) / scale) - 8))
+            except (tk.TclError, ValueError):
+                pass
+        master.bind("<Configure>", fit, add="+")
+        fit()
 
     # ---- raccourcis de la fenêtre de l'outil
     def _on_ctrl_key(self, e):

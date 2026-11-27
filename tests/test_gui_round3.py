@@ -104,7 +104,7 @@ def test_zones_off_screen():
 
 def test_new_config_fields_round_trip(tmp_path):
     cfg = core.Config()
-    assert (cfg.theme, cfg.accent, cfg.animations, cfg.tray, cfg.tray_minimize) == ("dark", "blue", True, True, False)
+    assert (cfg.theme, cfg.accent, cfg.animations, cfg.tray, cfg.tray_minimize) == ("dark", "blue", True, True, True)
     assert "calib_window" in core.PROFILE_FIELDS
     cfg.theme, cfg.accent, cfg.sound_volume = "light", "green", 0.25
     cfg.calib_window, cfg.cheatsheet_pos = [0, 0, 1920, 1080], [40, 60]

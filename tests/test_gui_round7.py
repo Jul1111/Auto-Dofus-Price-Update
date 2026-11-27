@@ -1,4 +1,4 @@
-"""HUD « 3 derniers prix » et récap de fin de Ctrl+F3."""
+"""Récap de fin de Ctrl+F3 (le HUD « objet sélectionné » : test_hud_selected.py)."""
 import pytest
 
 import dofus_core as core
@@ -9,19 +9,6 @@ import dofus_price_helper_psg as gui  # noqa: E402
 
 def R(msg, lot=10, price=9499, level="ok", old=None):
     return core.Result(lot, level, msg, new_price=price, old_price=old)
-
-
-def test_hud_history_line_keeps_only_prices_set_or_proposed():
-    text, level, hhmm = gui.hud_history_line(R("[VENTE] Lot 10 | Lu: 9500 -> 9499 | saisi"))
-    assert text == "✓ Lot 10  9 499" and level == "ok" and len(hhmm) == 5
-    text, _l, _t = gui.hud_history_line(R("[MAJ] Lot 100 | ton prix 52000 -> 49999 | modifié", 100, 49999,
-                                          old=52000))
-    assert text == "✓ Lot 100  52 000 → 49 999"
-    assert gui.hud_history_line(R("[MAJ] Lot 10 | ... | SUSPECT (...)", level="warn"))[0].startswith("! ")
-    assert gui.hud_history_line(R("   [MAJ] Lot 1 | déjà le moins cher, rien à faire", 1, 500, old=500)) is None
-    assert gui.hud_history_line(R("[MAJ TOUT] 12 lignes vues", None, None)) is None
-    assert gui.hud_history_line(R("[LECTURE] Lot 10", 10, None)) is None
-    assert gui.hud_history_line(R("[TOUT] 3×10 | arrêt : fin")) is None     # fin de F2 : déjà ligne par ligne
 
 
 def test_duration_text():
