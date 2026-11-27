@@ -3,13 +3,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Une idée pour améliorer l'outil ? Décris le besoin avant la solution : c'est ce qui aide le plus à trouver la bonne façon de faire.
-        Vote pour les idées des autres avec 👍 : ça aide à choisir quoi faire en premier.
+        Une idée pour améliorer l'outil ? Décrivez le besoin avant la solution : c'est ce qui aide le plus à trouver la bonne façon de faire.
+        Votez pour les idées des autres avec 👍 : cela aide à choisir quoi faire en premier.
   - type: textarea
     id: besoin
     attributes:
       label: Le besoin
-      description: Qu'est-ce qui te manque ou te gêne aujourd'hui ?
+      description: Qu'est-ce qui vous manque ou vous gêne aujourd'hui ?
       placeholder: "Quand je vends des ressources en grande quantité, je dois…"
     validations:
       required: true
@@ -17,7 +17,7 @@ body:
     id: idee
     attributes:
       label: L'idée
-      description: Comment tu imagines la solution (raccourci, option, onglet…).
+      description: Comment vous imaginez la solution (raccourci, option, onglet…).
     validations:
       required: true
   - type: checkboxes
