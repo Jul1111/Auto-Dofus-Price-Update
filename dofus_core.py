@@ -353,7 +353,7 @@ class Config:
     ambience: str = "night"           # ambiance du thème sombre : night | amber | forest | ocean
     animations: bool = True           # fondus des popups, barre de progression douce
     tray: bool = True                 # icône dans la zone de notification (près de l'horloge)
-    tray_minimize: bool = False       # réduire la fenêtre = la cacher dans la zone de notification
+    tray_minimize: bool = True        # (toujours actif) réduire la fenêtre = la cacher près de l'horloge
     calib_window: Optional[List[int]] = None   # fenêtre du jeu (x, y, l, h) quand la calibration marchait
     cheatsheet_pos: Optional[List[int]] = None # aide-mémoire : position choisie en le déplaçant
     auto_profile: bool = True         # changer de profil tout seul selon le personnage (titre du jeu)
@@ -3478,6 +3478,21 @@ class PriceEngine:
                 time.sleep(max(0.3, self.cfg.sell_all_delay))
         got = f"{c[0]}/{c[1]}" if c else "illisible"
         return f"vente non confirmée (compteur {got}, attendu {expected}/{base[1]})", False
+
+    def peek(self) -> Optional[ScreenRead]:
+        """Lecture discrète pour le HUD (objet sélectionné) : rien n'est cliqué ni tapé, aucune
+        recalibration. None si une action est en cours ou si l'HDV n'est pas là où il a été calibré."""
+        cfg = self.cfg
+        if not cfg.table_region or not self._lock.acquire(blocking=False):
+            return None
+        try:
+            if cfg.anchor_region:
+                tpl = load_anchor(anchor_path(cfg))
+                if tpl is not None and anchor_score(grab_screen(tuple(cfg.anchor_region)), tpl) < ANCHOR_OK:
+                    return None                    # HDV fermé, caché ou déplacé : on n'invente rien
+            return read_screen(cfg)
+        finally:
+            self._lock.release()
 
     def read_only(self) -> ScreenRead:
         with self._lock:

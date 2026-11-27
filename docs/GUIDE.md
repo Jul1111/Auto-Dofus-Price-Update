@@ -118,14 +118,16 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
   - Pendant Tout vendre ou Toute la liste, il rappelle la touche pour arrêter (`Ctrl+Alt+P`).
   - Si la mise en vente automatique est coupée, il rappelle « Entrée pour valider » une fois le prix saisi, ou « Ctrl+V puis Entrée » si le prix est seulement copié.
   - Dans l'onglet **Options** : **Déplacer**, taille (petit, normal, grand), opacité, et contenu (état, dernière action, ou les deux).
-  - Option **3 derniers prix sous la ligne** : les trois derniers lots traités (prix lu → prix mis), le plus récent en couleur, aussi pendant un parcours.
+  - Option **Prix de l'objet sélectionné sous la ligne** : le moins cher pour les lots de 1, 10 et 100 de l'objet sélectionné dans l'HDV, avec le prix à l'unité ; la quantité sélectionnée est en or (◆). Quand vous sélectionnez un autre objet, les prix se mettent à jour seuls après une seconde environ : l'outil relit simplement l'écran, sans cliquer ni taper quoi que ce soit.
   - Pendant un parcours : une barre de progression et le temps restant estimé (« ≈ 2 min restantes »), dès que le total est connu.
   - Contenu **Pastille** : le HUD n'est plus qu'un petit rond de couleur, qui s'agrandit 2 secondes à chaque action.
   - **Masquer** (jamais, 10 s, 30 s, 1 min) : sans action pendant ce temps, le HUD s'estompe. Il revient à la prochaine action, pendant un parcours, ou en maintenant Alt.
   - **Alt maintenu** (seul) dans le jeu : le HUD devient cliquable et propose **Arrêter le parcours**, **Copier** le dernier prix et **Ouvrir l'outil**. Alt + glisser le déplace. Relâchez Alt et les clics le traversent à nouveau.
 - **Aide-mémoire** (`Ctrl+Alt+H`) : déplaçable ; il reste alors affiché à cet endroit jusqu'au ✕.
 
-**Zone de notification.** Un clic ouvre l'outil. Un clic droit donne accès au HUD, à l'aide-mémoire ou à la fermeture, et pendant un parcours à **Arrêter le parcours**. La pastille de l'icône montre l'état : vert actif, bleu parcours en cours, rouge calibration à faire. En option, réduire la fenêtre la cache à cet endroit.
+**Fenêtre redimensionnable.** La fenêtre s'adapte à sa taille : en dessous d'environ 1 000 px de large, le panneau Activité se retire et les onglets prennent toute la largeur ; les textes se replient selon la place disponible et le journal raccourcit dans une fenêtre basse.
+
+**Zone de notification.** Un clic ouvre l'outil. Un clic droit donne accès au HUD, à l'aide-mémoire ou à la fermeture, et pendant un parcours à **Arrêter le parcours**. La pastille de l'icône montre l'état : vert actif, bleu parcours en cours, rouge calibration à faire. L'icône est toujours là : réduire la fenêtre la range à cet endroit (plus rien dans la barre des tâches).
 
 **Notifications et sons.** Une notification Windows signale la fin d'un long parcours quand vous êtes dans une autre fenêtre. Des sons discrets accompagnent succès, avertissements, erreurs et fin de parcours, avec volume réglable et bouton **Tester**. Tout se désactive dans **Options**.
 
