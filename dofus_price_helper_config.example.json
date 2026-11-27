@@ -79,6 +79,10 @@
   "TRAY_MINIMIZE": false,
   "CALIB_WINDOW": null,
   "CHEATSHEET_POS": null,
+  "AUTO_PROFILE": true,
+  "CHARACTER_PROFILES": {},
+  "HUD": false,
+  "HUD_POS": null,
   "HOTKEYS": {
     "sell": "f1",
     "sell_all": "f2",
@@ -100,6 +104,7 @@
     "show_zones": "ctrl+alt+v",
     "pause": "ctrl+alt+p",
     "cheatsheet": "ctrl+alt+h",
+    "hud": "ctrl+alt+u",
     "quit": "ctrl+alt+q"
   }
 }

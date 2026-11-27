@@ -85,6 +85,7 @@ HOTKEY_LABELS = {
     "pause": "Pause / reprise (arrête aussi les boucles)",
     "show_zones": "Afficher les zones calibrées",
     "cheatsheet": "Aide-mémoire des touches par-dessus le jeu",
+    "hud": "HUD discret par-dessus le jeu (afficher / cacher)",
     "calibrate_auto": "Calibration automatique (HDV ouvert, onglet Vente)",
     "calibrate_anchor": "Repère : titre « Hôtel de vente » (×2)",
     "calibrate_table": "Tableau « Actuellement en vente » (×2)",
@@ -496,6 +497,7 @@ class Tray:
             item("Mode compact", lambda: put(("tray", "compact"))),
             item(lambda _i: "▶ Reprendre" if self.app.engine.paused else "⏸ Pause", lambda: put(("tray", "pause"))),
             item("Aide-mémoire en jeu", lambda: put(("tray", "cheatsheet"))),
+            item("HUD discret", lambda: put(("tray", "hud")), checked=lambda _i: bool(self.app.cfg.hud)),
             pystray.Menu.SEPARATOR,
             item("Quitter", lambda: put(("tray", "quit"))),
             item("Forcer l'arrêt", self._kill))
@@ -648,6 +650,11 @@ class App(ctk.CTk):
         self._toasts: list = []              # popups ouvertes (Échap les ferme)
         self._log_seq = 0
         self.tray = Tray(self)
+        self._char: Optional[str] = None     # personnage du jeu au premier plan (titre de la fenêtre)
+        self._profile_lock = threading.Lock()
+        self._hud = None                     # HUD discret par-dessus le jeu
+        self._hud_moving = False
+        self._game_fg = False
         self.restart_requested = False
         self.closing = False
         ANIMATE["on"] = bool(self.cfg.animations)
@@ -678,6 +685,7 @@ class App(ctk.CTk):
             self.after(2500, self._check_calibration)   # fenêtre du jeu / écran changés depuis ?
         if self.cfg.tray:
             self.tray.start()
+        self.after(1200, self._watch_game)
         self.bind("<Control-KeyPress>", self._on_ctrl_key)
         self.bind("<Escape>", self._on_escape)
         self.bind("<Unmap>", self._on_unmap)
@@ -765,6 +773,8 @@ class App(ctk.CTk):
             "animations": ctk.BooleanVar(value=c.animations),
             "tray": ctk.BooleanVar(value=c.tray),
             "tray_minimize": ctk.BooleanVar(value=c.tray_minimize),
+            "auto_profile": ctk.BooleanVar(value=c.auto_profile),
+            "hud": ctk.BooleanVar(value=c.hud),
         }
         for var in self.v.values():
             var.trace_add("write", lambda *_: self._schedule_save())
@@ -1164,7 +1174,7 @@ class App(ctk.CTk):
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
         b = self._section(page, "Divers")
         self._hotkey_line(b, None, "Forcer une lecture jugée suspecte", literal="même touche ×2")
-        for name in ("pause", "show_zones", "cheatsheet"):
+        for name in ("pause", "show_zones", "cheatsheet", "hud"):
             self._hotkey_line(b, name, HOTKEY_LABELS[name])
         b = self._section(page, "Dans la fenêtre de l'outil", "Quand c'est l'outil qui a le focus (pas le jeu).")
         self._hotkey_line(b, None, "Changer d'onglet : Accueil, Prix, Mes ventes, Calibration, Raccourcis, "
@@ -1421,6 +1431,17 @@ class App(ctk.CTk):
                       ).pack(side="left", padx=(8, 4))
         ctk.CTkButton(r, text="Supprimer", width=90, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER, command=self._delete_profile
                       ).pack(side="left", padx=4)
+        self._switch(pb, "Changer de profil tout seul selon le personnage", "auto_profile",
+                     tip="Le titre de la fenêtre du jeu donne le personnage (« Perso - Classe - … »). Quand tu "
+                         "passes sur un autre personnage, l'outil prend son profil : celui que tu as choisi "
+                         "pour lui, ou un profil qui porte son nom. Choisir un profil pendant que tu joues un "
+                         "personnage le lui associe.")
+        r = self._row(pb)
+        self.char_lbl = ctk.CTkLabel(r, text="Personnage : pas encore vu (passe sur le jeu)", text_color=MUTED,
+                                     anchor="w", font=ctk.CTkFont(size=12))
+        self.char_lbl.pack(side="left", fill="x", expand=True)
+        self.char_btn = ctk.CTkButton(r, text="", width=200, height=26, fg_color=BTN2, text_color=P["text"],
+                                      hover_color=BTN2_HOVER, command=self._link_character)
         adv = self._collapsible(page, "Avancé : assistant et zones manuelles",
                                 "Seulement si la calibration automatique échoue ou place mal une zone.")
         top = self._section(adv, "Assistant", "Pas à pas, avec une vérification à la fin.")
@@ -1497,6 +1518,14 @@ class App(ctk.CTk):
                          "quand c'est fini, si tu es dans une autre fenêtre que le jeu et l'outil.")
         self._switch(b, "Fenêtre de l'outil toujours au-dessus du jeu", "always_on_top",
                      tip="Même chose que 📌 en haut. Le jeu doit être en fenêtré ou plein écran fenêtré.")
+        r = self._row(b)
+        self._tip(ctk.CTkSwitch(r, text="HUD discret par-dessus le jeu", variable=self.v["hud"]),
+                  "Une petite ligne au-dessus du jeu : état, dernière action, progression. Les clics la "
+                  "traversent ; visible seulement quand Dofus est au premier plan. Touche : "
+                  f"{self.cfg.hotkeys['hud'].upper()}.").pack(side="left")
+        self.hud_move_btn = ctk.CTkButton(r, text="Déplacer", width=90, height=24, fg_color=BTN2,
+                                          text_color=P["text"], hover_color=BTN2_HOVER, command=self._hud_move)
+        self.hud_move_btn.pack(side="left", padx=10)
         tr = self._switch(b, "Icône dans la zone de notification (près de l'horloge)", "tray",
                           tip="Clic = ouvrir l'outil. Clic droit : pause, mode compact, aide-mémoire, quitter. "
                               "La pastille montre l'état : vert actif, orange pause, bleu parcours en cours, "
@@ -1724,6 +1753,7 @@ class App(ctk.CTk):
         self.hdv_state = None          # autre HDV : pas encore vu
         self._log(msg, "CAL")
         self._refresh_status()
+        self._refresh_character()
 
     def _switch_profile(self, name: str):
         if name == self.cfg.profile:
@@ -1732,7 +1762,11 @@ class App(ctk.CTk):
             self.profile_var.set(self.cfg.profile)
             return
         self.cfg.switch_profile(name)
-        self._after_profile_change(f"[Profil] « {name} » actif.")
+        extra = ""
+        if self._char and self.cfg.auto_profile:     # sinon le profil auto le remettrait aussitôt
+            self.cfg.character_profiles[self._char] = name
+            extra = f" Utilisé désormais pour {self._char}."
+        self._after_profile_change(f"[Profil] « {name} » actif.{extra}")
 
     def _new_profile(self):
         if self._busy():
@@ -1746,6 +1780,8 @@ class App(ctk.CTk):
         except ValueError as e:
             self._log(f"[Profil] {e}.", "ERROR")
             return
+        if self._char and self.cfg.auto_profile:
+            self.cfg.character_profiles[self._char] = self.cfg.profile
         self._after_profile_change(f"[Profil] « {self.cfg.profile} » créé (copie) et actif : recalibre "
                                    "ce qui change dans cet HDV.")
 
@@ -1993,9 +2029,10 @@ class App(ctk.CTk):
         for name in ("auto_paste", "click_field", "auto_validate", "require_focus", "sound", "toast",
                      "relist_auto", "relist_confirm_enter", "relist_summary", "fast_digits", "auto_recalibrate",
                      "banner", "verify_before_enter", "smart_f1", "always_on_top", "check_updates", "notify",
-                     "animations", "tray", "tray_minimize"):
+                     "animations", "tray", "tray_minimize", "auto_profile", "hud"):
             setattr(c, name, bool(v[name].get()))
         ANIMATE["on"] = c.animations
+        self._apply_hud()
         self._apply_tray()
         self._apply_topmost()
         self._refresh_home()
@@ -2075,6 +2112,7 @@ class App(ctk.CTk):
             core.HOTKEYS.add(hk["show_zones"], lambda: self.ui_events.put(("zones", None)))
             core.HOTKEYS.add(hk["pause"], lambda: self.ui_events.put(("pause", None)))
             core.HOTKEYS.add(hk["cheatsheet"], lambda: self.ui_events.put(("cheatsheet", None)))
+            core.HOTKEYS.add(hk["hud"], lambda: self.ui_events.put(("hud", None)))
         except Exception as e:
             self._log(f"[Hotkeys] Erreur d'enregistrement: {e}", "ERROR")
             return
@@ -2094,6 +2132,12 @@ class App(ctk.CTk):
                     why = "pause active" if self.engine.paused else f"appuyé il y a {waited:.0f} s, pendant une autre action"
                     self.ui_events.put(("log", (f"[Hotkeys] Raccourci ignoré ({why}).", "WARN")))
                     continue
+                try:                     # autre personnage au premier plan : son profil d'abord
+                    msg = self._auto_profile()
+                    if msg:
+                        self.ui_events.put(("profile_auto", msg))
+                except Exception:
+                    pass
             try:
                 if name == "sell":
                     res = self.engine.sell(optimize=True) if arg else self.engine.smart()
@@ -2195,6 +2239,10 @@ class App(ctk.CTk):
             self._loop_end(arg)
         elif name == "cheatsheet":
             self._toggle_cheatsheet()
+        elif name == "hud":
+            self._toggle_hud()
+        elif name == "profile_auto":
+            self._on_auto_profile(arg)
         elif name == "anchor":
             self._log(f"[Repère] {arg}", "CAL" if "recalées" in arg else "WARN")
             if "introuvable" in arg:
@@ -3350,6 +3398,7 @@ class App(ctk.CTk):
             pass
 
     def _refresh_compact(self):
+        self._refresh_hud()
         w = self._compact
         if w is None or not w.winfo_exists():
             return
@@ -3545,6 +3594,206 @@ class App(ctk.CTk):
             self._save_cfg()
         self._hide_drift()
 
+    # ---- profil automatique selon le personnage
+    def _auto_profile(self) -> Optional[str]:
+        """Le jeu au premier plan montre un personnage qui a un autre profil : on le prend.
+        Appelé par la surveillance (thread UI) et avant chaque touche de jeu (thread de travail).
+        Retourne le message à afficher, ou None."""
+        c = self.cfg
+        info = core.foreground_info()
+        if not info or not core.is_game_window(*info, c):
+            return None
+        char = core.character_from_title(info[0])
+        if not char:
+            return None
+        self._char = char
+        if not c.auto_profile:
+            return None
+        with self._profile_lock:
+            target = core.profile_for_character(char, c.character_profiles, c.profile_names())
+            if not target or target == c.profile:
+                return None
+            c.switch_profile(target)
+            c.character_profiles[char] = target
+            c.save()
+        return f"[Profil] « {target} » activé pour {char}."
+
+    def _on_auto_profile(self, msg: str):
+        self.profile_menu.configure(values=self.cfg.profile_names())
+        self.profile_var.set(self.cfg.profile)
+        self.hdv_state = None
+        self._log(msg, "CAL")
+        self._refresh_status()
+        self._refresh_character()
+        if self.cfg.toast:
+            self._toast(f"Profil « {self.cfg.profile} »", self._char or "", P["cyan"], ms=1500)
+
+    def _refresh_character(self):
+        lbl = getattr(self, "char_lbl", None)
+        if lbl is None:
+            return
+        c, char = self.cfg, self._char
+        if not char:
+            return
+        linked = core.profile_for_character(char, c.character_profiles, c.profile_names())
+        if linked:
+            lbl.configure(text=f"Personnage : {char}  →  profil « {linked} »", text_color=P["text"])
+        else:
+            lbl.configure(text=f"Personnage : {char}  —  aucun profil associé", text_color=MUTED)
+        if linked != c.profile:
+            self.char_btn.configure(text=f"Associer à « {c.profile} »")
+            if not self.char_btn.winfo_ismapped():
+                self.char_btn.pack(side="right")
+        else:
+            self.char_btn.pack_forget()
+
+    def _link_character(self):
+        if self._char:
+            self.cfg.character_profiles[self._char] = self.cfg.profile
+            self._save_cfg()
+            self._log(f"[Profil] « {self.cfg.profile} » associé à {self._char}.", "CAL")
+            self._refresh_character()
+
+    def _watch_game(self):
+        """Toutes les 0,7 s : personnage au premier plan (profil auto) et visibilité du HUD."""
+        try:
+            info = core.foreground_info()
+            self._game_fg = bool(info and core.is_game_window(*info, self.cfg))
+            if self._game_fg:
+                before = self._char
+                if not self.engine._lock.locked() and self._loop is None:
+                    msg = self._auto_profile()
+                    if msg:
+                        self._on_auto_profile(msg)
+                else:
+                    self._char = core.character_from_title(info[0]) or self._char
+                if self._char != before:
+                    self._refresh_character()
+            self._hud_visibility()
+        except Exception:
+            pass
+        self.after(700, self._watch_game)
+
+    # ---- HUD discret par-dessus le jeu (les clics le traversent)
+    def _toggle_hud(self):
+        self.cfg.hud = not self.cfg.hud
+        self.v["hud"].set(self.cfg.hud)
+        self._apply_hud()
+        self._save_cfg()
+
+    def _apply_hud(self):
+        w = self._hud
+        if self.cfg.hud:
+            if w is None or not w.winfo_exists():
+                self._hud_create()
+            self._refresh_hud()
+            self._hud_visibility()
+        elif w is not None:
+            if w.winfo_exists():
+                w.destroy()
+            self._hud = None
+            self._hud_moving = False
+
+    def _hud_create(self):
+        t, card = rounded_popup(self, radius=10, alpha=0.9)
+        self._hud, self._hud_card = t, card
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(padx=(10, 14), pady=5)
+        ctk.CTkLabel(row, text="", image=self._logo_img_small()).pack(side="left", padx=(0, 8))
+        self._hud_state = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=12, weight="bold"))
+        self._hud_state.pack(side="left")
+        self._hud_head = ctk.CTkLabel(row, text="", text_color=P["text"], font=ctk.CTkFont(size=12, weight="bold"))
+        self._hud_head.pack(side="left", padx=(10, 0))
+        self._hud_sub = ctk.CTkLabel(row, text="", font=ctk.CTkFont(size=12))
+        self._hud_sub.pack(side="left", padx=(8, 0))
+        pos = self.cfg.hud_pos
+        try:
+            ok = bool(pos) and geometry_on_screen(f"300x40+{pos[0]}+{pos[1]}", core.screen_bounds())
+        except Exception:
+            ok = False
+        if ok:
+            x, y = pos
+        else:                                   # en haut, au centre de l'écran principal
+            x, y = self.winfo_screenwidth() // 2 - 170, 8
+        t.geometry(f"+{int(x)}+{int(y)}")
+        make_draggable(t, self._hud_dropped)
+        t.after(150, lambda: t.winfo_exists() and style.set_click_through(t, not self._hud_moving))
+        t.withdraw()
+
+    def _logo_img_small(self):
+        if getattr(self, "_logo16", None) is None:
+            img = dofus_logo.logo_image(32)
+            self._logo16 = ctk.CTkImage(light_image=img, dark_image=img, size=(16, 16))
+        return self._logo16
+
+    def _refresh_hud(self):
+        w = self._hud
+        if w is None or not w.winfo_exists():
+            return
+        state = ("pause" if self.engine.paused else "loop" if self._loop is not None
+                 else "calib" if not self._calibrated() else "ok")
+        color, text = TRAY_STATES[state]
+        chip = {"ok": "green", "pause": "orange", "loop": "grey", "calib": "red"}[state]
+        self._hud_state.configure(text=f"● {text}", text_color=P["cyan"] if state == "loop" else style.CHIP[chip][1])
+        lp = self._loop
+        if self._hud_moving:
+            self._hud_head.configure(text="Glisse-moi où tu veux")
+            self._hud_sub.configure(text="(lâche pour terminer)", text_color=MUTED)
+        elif lp is not None:
+            self._hud_head.configure(text=self.LOOP_NAMES.get(lp["kind"], ""))
+            self._hud_sub.configure(text=lp["text"], text_color=P["text"])
+        else:
+            head, sub, col = self.last_action
+            self._hud_head.configure(text="" if head.startswith("En attente") else head)
+            self._hud_sub.configure(text=sub, text_color=col)
+
+    def _hud_visibility(self):
+        w = self._hud
+        if w is None or not w.winfo_exists():
+            return
+        want = self.cfg.hud and (self._game_fg or self._hud_moving)
+        shown = w.winfo_ismapped()
+        if want and not shown:
+            w.deiconify()
+            w.attributes("-topmost", True)
+            w.after(50, lambda: w.winfo_exists() and style.set_click_through(w, not self._hud_moving))
+        elif not want and shown:
+            w.withdraw()
+
+    def _hud_move(self):
+        """« Déplacer » : le HUD devient cliquable le temps de le poser ailleurs."""
+        if not self.cfg.hud:
+            self._toggle_hud()
+        w = self._hud
+        if w is None or not w.winfo_exists():
+            return
+        self._hud_moving = True
+        self._hud_card.configure(border_color=P["accent"], border_width=2)
+        style.set_click_through(w, False)
+        self._refresh_hud()
+        self._hud_visibility()
+        self.hud_move_btn.configure(text="Glisse le HUD…", state="disabled")
+        self._hud_move_after = self.after(30000, self._hud_move_end)    # oublié : fin au bout de 30 s
+
+    def _hud_dropped(self, x: int, y: int):
+        self.cfg.hud_pos = [x, y]
+        self._save_cfg()
+        if self._hud_moving:
+            self._hud_move_end()
+
+    def _hud_move_end(self):
+        if getattr(self, "_hud_move_after", None):
+            self.after_cancel(self._hud_move_after)
+            self._hud_move_after = None
+        self._hud_moving = False
+        w = self._hud
+        if w is not None and w.winfo_exists():
+            self._hud_card.configure(border_color=P["border"], border_width=1)
+            style.set_click_through(w, True)
+        self.hud_move_btn.configure(text="Déplacer", state="normal")
+        self._refresh_hud()
+        self._hud_visibility()
+
     # ---- zone de notification
     def _tray_update(self):
         if self.engine.paused:
@@ -3584,6 +3833,8 @@ class App(ctk.CTk):
             self._toggle_pause()
         elif action == "cheatsheet":
             self._toggle_cheatsheet()
+        elif action == "hud":
+            self._toggle_hud()
         elif action == "quit":
             self._on_close()
 
