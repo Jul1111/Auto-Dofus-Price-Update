@@ -361,6 +361,7 @@ class Config:
     hud: bool = True                  # HUD par-dessus le jeu (les clics le traversent) : résultat des actions
     hud_pos: Optional[List[int]] = None        # position du HUD (choisie avec « Déplacer »)
     hud_size: str = "normal"          # HUD : "small" | "normal" | "large"
+    hud_shape: str = "card"           # HUD : "card" (carte) | "pill" (pilule) | "minimal" (texte + liseré)
     hud_opacity: float = 0.9          # HUD : opacité (0.5 .. 1)
     hud_content: str = "both"         # HUD : "state" (état seul) | "action" (dernière action) | "both"
     hud_history: bool = False         # HUD : les 3 derniers prix traités, sous la ligne principale
@@ -444,6 +445,8 @@ class Config:
             cfg.hud_content = "both"
         if cfg.ambience not in ("night", "amber", "forest", "ocean"):
             cfg.ambience = "night"
+        if cfg.hud_shape not in ("card", "pill", "minimal"):
+            cfg.hud_shape = "card"
         if not isinstance(cfg.profile_colors, dict):
             cfg.profile_colors = {}
         cfg.profile_colors = {str(k): v for k, v in cfg.profile_colors.items() if isinstance(v, str)}

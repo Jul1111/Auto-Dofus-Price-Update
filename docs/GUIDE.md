@@ -113,6 +113,8 @@ Dans la fenêtre de l'outil : `Ctrl+1` à `Ctrl+6` pour les onglets (fonctionne 
 
 **Par-dessus le jeu.**
 - **HUD** (`Ctrl+Alt+U`) : une ligne avec l'état, la dernière action ou la progression. Après chaque action, son bord s'allume de la couleur du résultat. Les clics le traversent et il n'apparaît que quand Dofus est au premier plan.
+  - **Forme** : **Carte** (par défaut), **Pilule** (plus arrondie) ou **Minimal** (le texte seul, avec un fin liseré de couleur dessous). En multi-compte, le bord prend la couleur du personnage actif.
+  - Le nouveau prix défile jusqu'à sa valeur, le HUD change de taille en douceur et son rond d'état respire pendant un parcours (option **Animations**).
   - Pendant Tout vendre ou Toute la liste, il rappelle la touche pour arrêter (`Ctrl+Alt+P`).
   - Si la mise en vente automatique est coupée, il rappelle « Entrée pour valider » une fois le prix saisi, ou « Ctrl+V puis Entrée » si le prix est seulement copié.
   - Dans l'onglet **Options** : **Déplacer**, taille (petit, normal, grand), opacité, et contenu (état, dernière action, ou les deux).
