@@ -3056,7 +3056,9 @@ class PriceEngine:
         y = y0 - offset
         if offset > 0.35 * step:
             y += step
-        y_max = y0 + (cfg.relist_rows - 1) * step + 0.3 * step
+        # En bas de la liste, le jeu laisse la dernière ligne ~0,32 ligne plus bas, entièrement
+        # visible (vidéo du joueur) : avec 0,3, elle était oubliée.
+        y_max = y0 + (cfg.relist_rows - 1) * step + 0.4 * step
         rows = []
         while y <= y_max:
             rows.append((int(y), int(round((y - y0 + shift) / step))))
@@ -3161,6 +3163,8 @@ class PriceEngine:
             seen = g_s - 1
             start_note = ", départ ligne sous la souris"
         last_click = None
+        page_last_y = None           # y de la dernière ligne traitée sur la page affichée
+        swept = False                 # fin de liste : lignes sous la dernière traitée revues
         ok_rows: List[np.ndarray] = []  # images de lignes déjà au bon prix (même objet, même prix)
         bad: List[str] = []           # lignes douteuses laissées telles quelles
         fails = 0                     # lignes douteuses consécutives
@@ -3222,11 +3226,13 @@ class PriceEngine:
                             same += 1
                             skipped += 1
                             seen = max(seen, g)
+                            page_last_y = y
                             continue
                         t0 = time.perf_counter()
                         before = grab_screen(mine_box) if mine_box else None
                         click_at((x0, y))
                         last_click = (x0, y)
+                        page_last_y = y
                         wait_change(mine_box, before, cfg.relist_delay)
                         self._tick("clic", t0)
                         res = self._relist(auto=True)
@@ -3318,8 +3324,24 @@ class PriceEngine:
                                     else "la barre de défilement n'est pas en bas")
                             stop = (f"défilement bloqué : la liste ne descend plus, {more}. Relance "
                                     "Ctrl+F3 avec la souris sur la dernière ligne traitée")
-                        break
+                            break
+                        # Vraie fin : la liste ne bouge plus, les positions à l'écran sont sûres.
+                        # Lignes SOUS la dernière traitée = pas encore traitées, quel que soit
+                        # leur numéro (vidéo du joueur : la ligne du bas manquait aux lignes
+                        # repérées sur la dernière page, « fin de la liste » sans la traiter).
+                        if swept:
+                            break
+                        swept = True
+                        ref = page_last_y if page_last_y is not None else -10 ** 9
+                        below = [g for y, g in self._page_rows(shift, base) if y > ref + step // 2]
+                        if not below:
+                            break
+                        log_line(f"[MAJ TOUT] Fin de la liste : {len(below)} ligne(s) sous la dernière "
+                                 "traitée, revue(s).")
+                        seen = min(below) - 1
+                        continue
                 shift += moved
+                page_last_y = None
                 seen -= 1
                 pages += 1
         except StopIteration:
