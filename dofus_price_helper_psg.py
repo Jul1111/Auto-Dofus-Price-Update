@@ -22,7 +22,7 @@ Raccourcis par défaut (modifiables dans la config, clé HOTKEYS) :
   Ctrl+Alt+F9 (x2)    mes ventes : 1re ligne puis 2e ligne de la liste (pour Ctrl+F3)
   Ctrl+Alt+F10 (x2)   repère : titre « Hôtel de vente » (les zones suivent l'HDV déplacé)
   Ctrl+Alt+V          afficher les zones calibrées
-  Ctrl+Alt+P          pause / reprise des raccourcis
+  Ctrl+Alt+P          arrêter le parcours en cours (Tout vendre, Toute la liste)
 """
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ HOTKEY_LABELS = {
     "optimize": "Meilleur lot (prix par objet le plus haut)",
     "relist": "Remettre la vente sélectionnée sous le moins cher",
     "relist_all": "Toute la liste (interrupteur dans « Mes ventes »)",
-    "pause": "Pause / reprise ; pendant un parcours, l'arrête (sans pause)",
+    "pause": "Arrêter le parcours en cours (Tout vendre, Toute la liste)",
     "show_zones": "Afficher les zones calibrées",
     "cheatsheet": "Aide-mémoire des touches par-dessus le jeu",
     "hud": "HUD discret par-dessus le jeu (afficher / cacher)",
@@ -444,7 +444,7 @@ def tab_index_for_key(keycode: int, keysym: str) -> Optional[int]:
 
 
 # ---------------------------------------------------------------- zone de notification (près de l'horloge)
-TRAY_STATES = {"ok": ("#3ecf8e", "Actif"), "pause": ("#f0a03c", "En pause"),
+TRAY_STATES = {"ok": ("#3ecf8e", "Actif"),
                "loop": ("#5ccfe6", "Parcours en cours"), "calib": ("#f0616d", "Calibration à faire")}
 
 
@@ -500,7 +500,6 @@ class Tray:
             item("Ouvrir l'outil", lambda: put(("tray", "open")), default=True),
             item("■ Arrêter le parcours", lambda: put(("tray", "stop")),
                  visible=lambda _i: self.app._loop is not None),
-            item(lambda _i: "▶ Reprendre" if self.app.engine.paused else "⏸ Pause", lambda: put(("tray", "pause"))),
             item("Aide-mémoire en jeu", lambda: put(("tray", "cheatsheet"))),
             item("HUD discret", lambda: put(("tray", "hud")), checked=lambda _i: bool(self.app.cfg.hud)),
             pystray.Menu.SEPARATOR,
@@ -594,8 +593,8 @@ WHATS_NEW = {
         "le prix saisi (ou « Ctrl+V puis Entrée » s'il est seulement copié).",
     ],
     "1.11.0": [
-        "Pendant Tout vendre ou Toute la liste, {pause} arrête le parcours sans mettre l'outil en pause : "
-        "les touches restent actives. Hors parcours, elle fait toujours pause / reprise.",
+        "Plus de pause : {pause} arrête le parcours en cours (Tout vendre, Toute la liste), comme le bouton "
+        "« Arrêter », et les touches restent actives. Le bouton Pause a disparu.",
         "HUD : option « 3 derniers prix sous la ligne » (onglet Options) pour vérifier les derniers lots "
         "d'un coup d'œil, aussi pendant un parcours.",
         "Fin de Toute la liste : le résumé commence par un récap (modifiés, à revoir, déjà au bon prix, "
@@ -1055,7 +1054,7 @@ class App(ctk.CTk):
         chips.pack(side="left")
         self.chips = {}
         for key, tip, action in (
-                ("state", "Raccourcis actifs ou en pause. Clic = pause / reprise.", self._toggle_pause),
+                ("state", "Raccourcis actifs. Pendant un parcours : clic = l'arrêter.", self._stop_loop),
                 ("profile", "Profil de calibration actif (un par HDV ou personnage). Clic = onglet Calibration.",
                  lambda: self.tabs.set("Calibration")),
                 ("calib", "Zones de base : tableau, quantité, champ « Prix du lot ». Clic = onglet Calibration.",
@@ -1097,8 +1096,6 @@ class App(ctk.CTk):
                   ).pack(side="right", padx=4, pady=6)
         self._tip(ctk.CTkCheckBox(head, text="📌", variable=self.v["always_on_top"], width=44),
                   "Fenêtre de l'outil toujours au-dessus du jeu.").pack(side="right", padx=(8, 14))
-        self.pause_btn = ctk.CTkButton(head, text="⏸ Pause", width=90, command=self._toggle_pause)
-        self.pause_btn.pack(side="right", padx=4)
         self.update_btn = ctk.CTkButton(head, text="", width=150, fg_color=style.CHIP["green"][0],
                                         hover_color=P["green_hover"], text_color=style.CHIP["green"][1])   # affiché si une version plus récente existe
 
@@ -1746,7 +1743,7 @@ class App(ctk.CTk):
         self.hud_op_lbl.pack(side="left", padx=6)
         tr = self._switch(b, "Icône dans la zone de notification (près de l'horloge)", "tray",
                           tip="Clic = ouvrir l'outil. Clic droit : pause, HUD, aide-mémoire, quitter. "
-                              "La pastille montre l'état : vert actif, orange pause, bleu parcours en cours, "
+                              "La pastille montre l'état : vert actif, bleu parcours en cours, "
                               "rouge calibration à faire.")
         tm = self._switch(b, "… réduire la fenêtre l'y cache (plus rien dans la barre des tâches)",
                           "tray_minimize", tip="Le bouton « réduire » de la fenêtre cache l'outil près de "
@@ -2326,12 +2323,6 @@ class App(ctk.CTk):
 
         def game_job(job):
             def cb():
-                if self.engine.paused:
-                    if time.time() - last_warn[0] > 5:   # sinon on croit les raccourcis cassés
-                        last_warn[0] = time.time()
-                        self.ui_events.put(("log", (f"[Hotkeys] Raccourci ignoré : l'outil est en pause "
-                                                    f"({hk['pause'].upper()} pour reprendre).", "WARN")))
-                    return
                 if not core.game_has_focus(self.cfg):
                     if time.time() - last_warn[0] > 5:  # diagnostic, max 1 fois / 5 s
                         last_warn[0] = time.time()
@@ -2379,12 +2370,12 @@ class App(ctk.CTk):
             name, arg, *pressed = self.jobs.get()
             if pressed:
                 # Touche de jeu appuyée PENDANT une action longue (F2, Ctrl+F3) : elle attendait
-                # dans la file. L'exécuter après coup (ou après une pause) agirait sur un écran
+                # dans la file. L'exécuter après coup agirait sur un écran
                 # qui a changé depuis -> ignorée.
                 waited = time.time() - pressed[0]
-                if self.engine.paused or waited > STALE_JOB_S:
-                    why = "pause active" if self.engine.paused else f"appuyé il y a {waited:.0f} s, pendant une autre action"
-                    self.ui_events.put(("log", (f"[Hotkeys] Raccourci ignoré ({why}).", "WARN")))
+                if waited > STALE_JOB_S:
+                    self.ui_events.put(("log", (f"[Hotkeys] Raccourci ignoré (appuyé il y a {waited:.0f} s, "
+                                                "pendant une autre action).", "WARN")))
                     continue
                 try:                     # autre personnage au premier plan : son profil d'abord
                     msg = self._auto_profile()
@@ -3305,17 +3296,13 @@ class App(ctk.CTk):
 
     # ---------------------------------------------------------------- misc
     def _on_pause_key(self):
-        """Touche pause : pendant un parcours (Tout vendre, Toute la liste), l'arrête seulement,
-        comme « Arrêter » ; l'outil reste actif. Sinon : pause / reprise."""
-        if self._loop is not None and not self.engine.paused:
+        """Touche d'arrêt (Ctrl+Alt+P) : arrête le parcours en cours (Tout vendre, Toute la liste),
+        comme « Arrêter ». Il n'y a plus de pause : hors parcours, elle ne fait rien."""
+        if self._loop is not None:
             self._stop_loop()
         else:
-            self._toggle_pause()
-
-    def _toggle_pause(self):
-        self.engine.paused = not self.engine.paused
-        self._log("[Hotkeys] " + ("En pause." if self.engine.paused else "Actifs."), "WARN")
-        self._refresh_status()
+            self._hud_message("Aucun parcours en cours", f"{self.cfg.hotkeys['pause'].upper()} arrête "
+                              "Tout vendre / Toute la liste", MUTED, 1800)
 
     CHIP_GREEN, CHIP_ORANGE, CHIP_RED, CHIP_GREY = "green", "orange", "red", "grey"   # dofus_style.CHIP
 
@@ -3329,7 +3316,6 @@ class App(ctk.CTk):
     def _chip_values(self) -> dict:
         """Texte et couleur de chaque pastille de la barre d'état."""
         c = self.cfg
-        paused = self.engine.paused
         calib = self._calibrated()
         if self.hdv_state == "ok":
             hdv = ("HDV vu ✓", self.CHIP_GREEN)
@@ -3340,7 +3326,8 @@ class App(ctk.CTk):
         if hdv[0] != "HDV introuvable" and not c.anchor_region:
             hdv = (hdv[0] + " · sans repère", hdv[1])
         return {
-            "state": ("⏸ Pause" if paused else "● Actif", self.CHIP_ORANGE if paused else self.CHIP_GREEN),
+            "state": ("■ Arrêter le parcours", self.CHIP_ORANGE) if self._loop is not None
+                     else ("● Actif", self.CHIP_GREEN),
             "profile": (f"Profil : {c.profile}", self.CHIP_GREY),
             "calib": ("Calibration OK" if calib else "Calibration à faire",
                       self.CHIP_GREEN if calib else self.CHIP_RED),
@@ -3349,14 +3336,12 @@ class App(ctk.CTk):
 
     def _refresh_status(self):
         c = self.cfg
-        paused = self.engine.paused
         for key, (text, color) in self._chip_values().items():
             bg, fg = style.CHIP[color]
             if key == "profile":                     # couleur du profil
                 bg, fg = self._profile_color(), style.ON_PROFILE
             self.chips[key].configure(text=text, fg_color=bg, text_color=fg)
         self._refresh_hud()
-        self.pause_btn.configure(text="▶ Reprendre" if paused else "⏸ Pause")
         try:
             n = len(core.digit_reader().known())
             self.digits_var.set(f"Chiffres appris {n}/10" + ("  ✓" if n == 10 else ""))
@@ -3453,7 +3438,7 @@ class App(ctk.CTk):
         self.loop_stop.configure(text="■ Arrêter", state="normal")
         self._loop_show()
         self._tray_update()
-        self._refresh_hud()
+        self._refresh_status()               # pastille d'état : « ■ Arrêter le parcours »
 
     def _loop_progress(self, d: dict):
         if self._loop is None or d.get("finished"):
@@ -3515,7 +3500,7 @@ class App(ctk.CTk):
         lp, self._loop = self._loop, None
         self.loop_pb.stop()
         self.loop_bar.pack_forget()
-        self._refresh_hud()
+        self._refresh_status()
         self._tray_update()
         if lp is not None and res is not None and res.level == "ok":
             core.beep("done", self.cfg)
@@ -3543,7 +3528,7 @@ class App(ctk.CTk):
     CHEAT_KEYS = ("sell", "sell_all", "optimize", "relist", "relist_all", "pause", "cheatsheet")
     CHEAT_TEXT = {"sell": "Vendre / mettre à jour", "sell_all": "Tout vendre", "optimize": "Meilleur lot",
                   "relist": "Remettre sous le moins cher", "relist_all": "Toute la liste",
-                  "pause": "Pause · arrête un parcours", "cheatsheet": "Fermer cet aide-mémoire"}
+                  "pause": "Arrêter le parcours", "cheatsheet": "Fermer cet aide-mémoire"}
 
     def _toggle_cheatsheet(self, ms: int = 10000):
         w = self._cheat
@@ -3941,10 +3926,9 @@ class App(ctk.CTk):
         if w is None or not w.winfo_exists():
             return
         c = self.cfg
-        state = ("pause" if self.engine.paused else "loop" if self._loop is not None
-                 else "calib" if not self._calibrated() else "ok")
+        state = "loop" if self._loop is not None else "calib" if not self._calibrated() else "ok"
         color, text = TRAY_STATES[state]
-        chip = {"ok": "green", "pause": "orange", "loop": "grey", "calib": "red"}[state]
+        chip = {"ok": "green", "loop": "grey", "calib": "red"}[state]
         if len(c.profile_names()) > 1:          # multi-compte : profil actif dans sa couleur
             self._hud_profile.configure(text=f" {c.profile} ", fg_color=self._profile_color())
             if not self._hud_profile.winfo_ismapped():
@@ -4378,9 +4362,7 @@ class App(ctk.CTk):
 
     # ---- zone de notification
     def _tray_update(self):
-        if self.engine.paused:
-            state = "pause"
-        elif self._loop is not None:
+        if self._loop is not None:
             state = "loop"
         elif not self._calibrated():
             state = "calib"
@@ -4422,8 +4404,6 @@ class App(ctk.CTk):
     def _on_tray(self, action: str):
         if action == "open":
             self._show_main()
-        elif action == "pause":
-            self._toggle_pause()
         elif action == "cheatsheet":
             self._toggle_cheatsheet()
         elif action == "stop":

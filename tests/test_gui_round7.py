@@ -43,16 +43,15 @@ def test_runs_keep_summary_and_read_old_files(tmp_path):
     assert gui.load_runs(path)[0]["summary"] == {}
 
 
-def test_pause_key_stops_loop_without_pausing():
+def test_stop_key_only_stops_the_loop():
     calls = []
     fake = type("A", (), {})()
-    fake.engine = type("E", (), {"paused": False})()
+    fake.cfg = core.Config()
     fake._stop_loop = lambda: calls.append("stop")
-    fake._toggle_pause = lambda: calls.append("pause")
+    fake._hud_message = lambda *a, **k: calls.append("message")
     fake._loop = {"kind": "relist_all"}
-    gui.App._on_pause_key(fake)                 # parcours en cours : arrêt seulement
+    gui.App._on_pause_key(fake)                 # parcours en cours : arrêt
     fake._loop = None
-    gui.App._on_pause_key(fake)                 # sinon : pause / reprise
-    fake._loop, fake.engine.paused = {"kind": "sell_all"}, True
-    gui.App._on_pause_key(fake)                 # déjà en pause : la touche reprend
-    assert calls == ["stop", "pause", "pause"]
+    gui.App._on_pause_key(fake)                 # rien en cours : simple message, pas de pause
+    assert calls == ["stop", "message"]
+    assert not hasattr(gui.App, "_toggle_pause") and "pause" not in gui.TRAY_STATES

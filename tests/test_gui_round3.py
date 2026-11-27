@@ -145,7 +145,7 @@ def test_tray_icon_and_logo_images(tmp_path):
     ico = tmp_path / "l.ico"
     dofus_logo.write_ico(ico)
     assert ico.read_bytes()[:4] == b"\x00\x00\x01\x00"
-    assert set(gui.TRAY_STATES) == {"ok", "pause", "loop", "calib"}
+    assert set(gui.TRAY_STATES) == {"ok", "loop", "calib"}
 
 
 def test_relaunch_command(monkeypatch):
