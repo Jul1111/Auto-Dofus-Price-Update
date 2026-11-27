@@ -606,6 +606,10 @@ WHATS_NEW = {
         "pour qu'il s'estompe sans action.",
         "Dans le jeu, maintiens Alt : le HUD devient cliquable (Arrêter le parcours, Copier le dernier prix, "
         "Ouvrir l'outil) ; Alt + glisser le déplace.",
+        "Toute la liste va jusqu'au bout : la barre de défilement de l'HDV sert de repère, et le défilement "
+        "est relancé quand le jeu ignore la molette.",
+        "Nouvelle option (Mes ventes) : « Modifier même si le prix est suspect », pour suivre un marché qui "
+        "chute. Le prix est relu une 2e fois avant ; une lecture peu fiable reste bloquée.",
     ],
 }
 
