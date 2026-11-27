@@ -39,7 +39,7 @@
 - **Vos ventes reconnues** : l'outil ne passe jamais sous votre propre prix, même d'une session à l'autre.
 - **Calibration en un clic** : l'HDV est détecté à n'importe quelle résolution et échelle d'interface.
 - **Rapide** : environ 5 ms par lecture grâce à un modèle des chiffres du jeu, appris sur votre écran.
-- **Discret** : mode compact, HUD par-dessus le jeu, profils par personnage pour le multi-compte.
+- **Discret** : un HUD par-dessus le jeu montre le résultat de chaque action (les clics le traversent), et les profils suivent le personnage en multi-compte.
 
 ## Installation
 

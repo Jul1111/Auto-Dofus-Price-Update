@@ -23,7 +23,7 @@ def test_profile_for_character():
 
 def test_config_fields_and_cleanup(tmp_path):
     cfg = core.Config()
-    assert cfg.auto_profile is True and cfg.character_profiles == {} and cfg.hud is False
+    assert cfg.auto_profile is True and cfg.character_profiles == {} and cfg.hud is True
     assert cfg.hotkeys["hud"] == "ctrl+alt+u"
     cfg.new_profile("Mule")
     cfg.character_profiles = {"Perso": "Mule", "Autre": "Principal"}
@@ -52,3 +52,18 @@ def test_hud_hotkey_is_free():
     others = {k: v for k, v in core.DEFAULT_HOTKEYS.items() if k != "hud"}
     assert gui.hotkey_problem("hud", "ctrl+alt+u", others) is None
     assert "hud" in gui.HOTKEY_LABELS
+
+
+def test_hud_replaces_popups_and_compact(tmp_path):
+    """v6 : plus de popup / bandeau de résultat ni de mode compact ; le HUD est activé une fois
+    pour les anciennes configs (sinon plus aucun retour en jeu), puis le choix est respecté."""
+    import json
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"CONFIG_VERSION": 5, "HUD": False, "TOAST": True, "BANNER": True,
+                                "COMPACT_GEOMETRY": "340x170+5+5"}), encoding="utf-8")
+    cfg = core.Config.load(path)
+    assert cfg.hud is True
+    assert not any(hasattr(cfg, f) for f in ("toast", "banner", "compact_geometry"))
+    cfg.hud = False
+    cfg.save(path)
+    assert core.Config.load(path).hud is False          # coupé ensuite : reste coupé

@@ -189,7 +189,7 @@ DIGITS_PATH = BASE_DIR / "digit_templates.npz"   # modèles de chiffres appris (
 ANCHOR_PATH = BASE_DIR / "hdv_anchor.png"        # image du titre « Hôtel de vente » (repère)
 HISTORY_HEADER = ["ts", "datetime", "action", "lot", "selected_qty", "read_price", "confidence",
                   "new_price", "status", "mode", "value", "rounding", "item"]
-CONFIG_VERSION = 5
+CONFIG_VERSION = 6
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -312,7 +312,6 @@ class Config:
     auto_validate: bool = False       # mettre en vente automatiquement après collage
     verify_before_enter: bool = True  # relire « Prix du lot » avant de valider : jamais un mauvais prix
     smart_f1: bool = True             # F1 : vend (objet de l'inventaire) OU met à jour (une de tes ventes)
-    banner: bool = True               # bandeau fixe au-dessus de l'HDV (sinon popup près de la souris)
     always_on_top: bool = True        # fenêtre de l'outil toujours au-dessus du jeu
     check_updates: bool = True        # au démarrage : nouvelle version publiée sur GitHub ?
     validate_method: str = "enter"    # "enter" (rapide, souris immobile) | "click" (bouton calibré)
@@ -325,13 +324,11 @@ class Config:
     window_title: str = " - Release"  # titre : « Perso - Classe - version - Release »
     require_focus: bool = True
     sound: bool = True
-    toast: bool = True
     calib_countdown: int = 3          # secondes avant calibration via bouton UI
     ui_scale: float = 1.0             # taille du texte / des éléments de l'interface (1.0 = 100 %)
     ui_style: str = "classic"         # "classic" (opaque) | "glass" (flou du jeu derrière, Windows)
     glass_opacity: float = 0.6        # teinte du verre : 0.3 (très transparent) .. 0.95 (presque opaque)
     window_geometry: str = ""         # taille et position de la fenêtre (mémorisées à la fermeture)
-    compact_geometry: str = ""        # position du mode compact
     notify: bool = True               # notification Windows à la fin d'un long F2 / Ctrl+F3 (outil en arrière-plan)
     first_steps: List[str] = field(default_factory=list)   # premiers pas faits : "read", "sell"
     sound_volume: float = 0.5         # volume des sons (0..1)
@@ -344,7 +341,7 @@ class Config:
     cheatsheet_pos: Optional[List[int]] = None # aide-mémoire : position choisie en le déplaçant
     auto_profile: bool = True         # changer de profil tout seul selon le personnage (titre du jeu)
     character_profiles: Dict = field(default_factory=dict)   # personnage -> profil de calibration
-    hud: bool = False                 # HUD discret par-dessus le jeu (les clics le traversent)
+    hud: bool = True                  # HUD par-dessus le jeu (les clics le traversent) : résultat des actions
     hud_pos: Optional[List[int]] = None        # position du HUD (choisie avec « Déplacer »)
 
     hotkeys: Dict = field(default_factory=lambda: _copy(DEFAULT_HOTKEYS))
@@ -397,6 +394,8 @@ class Config:
             cfg.input_method, cfg.clear_method = "paste", "backspace"
         if int(data.get("CONFIG_VERSION", 1)) < 5 and cfg.relist_max == 120:
             cfg.relist_max = cls.relist_max  # v5 : 120 était trop bas pour une liste de 100+ lots
+        if int(data.get("CONFIG_VERSION", 1)) < 6:
+            cfg.hud = True   # v6 : le HUD remplace le popup / bandeau de résultat et le mode compact
         if not isinstance(cfg.character_profiles, dict):
             cfg.character_profiles = {}
         cfg.character_profiles = {str(k): str(v) for k, v in cfg.character_profiles.items()
