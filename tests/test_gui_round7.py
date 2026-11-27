@@ -41,3 +41,18 @@ def test_runs_keep_summary_and_read_old_files(tmp_path):
     assert back[0]["changes"][0].new == 450
     path.write_text('[{"time": 2, "changes": []}]', encoding="utf-8")        # avant le récap
     assert gui.load_runs(path)[0]["summary"] == {}
+
+
+def test_pause_key_stops_loop_without_pausing():
+    calls = []
+    fake = type("A", (), {})()
+    fake.engine = type("E", (), {"paused": False})()
+    fake._stop_loop = lambda: calls.append("stop")
+    fake._toggle_pause = lambda: calls.append("pause")
+    fake._loop = {"kind": "relist_all"}
+    gui.App._on_pause_key(fake)                 # parcours en cours : arrêt seulement
+    fake._loop = None
+    gui.App._on_pause_key(fake)                 # sinon : pause / reprise
+    fake._loop, fake.engine.paused = {"kind": "sell_all"}, True
+    gui.App._on_pause_key(fake)                 # déjà en pause : la touche reprend
+    assert calls == ["stop", "pause", "pause"]

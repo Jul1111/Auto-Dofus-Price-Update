@@ -55,7 +55,7 @@ Quand le titre « Hôtel de vente » est calibré, les zones suivent la fenêtre
 - **Ctrl+F3** met à jour toute la liste de vos ventes, avec défilement automatique. Fonction désactivée par défaut : activez-la dans l'onglet **Mes ventes**.
 - **F4** choisit le meilleur lot (prix par objet le plus élevé).
 
-Pendant un parcours **F2** ou **Ctrl+F3**, la progression s'affiche en haut de la fenêtre et dans le HUD (« Ligne 34 / 87 · 12 modifiées » ; le total est connu si le compteur « x/100 lots » est calibré). Le bouton **Arrêter**, ou **Arrêter le parcours** dans le menu de l'icône de la zone de notification, interrompt le parcours sans mettre l'outil en pause. En jeu, `Ctrl+Alt+P` l'arrête aussi (et met l'outil en pause).
+Pendant un parcours **F2** ou **Ctrl+F3**, la progression s'affiche en haut de la fenêtre et dans le HUD (« Ligne 34 / 87 · 12 modifiées » ; le total est connu si le compteur « x/100 lots » est calibré). Le bouton **Arrêter**, ou **Arrêter le parcours** dans le menu de l'icône de la zone de notification, interrompt le parcours sans mettre l'outil en pause. En jeu, `Ctrl+Alt+P` l'arrête aussi, sans mettre l'outil en pause. Hors parcours, cette touche fait pause / reprise.
 
 À la fin d'un Ctrl+F3, un résumé s'ouvre. En tête, un récap : prix modifiés, lignes à revoir, lignes déjà au bon prix, durée, et la raison de l'arrêt si la liste n'a pas été parcourue jusqu'au bout. Dessous, le détail des prix modifiés (ancien → nouveau, avec l'image du nom de l'objet) et des lignes à revoir. Un clic sur une ligne la retrouve et la surligne dans le journal. Les 10 derniers résumés restent consultables dans l'onglet **Mes ventes**.
 
@@ -88,7 +88,7 @@ La lecture des chiffres repose sur un modèle de la police du jeu, appris automa
 | `Ctrl+F3` | Mettre à jour toute la liste |
 | `F4` | Meilleur lot |
 | Même touche deux fois | Forcer une lecture jugée suspecte |
-| `Ctrl+Alt+P` | Pause et reprise, arrêt des boucles |
+| `Ctrl+Alt+P` | Pause et reprise ; pendant un parcours, l'arrête (sans pause) |
 | `Ctrl+Alt+V` | Afficher les zones calibrées |
 | `Ctrl+Alt+H` | Aide-mémoire des touches par-dessus le jeu |
 | `Ctrl+Alt+U` | Afficher ou cacher le HUD |

@@ -64,7 +64,7 @@ Rien d'autre à installer : Tesseract est inclus. L'outil se met ensuite à jour
 | `F1` | Vendre ou mettre à jour le prix de l'objet sélectionné |
 | `F2` | Tout vendre au même prix |
 | `Ctrl+F3` | Mettre à jour toute la liste (à activer dans **Mes ventes**) |
-| `Ctrl+Alt+P` | Pause |
+| `Ctrl+Alt+P` | Pause ; pendant un parcours, l'arrête |
 
 La calibration automatique fonctionne avec Dofus 3 en français. Pour les autres cas, la calibration manuelle, les autres raccourcis et tous les réglages sont décrits dans le [guide d'utilisation](docs/GUIDE.md).
 
