@@ -1,5 +1,5 @@
 {
-  "CONFIG_VERSION": 6,
+  "CONFIG_VERSION": 7,
   "TESSERACT_CMD": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
   "LOTS": [
     1,
@@ -86,6 +86,7 @@
   "HUD_HISTORY": false,
   "PROFILE_COLORS": {},
   "LAST_SEEN_VERSION": "",
+  "TOUR_DONE": false,
   "HOTKEYS": {
     "sell": "f1",
     "sell_all": "f2",

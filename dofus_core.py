@@ -189,7 +189,7 @@ DIGITS_PATH = BASE_DIR / "digit_templates.npz"   # modèles de chiffres appris (
 ANCHOR_PATH = BASE_DIR / "hdv_anchor.png"        # image du titre « Hôtel de vente » (repère)
 HISTORY_HEADER = ["ts", "datetime", "action", "lot", "selected_qty", "read_price", "confidence",
                   "new_price", "status", "mode", "value", "rounding", "item"]
-CONFIG_VERSION = 6
+CONFIG_VERSION = 7
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -350,6 +350,7 @@ class Config:
     hud_history: bool = False         # HUD : les 3 derniers prix traités, sous la ligne principale
     profile_colors: Dict = field(default_factory=dict)       # profil -> couleur (HUD, pastille, icône)
     last_seen_version: str = ""       # « Quoi de neuf » déjà montré pour cette version
+    tour_done: bool = False           # visite guidée vue (1er lancement) ; se relance depuis l'Accueil
 
     hotkeys: Dict = field(default_factory=lambda: _copy(DEFAULT_HOTKEYS))
 
@@ -403,6 +404,8 @@ class Config:
             cfg.relist_max = cls.relist_max  # v5 : 120 était trop bas pour une liste de 100+ lots
         if int(data.get("CONFIG_VERSION", 1)) < 6:
             cfg.hud = True   # v6 : le HUD remplace le popup / bandeau de résultat et le mode compact
+        if int(data.get("CONFIG_VERSION", 1)) < 7:
+            cfg.tour_done = True   # v7 : visite guidée réservée aux nouvelles installations
         if not isinstance(cfg.profile_colors, dict):
             cfg.profile_colors = {}
         cfg.profile_colors = {str(k): v for k, v in cfg.profile_colors.items() if isinstance(v, str)}

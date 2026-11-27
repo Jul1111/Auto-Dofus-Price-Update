@@ -598,6 +598,8 @@ WHATS_NEW = {
         "d'un coup d'œil, aussi pendant un parcours.",
         "Fin de Toute la liste : le résumé commence par un récap (modifiés, à revoir, déjà au bon prix, "
         "durée, raison de l'arrêt). Un clic sur une ligne la retrouve dans le journal.",
+        "Visite guidée en 5 bulles au premier lancement. Elle se relance avec « Visite guidée » "
+        "(onglet Accueil).",
     ],
 }
 
@@ -669,6 +671,54 @@ def hud_history_line(res) -> Optional[tuple]:
 def duration_text(seconds) -> str:
     s = max(0, int(round(seconds or 0)))
     return f"{s} s" if s < 60 else f"{s // 60} min {s % 60:02d}"
+# ---------------------------------------------------------------- visite guidée
+# (onglet, widgets visés par ordre de préférence, titre, texte) ; {touche} = raccourci actuel
+TOUR = (
+    ("Accueil", ("steps_outer",), "Bienvenue ! D'abord, la calibration",
+     "L'outil lit l'Hôtel de vente à l'écran. Ouvre l'HDV sur l'onglet « Vente », puis clique « Calibrer » : "
+     "toutes les zones sont placées seules."),
+    ("Accueil", ("keys_outer",), "Les touches, dans le jeu",
+     "{sell} vend l'objet sélectionné juste sous le moins cher, {sell_all} remet tout en vente et {relist} "
+     "met à jour une de tes ventes. {cheatsheet} affiche l'aide-mémoire par-dessus le jeu."),
+    ("Accueil", ("pause_btn",), "Pause",
+     "Ce bouton, ou {pause} depuis le jeu, met l'outil en pause. Pendant un parcours, il l'arrête."),
+    ("Options", ("hud_switch",), "Le HUD, par-dessus le jeu",
+     "Une ligne discrète montre le résultat de chaque action et la progression d'un parcours. {hud} "
+     "l'affiche ou le cache, « Déplacer » le pose où tu veux."),
+    ("Accueil", ("log_frame",), "Le journal",
+     "Tout ce que fait l'outil, ligne par ligne. Un clic sur une ligne avec un prix le copie. "
+     "Pour revoir cette visite : « Visite guidée », dans l'onglet Accueil."),
+)
+
+
+def tour_steps(hk: dict) -> list:
+    keys = {k: str(v).upper() for k, v in hk.items()}
+    return [{"tab": tab, "targets": targets, "title": title, "text": text.format(**keys)}
+            for tab, targets, title, text in TOUR]
+
+
+def tour_place(target, size, area, gap: int = 12) -> tuple:
+    """Position (x, y) de la bulle de taille `size` près de `target` (x, y, l, h), dans `area`
+    (x0, y0, x1, y1) : dessous, sinon dessus, à droite, à gauche ; au centre sans cible."""
+    bw, bh = size
+    x0, y0, x1, y1 = area
+
+    def clamp(v, lo, hi):
+        return max(lo, min(v, hi)) if hi >= lo else lo
+    if target is None:
+        return (x0 + (x1 - x0 - bw) // 2, y0 + (y1 - y0 - bh) // 2)
+    tx, ty, tw, th = target
+    cx = clamp(tx, x0 + gap, x1 - bw - gap)
+    cy = clamp(ty, y0 + gap, y1 - bh - gap)
+    if ty + th + gap + bh <= y1:
+        return (cx, ty + th + gap)
+    if ty - gap - bh >= y0:
+        return (cx, ty - gap - bh)
+    if tx + tw + gap + bw <= x1:
+        return (tx + tw + gap, cy)
+    if tx - gap - bw >= x0:
+        return (tx - gap - bw, cy)
+    return (cx, clamp(y1 - bh - gap, y0, y1))
 
 
 HUD_SIZES = {"small": ("Petit", 11), "normal": ("Normal", 12), "large": ("Grand", 15)}
@@ -768,6 +818,7 @@ class App(ctk.CTk):
         self._char: Optional[str] = None     # personnage du jeu au premier plan (titre de la fenêtre)
         self._profile_lock = threading.Lock()
         self._hud = None                     # HUD discret par-dessus le jeu
+        self._tour: Optional[dict] = None    # visite guidée en cours : étape, bulle, cadre
         self._hud_moving = False
         self._game_fg = False
         self.restart_requested = False
@@ -794,7 +845,9 @@ class App(ctk.CTk):
         self._refresh_status()
         self._apply_topmost()
         self.after(300, self._apply_style)   # après la mise en place de la barre de titre par CTk
-        if not self._calibrated():
+        if not self.cfg.tour_done:
+            self.after(900, lambda: self._tour_start(first=True))   # 1er lancement : visite, puis calibration
+        elif not self._calibrated():
             self.after(800, self._first_launch)   # 1er lancement : calibration automatique proposée
         else:
             self.after(2500, self._check_calibration)   # fenêtre du jeu / écran changés depuis ?
@@ -1116,6 +1169,7 @@ class App(ctk.CTk):
         # ---------------- journal
         lf = ctk.CTkFrame(self, fg_color=CARD, border_width=1, border_color=P["border"], corner_radius=12)
         lf.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=12, pady=(6, 12))
+        self.log_frame = lf
         top = ctk.CTkFrame(lf, fg_color="transparent")
         top.pack(fill="x", padx=8, pady=(6, 0))
         ctk.CTkLabel(top, text="Journal", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=4)
@@ -1181,6 +1235,7 @@ class App(ctk.CTk):
             self.step_rows[key] = (mark, btn)
         # touches principales en grosses cartes
         kb = self._section(page, "Touches principales", "Dans le jeu, HDV ouvert.")
+        self.keys_outer = kb.master
         grid = ctk.CTkFrame(kb, fg_color="transparent")
         grid.pack(fill="x")
         grid.grid_columnconfigure((0, 1), weight=1, uniform="k")
@@ -1208,6 +1263,9 @@ class App(ctk.CTk):
                                 hover_color=BTN2_HOVER, command=self._toggle_cheatsheet),
                   "Affiche les touches par-dessus le jeu, au-dessus de l'HDV. En jeu : "
                   f"{hk['cheatsheet'].upper()}.").pack(side="left", padx=8, pady=(4, 0))
+        self._tip(ctk.CTkButton(r, text="Visite guidée", width=130, fg_color=BTN2, text_color=P["text"],
+                                hover_color=BTN2_HOVER, command=self._tour_start),
+                  "Les principaux endroits de l'outil, en 5 bulles.").pack(side="left", pady=(4, 0))
         # session
         sb = self._section(page, "Cette session")
         tiles = ctk.CTkFrame(sb, fg_color="transparent")
@@ -1648,11 +1706,13 @@ class App(ctk.CTk):
         self._switch(b, "Fenêtre de l'outil toujours au-dessus du jeu", "always_on_top",
                      tip="Même chose que 📌 en haut. Le jeu doit être en fenêtré ou plein écran fenêtré.")
         r = self._row(b)
-        self._tip(ctk.CTkSwitch(r, text="HUD par-dessus le jeu (résultat de chaque action)", variable=self.v["hud"]),
+        self.hud_switch = self._tip(ctk.CTkSwitch(r, text="HUD par-dessus le jeu (résultat de chaque action)",
+                                                  variable=self.v["hud"]),
                   "Une petite ligne au-dessus du jeu : état, dernière action (elle s'allume de la couleur du "
                   "résultat), progression. Les clics la traversent ; visible seulement quand Dofus est au "
                   "premier plan. Touche : "
-                  f"{self.cfg.hotkeys['hud'].upper()}.").pack(side="left")
+                  f"{self.cfg.hotkeys['hud'].upper()}.")
+        self.hud_switch.pack(side="left")
         self.hud_move_btn = ctk.CTkButton(r, text="Déplacer", width=90, height=24, fg_color=BTN2,
                                           text_color=P["text"], hover_color=BTN2_HOVER, command=self._hud_move)
         self.hud_move_btn.pack(side="left", padx=10)
@@ -1777,6 +1837,8 @@ class App(ctk.CTk):
             ctk.CTkButton(b, text="Quoi de neuf dans cette version ?", width=240, fg_color=BTN2, text_color=P["text"],
                           hover_color=BTN2_HOVER, command=lambda: self._whats_new(force=True)
                           ).pack(anchor="w", pady=(4, 2))
+        ctk.CTkButton(b, text="Revoir la visite guidée", width=240, fg_color=BTN2, text_color=P["text"],
+                      hover_color=BTN2_HOVER, command=self._tour_start).pack(anchor="w", pady=(2, 2))
         r = self._row(b)
         ctk.CTkButton(r, text="Ouvrir le dossier du journal", width=200, fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                       command=self._open_log_dir).pack(side="left")
@@ -4044,6 +4106,163 @@ class App(ctk.CTk):
         self._refresh_hud()
         self._hud_visibility()
 
+    # ---- visite guidée (1er lancement, ou bouton « Visite guidée »)
+    def _tour_start(self, first: bool = False):
+        if self._tour is not None:
+            return
+        self._show_main()
+        self._tour = {"i": 0, "first": first, "steps": tour_steps(self.cfg.hotkeys), "win": None, "ring": None,
+                      "geo": None}
+        self._tour_show(0)
+        self._tour_watch()
+
+    def _tour_target(self, step: dict):
+        """Rectangle (x, y, l, h) à l'écran du widget visé, s'il est affiché dans la fenêtre."""
+        for name in step["targets"]:
+            w = getattr(self, name, None)
+            try:
+                if w is None or not w.winfo_ismapped():
+                    continue
+                x0, y0 = w.winfo_rootx(), w.winfo_rooty()
+                x1, y1 = x0 + w.winfo_width(), y0 + w.winfo_height()
+                p = w.master                       # partie visible : coupée par les cadres qui défilent
+                while p is not None:
+                    px, py = p.winfo_rootx(), p.winfo_rooty()
+                    x0, y0 = max(x0, px), max(y0, py)
+                    x1, y1 = min(x1, px + p.winfo_width()), min(y1, py + p.winfo_height())
+                    p = None if p is self else p.master
+            except tk.TclError:
+                continue
+            if x1 - x0 > 4 and y1 - y0 > 8:
+                return x0, y0, x1 - x0, y1 - y0
+        return None
+
+    def _tour_clear(self):
+        t = self._tour
+        for key in ("win", "ring"):
+            w = t.get(key) if t else None
+            if w is not None:
+                try:
+                    w.destroy()
+                except tk.TclError:
+                    pass
+                t[key] = None
+
+    def _tour_show(self, i: int):
+        t = self._tour
+        if t is None:
+            return
+        self._tour_clear()
+        t["i"] = i
+        step, n = t["steps"][i], len(t["steps"])
+        try:
+            self.tabs.set(step["tab"])
+        except Exception:
+            pass
+        win, card = rounded_popup(self, radius=12, alpha=1.0, border=P["accent"])
+        t["win"] = win
+        ctk.CTkLabel(card, text=f"Visite guidée · {i + 1}/{n}", text_color=MUTED,
+                     font=ctk.CTkFont(size=11)).pack(anchor="w", padx=16, pady=(12, 0))
+        ctk.CTkLabel(card, text=step["title"], font=ctk.CTkFont(size=15, weight="bold"), anchor="w"
+                     ).pack(anchor="w", padx=16)
+        ctk.CTkLabel(card, text=step["text"], wraplength=330, justify="left", anchor="w"
+                     ).pack(anchor="w", fill="x", padx=16, pady=(4, 10))
+        bar = ctk.CTkFrame(card, fg_color="transparent")
+        bar.pack(fill="x", padx=12, pady=(0, 12))
+        last = i == n - 1
+        if not last:
+            ctk.CTkButton(bar, text="Passer", width=70, height=28, fg_color="transparent", text_color=MUTED,
+                          hover_color=BTN2, command=self._tour_end).pack(side="left")
+        ctk.CTkButton(bar, text="Terminer" if last else "Suivant →", width=100, height=28,
+                      command=self._tour_end if last else lambda: self._tour_show(i + 1)).pack(side="right")
+        if i > 0:
+            ctk.CTkButton(bar, text="← Précédent", width=100, height=28, fg_color=BTN2, text_color=P["text"],
+                          hover_color=BTN2_HOVER, command=lambda: self._tour_show(i - 1)).pack(side="right", padx=6)
+        self.after(120, self._tour_place)          # onglet changé : attendre qu'il soit dessiné
+
+    def _tour_place(self):
+        t = self._tour
+        if t is None or t["win"] is None:
+            return
+        win = t["win"]
+        try:
+            self.update_idletasks()
+            target = self._tour_target(t["steps"][t["i"]])
+            mx, my = self.winfo_rootx(), self.winfo_rooty()
+            area = (mx, my, mx + self.winfo_width(), my + self.winfo_height())
+            x, y = tour_place(target, (win.winfo_reqwidth(), win.winfo_reqheight()), area)
+            win.geometry(f"+{int(x)}+{int(y)}")
+            win.lift()
+        except tk.TclError:
+            return
+        ring = t.get("ring")
+        if target is None:
+            if ring is not None:
+                ring.withdraw()
+            return
+        pad = 5
+        tx, ty, tw, th = target
+        tw, th = tw + 2 * pad, th + 2 * pad
+        if ring is None:                            # cadre autour du widget visé (les clics le traversent)
+            ring = tk.Toplevel(self)
+            ring.overrideredirect(True)
+            ring.attributes("-topmost", True)
+            ring.configure(bg=POPUP_KEY)
+            try:
+                ring.attributes("-transparentcolor", POPUP_KEY)
+            except tk.TclError:
+                pass
+            cv = tk.Canvas(ring, bg=POPUP_KEY, highlightthickness=0, bd=0)
+            cv.pack(fill="both", expand=True)
+            ring._cv = cv
+            t["ring"] = ring
+            ring.after(60, lambda: ring.winfo_exists() and style.set_click_through(ring, True))
+        ring.geometry(f"{tw}x{th}+{tx - pad}+{ty - pad}")
+        ring.deiconify()
+        cv = ring._cv
+        cv.delete("all")
+        cv.create_rectangle(2, 2, tw - 2, th - 2, outline=P["accent"], width=3)
+        win.lift()
+
+    def _tour_watch(self):
+        """Pendant la visite : la bulle suit la fenêtre (déplacée, redimensionnée, cachée)."""
+        t = self._tour
+        if t is None:
+            return
+        try:
+            hidden = self.state() in ("withdrawn", "iconic")
+            geo = self.geometry()
+        except tk.TclError:
+            return
+        for key in ("win", "ring"):
+            w = t.get(key)
+            if w is not None and hidden and w.winfo_ismapped():
+                w.withdraw()
+        if hidden:
+            t["geo"] = None
+        elif geo != t["geo"]:
+            t["geo"] = geo
+            if t["win"] is not None:
+                t["win"].deiconify()
+            self._tour_place()
+        self.after(300, self._tour_watch)
+
+    def _tour_end(self):
+        t = self._tour
+        if t is None:
+            return
+        self._tour_clear()
+        self._tour = None
+        try:
+            self.tabs.set("Accueil")
+        except Exception:
+            pass
+        if not self.cfg.tour_done:
+            self.cfg.tour_done = True
+            self._save_cfg()
+        if t["first"] and not self._calibrated():
+            self.after(300, self._first_launch)    # puis : calibration automatique proposée
+
     # ---- « Quoi de neuf » après une mise à jour
     def _whats_new(self, force: bool = False):
         c, cur = self.cfg, core.app_version()
@@ -4230,6 +4449,9 @@ class App(ctk.CTk):
         return None
 
     def _on_escape(self, _e=None):
+        if self._tour is not None:
+            self._tour_end()
+            return
         for name in ("_cheat", "_summary_win"):
             w = getattr(self, name, None)
             if w is not None and w.winfo_exists():
