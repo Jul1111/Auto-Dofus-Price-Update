@@ -611,6 +611,11 @@ WHATS_NEW = {
         "Nouvelle option (Mes ventes) : « Modifier même si le prix est suspect », pour suivre un marché qui "
         "chute. Le prix est relu une 2e fois avant ; une lecture peu fiable reste bloquée.",
     ],
+    "1.12.0": [
+        "HUD : la pastille passe à l'orange quand la calibration semble décalée (fenêtre du jeu "
+        "redimensionnée, écran changé, HDV introuvable). Maintiens Alt : « Recalibrer » la refait sans "
+        "quitter le jeu.",
+    ],
 }
 
 
@@ -753,6 +758,25 @@ def eta_text(elapsed: float, frac: Optional[float]) -> Optional[str]:
     return f"≈ {-int(-left // 60)} min restantes"
 
 
+CALIB_WATCH_MS = 5000      # vérification de la calibration (fenêtre du jeu, écran)
+HUD_ALERT_LEN = 70
+
+
+def hud_calib_alert(drift: Optional[str], hdv_state: Optional[str], calibrated: bool) -> Optional[tuple]:
+    """Alerte calibration pour le HUD : (titre, détail), ou None si tout va bien.
+    drift = texte du bandeau « calibration décalée » ; hdv_state = "lost" si le repère est introuvable."""
+    if not calibrated:
+        return None                               # déjà signalé : « Calibration à faire »
+    if drift:
+        why = drift.split(" : ", 1)[-1].split(". ")[0].strip().rstrip(".")
+        if len(why) > HUD_ALERT_LEN:
+            why = why[:HUD_ALERT_LEN - 1].rstrip(" ,") + "…"
+        return "Calibration décalée", why
+    if hdv_state == "lost":
+        return "HDV introuvable", "l'HDV est-il ouvert, onglet Vente ?"
+    return None
+
+
 def alt_alone_down() -> bool:
     """Alt enfoncé seul (sans Ctrl, Maj, Windows ni Tab : pas un raccourci ni Alt+Tab). Windows."""
     if sys.platform != "win32":
@@ -871,6 +895,10 @@ class App(ctk.CTk):
         self._tour: Optional[dict] = None    # visite guidée en cours : étape, bulle, cadre
         self._hud_moving = False
         self._game_fg = False
+        self._drift_text: Optional[str] = None     # problème de calibration affiché (bandeau + HUD)
+        self._drift_ignored: Optional[str] = None  # « Ignorer » : ce texte-là ne revient plus
+        self._calib_alert_t = 0.0                  # début de l'alerte (le HUD la montre jusqu'au résultat suivant)
+        self._last_action_t = 0.0
         self.restart_requested = False
         self.closing = False
         ANIMATE["on"] = bool(self.cfg.animations)
@@ -899,8 +927,7 @@ class App(ctk.CTk):
             self.after(900, lambda: self._tour_start(first=True))   # 1er lancement : visite, puis calibration
         elif not self._calibrated():
             self.after(800, self._first_launch)   # 1er lancement : calibration automatique proposée
-        else:
-            self.after(2500, self._check_calibration)   # fenêtre du jeu / écran changés depuis ?
+        self.after(2500, self._check_calibration)   # fenêtre du jeu / écran changés ? (toutes les 5 s)
         if self.cfg.tray:
             self.tray.start()
         self.after(400, self._apply_hud)          # HUD activé : créé dès le lancement (caché hors du jeu)
@@ -2630,6 +2657,7 @@ class App(ctk.CTk):
         head = (f"Lot {res.lot} → {fmt(res.new_price)}" if res.new_price is not None
                 else "Liste mise à jour" if res.message.startswith("[MAJ TOUT]") else "Pas de prix")
         self.last_action = (head, res.hint or res.level, LEVEL_COLORS[res.level])
+        self._last_action_t = time.time()
         remind = validate_reminder(res, self.cfg)
         if remind:                                   # prix prêt mais pas mis en vente : à toi de valider
             self.last_action = (head, remind, P["gold"])
@@ -3337,6 +3365,10 @@ class App(ctk.CTk):
     def _on_calib_auto(self, res, checks: list):
         self._log(f"[Calib auto] {res.message}", "CAL" if res.ok else "ERROR")
         self._set_hdv("ok" if res.ok else "lost")
+        if res.ok:
+            self._hud_message("Calibration refaite ✓", "zones recalées sur l'HDV", P["green"], 3000)
+        else:
+            self._hud_message("Calibration impossible", "HDV pas reconnu : ouvre-le, onglet Vente", P["red"], 3500)
         if not res.ok:
             if not self._calibrated():
                 self._log("[Calib auto] Essaie l'assistant pas à pas : onglet Calibration › Avancé.", "WARN")
@@ -3377,6 +3409,9 @@ class App(ctk.CTk):
     def _set_hdv(self, state: Optional[str]):
         if state != self.hdv_state:
             self.hdv_state = state
+            if state == "lost":
+                self._calib_alert_t = time.time()
+                self._hud_flash(style.CHIP["orange"][1], 2500)
             if state == "ok":
                 self._remember_game_window()     # la calibration marche avec cette fenêtre du jeu
             self._refresh_status()
@@ -3804,42 +3839,60 @@ class App(ctk.CTk):
         if rect:
             self._hide_drift()
 
-    def _check_calibration(self, tries: int = 0):
-        """Au démarrage : écran changé (zones hors de l'écran) ou fenêtre du jeu redimensionnée
-        depuis la calibration ? -> bandeau avec « Recalibrer »."""
+    def _calib_problem(self) -> Optional[str]:
+        """Écran changé (zones hors de l'écran) ou fenêtre du jeu redimensionnée / déplacée depuis
+        la calibration ? Texte du problème, None si rien, "" si le jeu est introuvable (on ne sait pas)."""
         c = self.cfg
-        if not self._calibrated():
-            return
         try:
             off = core.zones_off_screen(c, core.screen_bounds())
         except Exception:
             off = []
         if off:
             names = ", ".join(dict.fromkeys(self.OFF_LABELS.get(z, z) for z in off))
-            self._show_drift(f"Calibration à refaire : des zones sont hors de l'écran ({names}). Écran "
-                             "débranché ou résolution changée ?")
-            return
+            return (f"Calibration à refaire : des zones sont hors de l'écran ({names}). Écran "
+                    "débranché ou résolution changée ?")
         try:
             rect = core.game_window_rect(c)
         except Exception:
             rect = None
-        if rect is None:                       # jeu pas encore lancé (ou réduit) : on réessaie
-            if tries < 120:
-                self.after(5000, lambda: self._check_calibration(tries + 1))
-            return
+        if rect is None:                       # jeu pas lancé (ou réduit)
+            return ""
         why = core.calib_drift(c.calib_window, rect, bool(c.anchor_region))
-        if why:
-            self._show_drift(f"La calibration semble décalée : {why}.")
+        return f"La calibration semble décalée : {why}." if why else None
+
+    def _check_calibration(self):
+        """Toutes les 5 s : calibration décalée ? -> bandeau « Recalibrer » et alerte dans le HUD,
+        qui disparaissent d'eux-mêmes quand c'est réglé."""
+        try:
+            if self._calibrated() and self._loop is None and not self.closing:
+                text = self._calib_problem()
+                if text is None:
+                    self._drift_ignored = None
+                    if self._drift_text:
+                        self._hide_drift()
+                elif text and text != self._drift_ignored:
+                    self._show_drift(text)
+        except Exception:
+            pass
+        if not self.closing:
+            self.after(CALIB_WATCH_MS, self._check_calibration)
 
     def _show_drift(self, text: str):
         self.drift_lbl.configure(text="⚠  " + text)
+        if text != self._drift_text:
+            self._drift_text = text
+            self._calib_alert_t = time.time()
         if not self.drift_bar.winfo_manager():
             self.drift_bar.pack(fill="x", padx=12, pady=(0, 6))
             self._log(f"[Calib] {text}", "WARN")
+            self._hud_flash(style.CHIP["orange"][1], 2500)
+        self._refresh_hud()
 
     def _hide_drift(self):
+        self._drift_text = None
         if self.drift_bar.winfo_manager():
             self.drift_bar.pack_forget()
+        self._refresh_hud()
 
     def _ignore_drift(self):
         try:
@@ -3849,6 +3902,7 @@ class App(ctk.CTk):
         if rect:
             self.cfg.calib_window = list(rect)    # nouvelle référence : plus d'alerte pour cette fenêtre
             self._save_cfg()
+        self._drift_ignored = self._drift_text    # zones hors de l'écran : ne revient pas toutes les 5 s
         self._hide_drift()
 
     # ---- profil automatique selon le personnage
@@ -3978,6 +4032,10 @@ class App(ctk.CTk):
                                            text_color=P["on_accent"], command=self._stop_loop)
         self._hud_btn_copy = ctk.CTkButton(self._hud_actions, text="Copier le prix", height=24, width=10, font=small,
                                            command=self._hud_copy_price)
+        self._hud_btn_recal = ctk.CTkButton(self._hud_actions, text="✨ Recalibrer", height=24, width=10,
+                                            font=small, fg_color=style.CHIP["orange"][0],
+                                            hover_color=P["card2"], text_color=style.CHIP["orange"][1],
+                                            command=self._hud_recalibrate)
         self._hud_btn_open = ctk.CTkButton(self._hud_actions, text="Ouvrir l'outil", height=24, width=10, font=small,
                                            fg_color=BTN2, text_color=P["text"], hover_color=BTN2_HOVER,
                                            command=self._show_main)
@@ -4022,8 +4080,12 @@ class App(ctk.CTk):
             self._hud_profile.configure(text=f" {c.profile} ", fg_color=self._profile_color())
         show_state = c.hud_content not in ("action", "dot") or self._hud_moving
         show_action = c.hud_content != "state" or self._loop is not None or self._hud_moving
-        self._hud_state.configure(text=f"● {text}" if show_state and not dot else "●",
-                                  text_color=P["cyan"] if state == "loop" else style.CHIP[chip][1])
+        alert = self._hud_alert() if state == "ok" else None
+        state_color = P["cyan"] if state == "loop" else style.CHIP[chip][1]
+        if alert:                                   # calibration décalée : rond orange, toujours visible
+            text, state_color, show_state = alert[0], style.CHIP["orange"][1], True
+        self._hud_state.configure(text=(f"⚠ {text}" if alert else f"● {text}") if show_state and not dot
+                                  else "●", text_color=state_color)
         lp = self._loop
         frac = None
         if self._hud_moving:
@@ -4040,6 +4102,9 @@ class App(ctk.CTk):
             head, sub, col = note[:3] if note and now < note[3] else self.last_action
             if head.startswith("En attente"):
                 head = ""
+            if alert and not (note and now < note[3]) and self._calib_alert_t >= self._last_action_t:
+                hint = " · maintiens Alt pour recalibrer" if c.hud_alt else ""
+                head, sub, col = "", alert[1] + hint, style.CHIP["orange"][1]
         self._hud_head.configure(text=head if show_action and not dot else "")
         self._hud_sub.configure(text=sub if show_action and not dot else "", text_color=col)
         self._refresh_hud_bar(None if dot else frac)
@@ -4077,11 +4142,14 @@ class App(ctk.CTk):
         if not self._hud_alt:
             box.pack_forget()
             return
-        for b in (self._hud_btn_stop, self._hud_btn_copy, self._hud_btn_open):
+        for b in (self._hud_btn_stop, self._hud_btn_recal, self._hud_btn_copy, self._hud_btn_open):
             b.pack_forget()
         if self._loop is not None:
             self._hud_btn_stop.configure(state="disabled" if self.engine.stop_requested else "normal")
             self._hud_btn_stop.pack(side="left", padx=(0, 6))
+        elif self._hud_alert():
+            self._hud_btn_recal.configure(state="disabled" if self.engine._lock.locked() else "normal")
+            self._hud_btn_recal.pack(side="left", padx=(0, 6))
         p = self._last_price
         self._hud_btn_copy.configure(text=f"Copier {fmt(p)}" if p is not None else "Copier le prix",
                                      state="normal" if p is not None else "disabled")
@@ -4218,11 +4286,21 @@ class App(ctk.CTk):
             else:
                 w.withdraw()
 
+    def _hud_alert(self) -> Optional[tuple]:
+        return hud_calib_alert(self._drift_text, self.hdv_state, self._calibrated())
+
+    def _hud_recalibrate(self):
+        """« Recalibrer » du HUD (Alt maintenu) : calibration automatique tout de suite, l'HDV est à l'écran."""
+        if self.engine._lock.locked():
+            return
+        self._hud_message("Calibration automatique…", "garde l'HDV ouvert, onglet Vente", P["cyan"], 4000)
+        self._calib_auto_ui()
+
     def _hud_wanted(self) -> tuple:
         """(afficher ?, masqué faute d'activité ?)."""
         c = self.cfg
         idle = bool(c.hud_autohide) and self._loop is None and not self._hud_moving and not self._hud_alt \
-            and time.time() - self._hud_active > c.hud_autohide
+            and not self._hud_alert() and time.time() - self._hud_active > c.hud_autohide
         return bool(c.hud and ((self._game_fg and not idle) or self._hud_moving)), idle
 
     def _hud_faded(self):
