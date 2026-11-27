@@ -1843,6 +1843,7 @@ SCROLL_RETRY_WAIT = 0.3   # s : liste immobile -> on laisse le jeu finir avant d
 SCROLL_ZEROS = 3          # crans sans mouvement (avec attente) avant de conclure « en bas »
 
 
+SCROLLBAR_SETTLE = 0.6    # s max pour que la poignée finisse de glisser avant d'être jugée
 SCROLLBAR_BRIGHT = 90     # poignée de la barre de défilement : ~128 ; piste ~44 ; fond ~33
 
 
@@ -1906,6 +1907,9 @@ def scrollbar_at_bottom(cfg: "Config") -> Optional[bool]:
     step = cfg.relist_step
     region = (x0 + 2 * step, y0 - step, 4 * step, step * (cfg.relist_rows + 2))
     try:
+        # La poignée glisse avec un léger retard sur la liste : on attend qu'elle soit
+        # immobile (vu en vidéo : jugée « pas en bas » alors que la liste était au bout).
+        wait_still(region, SCROLLBAR_SETTLE)
         img = grab_screen(region)
     except Exception:
         return None
@@ -3188,6 +3192,8 @@ class PriceEngine:
                         if err:
                             stop = err
                             break
+                    if moved <= 0 and left and scrollbar_at_bottom(cfg):
+                        left = 0                  # poignée arrivée en bas entre-temps : vraie fin
                     if moved <= 0:
                         if left:
                             more = (f"encore ~{left} vente(s) après la dernière ligne vue" if left > 0

@@ -975,6 +975,19 @@ def test_relist_all_scrollbar_not_at_bottom_means_blocked(relist_engine, monkeyp
     assert "défilement bloqué" in res.message and "barre de défilement" in res.message
 
 
+def test_relist_all_thumb_still_sliding_then_at_bottom_is_the_end(relist_engine, monkeypatch):
+    # Vidéo du joueur : liste au bout, poignée encore en train de glisser -> « pas en bas »,
+    # puis en bas. Avant : « défilement bloqué » à tort.
+    eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None), (0, None)], None)
+    eng.cfg.count_region = None
+    verdicts = iter([False, True])
+    monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: next(verdicts))
+    st["screens"] = [scr({1: 87}), scr({1: 50})]
+    st["mine"] = [87, 50]
+    res = eng.relist_all()
+    assert "fin de la liste" in res.message and "bloqué" not in res.message
+
+
 def test_relist_all_scrollbar_at_bottom_wins_over_counter(relist_engine, monkeypatch):
     eng, st = _rows_test_engine(relist_engine, monkeypatch, [(0, None)], (40, 100))
     monkeypatch.setattr(core, "scrollbar_at_bottom", lambda c: True)
