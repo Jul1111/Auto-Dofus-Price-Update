@@ -694,7 +694,7 @@ def test_relist_force_suspect_option(relist_engine, monkeypatch):
     # Marché qui chute : 774 -> 100 = « baisse énorme ». Option active + 2e lecture identique : modifié.
     eng, calls, st = relist_engine
     eng.cfg.relist_force_suspect = True
-    monkeypatch.setattr(core, "table_second_read", lambda c: scr({1: 100}))
+    monkeypatch.setattr(core, "table_second_read", lambda c, e="": scr({1: 100}))
     st["screens"] = [scr({1: 100})]
     st["mine"] = [774, None]
     res = eng.relist()
@@ -705,7 +705,7 @@ def test_relist_force_suspect_option(relist_engine, monkeypatch):
 def test_relist_force_suspect_needs_same_second_read(relist_engine, monkeypatch):
     eng, calls, st = relist_engine
     eng.cfg.relist_force_suspect = True
-    monkeypatch.setattr(core, "table_second_read", lambda c: scr({1: 3000}))   # lu autrement : doute
+    monkeypatch.setattr(core, "table_second_read", lambda c, e="": scr({1: 3000}))   # lu autrement : doute
     st["screens"] = [scr({1: 100})]
     st["mine"] = [774]
     res = eng.relist()
@@ -717,7 +717,7 @@ def test_relist_force_suspect_never_skips_unreliable_reading(relist_engine, monk
     eng, calls, st = relist_engine
     eng.cfg.relist_force_suspect = True
     seen = []
-    monkeypatch.setattr(core, "table_second_read", lambda c: seen.append(1) or scr({1: 100}))
+    monkeypatch.setattr(core, "table_second_read", lambda c, e="": seen.append(1) or scr({1: 100}))
     s1 = scr({1: 100})
     s1.prices[1] = R(100, 20)                     # confiance OCR trop basse
     st["screens"] = [s1]
@@ -1782,3 +1782,24 @@ def test_parse_combo():
         core.parse_combo("ctrl+")
     with pytest.raises(ValueError):
         core.parse_combo("f3+f4")
+
+
+def test_table_second_read_changes_image_when_first_was_tesseract(monkeypatch):
+    # 1re lecture par Tesseract : relire la même image avec Tesseract redonnait la même erreur
+    seen = []
+    monkeypatch.setattr(core, "read_screen", lambda c, **k: seen.append((c.scale, k)) or core.ScreenRead())
+    cfg = core.Config(scale=2)
+    core.table_second_read(cfg, "chiffres")
+    core.table_second_read(cfg, "tesseract")
+    assert seen == [(2, {"tesseract_only": True}), (3, {"tesseract_only": True})]
+    assert cfg.scale == 2                     # la config de l'utilisateur n'est pas touchée
+
+
+def test_mine_second_opinions_are_really_different(monkeypatch):
+    # la 2e lecture ne doit ni relire la même image, ni reprendre la lecture en gris (3e avis)
+    calls = []
+    monkeypatch.setattr(core, "read_mine", lambda c, **k: calls.append(k) or core.Reading(1, 99))
+    monkeypatch.setattr(core, "read_mine_gray", lambda c: calls.append("gray") or core.Reading(2, 99))
+    core.mine_second_opinions(core.Config())
+    assert calls == [{"tesseract_only": True, "scale": core.SECOND_OPINION_SCALE, "gray_fallback": False},
+                     "gray"]

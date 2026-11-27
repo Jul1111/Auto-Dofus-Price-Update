@@ -242,3 +242,24 @@ def test_reads_field_with_text_caret(monkeypatch):
     cfg = core.Config(price_field=[145, 35])
     assert core.read_mine(cfg).value == 496
     assert core.field_check(cfg, 496)[0]
+
+
+def test_second_readings_still_read_real_captures(monkeypatch):
+    # 2es lectures (image agrandie autrement) : elles doivent lire juste, sinon chaque
+    # contrôle échouerait et les lignes resteraient « suspectes »
+    _patch_fixture(monkeypatch, "hdv_mesventes.png")
+    cfg = core.Config(table_region=[30, 462, 180, 128], qty_region=[16, 229, 90, 22],
+                      mine_region=[16, 172, 125, 22], fast_digits=False)
+    sr = core.table_second_read(cfg, "tesseract")
+    assert sr.values == {1: 760, 10: 6999, 100: 83199, 1000: 844000} and sr.selected == 1
+    assert core.mine_second_opinions(cfg)[0].value == 774
+
+
+def test_second_opinion_reads_field_with_caret(monkeypatch):
+    _patch_fixture(monkeypatch, "champ_curseur.png")
+    assert core.mine_second_opinions(core.Config(price_field=[145, 35]))[0].value == 496
+
+
+def test_second_opinion_reads_highlighted_field(monkeypatch):
+    w, h = _patch_fixture(monkeypatch, "tonprix_laine.png")
+    assert core.mine_second_opinions(core.Config(mine_region=[0, 0, w, h]))[0].value == 774

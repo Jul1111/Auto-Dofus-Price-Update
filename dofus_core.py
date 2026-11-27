@@ -989,8 +989,13 @@ def parse_number(data: Dict[str, list], bounds: Tuple[int, int]) -> Reading:
     return Reading(int("".join(w[1] for w in ws)), min(w[2] for w in ws), " ".join(w[1] for w in ws))
 
 
-def table_second_read(cfg: Config) -> "ScreenRead":
-    """2e lecture du tableau, Tesseract seul (sans la lecture rapide) : contrôle indépendant."""
+def table_second_read(cfg: Config, first_engine: str = "") -> "ScreenRead":
+    """2e lecture du tableau, Tesseract seul (sans la lecture rapide), pour contrôler la 1re.
+    1re lecture déjà faite par Tesseract : même moteur, même image = même résultat, erreur
+    comprise (« 1 499 » lu 199 était « confirmé »). L'image est alors agrandie autrement."""
+    if first_engine != "chiffres":
+        import dataclasses
+        cfg = dataclasses.replace(cfg, scale=cfg.scale + 1)
     return read_screen(cfg, tesseract_only=True)
 
 
@@ -1306,9 +1311,16 @@ def field_gray_image(img_bgr: np.ndarray, scale: int = 4) -> Optional[np.ndarray
     return cv2.copyMakeBorder(inv, BORDER, BORDER, BORDER, BORDER, cv2.BORDER_CONSTANT, value=255)
 
 
+SECOND_OPINION_SCALE = 6   # « ton prix » relu plus grand : pas la même image que la 1re lecture
+
+
 def mine_second_opinions(cfg: Config) -> List[Reading]:
-    """Deux autres lectures de « ton prix » : Tesseract seul et niveaux de gris."""
-    return [read_mine(cfg, tesseract_only=True), read_mine_gray(cfg)]
+    """Deux autres lectures de « ton prix », chacune sur une image DIFFÉRENTE de la 1re :
+    Tesseract seul sur le champ agrandi autrement, et niveaux de gris. Avant, la 2e relisait
+    la même image avec le même moteur (ou reprenait la lecture en gris) : une majorité
+    « 2 sur 3 » sans vrai 2e avis."""
+    return [read_mine(cfg, tesseract_only=True, scale=SECOND_OPINION_SCALE, gray_fallback=False),
+            read_mine_gray(cfg)]
 
 
 def vote_mine(first: Reading, others: List[Reading], min_conf: float) -> Tuple[Optional[int], str]:
@@ -1340,12 +1352,13 @@ def surer(a: Optional[Reading], b: Optional[Reading]) -> Reading:
     return max(cands, key=lambda r: (r.value is not None, r.confidence))
 
 
-def read_mine(cfg: Config, tesseract_only: bool = False) -> Reading:
+def read_mine(cfg: Config, tesseract_only: bool = False, scale: int = 4,
+              gray_fallback: bool = True) -> Reading:
     """Ton prix actuel (champ « Prix du lot » de la vente sélectionnée).
     tesseract_only : sans la lecture rapide (2e avis quand la relecture ne colle pas).
     Lecture peu sûre -> relue en niveaux de gris, la plus sûre des deux est gardée."""
     import pytesseract
-    img = mine_field_image(cfg)
+    img = mine_field_image(cfg, scale)
     if img is None:
         return Reading(None, -1.0, "")
     if cfg.fast_digits and not tesseract_only:
@@ -1356,7 +1369,7 @@ def read_mine(cfg: Config, tesseract_only: bool = False) -> Reading:
                 return r
     data = pytesseract.image_to_data(img, config=OCR_CONFIG, output_type=pytesseract.Output.DICT)
     r = parse_number(data, (0, img.shape[0]))
-    if r.value is None or r.confidence < MINE_SURE:
+    if gray_fallback and (r.value is None or r.confidence < MINE_SURE):
         r = surer(r, read_mine_gray(cfg))
     return r
 
@@ -2831,7 +2844,7 @@ class PriceEngine:
             # Option « modifier même si suspect » : le marché peut chuter d'un jour à l'autre.
             # Seuls les doutes sur le PRIX sont levés (jamais une lecture peu fiable), et
             # seulement si une 2e lecture indépendante redonne exactement le même prix.
-            sr2 = table_second_read(cfg)
+            sr2 = table_second_read(cfg, sr.engine)
             top2 = sr2.prices.get(lot)
             if sr2.selected == lot and top2 is not None and top2.value == top.value:
                 prefix += f" [suspect accepté : {'; '.join(problems)}]"
