@@ -5,13 +5,13 @@ body:
       value: |
         Merci de prendre le temps de signaler un problème 🙏
 
-        **Le plus utile** : dans l'outil, onglet **Options** › **📦 Rapport de problème**. Un zip est créé (journal, réglages, captures de diagnostic, image de l'HDV) : glisse-le dans la zone « Rapport » plus bas.
-        Rien n'est envoyé automatiquement et l'historique des ventes n'est pas inclus. Jette quand même un œil au contenu avant de le publier : ce fil est public.
+        **Le plus utile** : dans l'outil, onglet **Options** › **📦 Rapport de problème**. Un zip est créé (journal, réglages, captures de diagnostic, image de l'HDV) : glissez-le dans la zone « Rapport » plus bas.
+        Rien n'est envoyé automatiquement et l'historique des ventes n'est pas inclus. Vérifiez tout de même son contenu avant de le publier : ce fil est public.
   - type: textarea
     id: probleme
     attributes:
       label: Que s'est-il passé ?
-      description: Ce que tu as fait, ce que l'outil a fait, et ce que tu attendais à la place.
+      description: Ce que vous avez fait, ce que l'outil a fait, et ce que vous attendiez à la place.
       placeholder: "J'appuie sur F1 sur une de mes ventes, l'outil met 1 kama au lieu de 9 999…"
     validations:
       required: true
@@ -57,4 +57,4 @@ body:
     id: rapport
     attributes:
       label: Rapport de problème, captures, extrait du journal
-      description: 'Glisse le zip du rapport ou des captures ici. Journal seul : `%APPDATA%\Dofus Price Helper\journaux\journal.log`.'
+      description: 'Glissez le zip du rapport ou des captures ici. Journal seul : `%APPDATA%\Dofus Price Helper\journaux\journal.log`.'

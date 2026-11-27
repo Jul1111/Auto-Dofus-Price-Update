@@ -3,7 +3,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Raconte comment l'outil se passe chez toi, même quand tout marche : savoir sur quelles configurations la calibration automatique fonctionne aide beaucoup.
+        Racontez comment l'outil se comporte chez vous, même quand tout fonctionne : savoir sur quelles configurations la calibration automatique fonctionne aide beaucoup.
   - type: dropdown
     id: avis
     attributes:
@@ -31,7 +31,7 @@ body:
   - type: textarea
     id: retour
     attributes:
-      label: Ton retour
-      description: Ce qui t'aide, ce qui est pénible, ce qui pourrait être plus clair…
+      label: Votre retour
+      description: Ce qui vous aide, ce qui est pénible, ce qui pourrait être plus clair…
     validations:
       required: true

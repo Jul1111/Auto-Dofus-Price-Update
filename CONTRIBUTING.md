@@ -1,32 +1,32 @@
 # Participer à Dofus Price Helper
 
-Merci de t'intéresser au projet ! Il y a plusieurs façons d'aider, et toutes ne demandent pas de savoir coder.
+Merci de votre intérêt pour le projet ! Il y a plusieurs façons d'aider, et toutes ne demandent pas de savoir coder.
 
 ## Où poster quoi
 
-| Tu veux… | Va dans |
+| Vous voulez… | Rendez-vous dans |
 |---|---|
 | Signaler un problème | [Discussions › Bugs](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/bugs) |
 | Poser une question (installation, calibration, réglages) | [Discussions › Q&A](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/q-a) |
 | Proposer une idée | [Discussions › Ideas](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/ideas) |
-| Dire comment ça se passe chez toi | [Discussions › Show and tell](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/show-and-tell) |
+| Partager votre retour d'utilisation | [Discussions › Show and tell](https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions/categories/show-and-tell) |
 | Proposer du code | Une [pull request](#proposer-du-code) |
 
-Chaque catégorie a un petit formulaire : remplis-le, il contient tout ce qu'il faut pour comprendre le problème du premier coup.
+Chaque catégorie a un petit formulaire : remplissez-le, il contient tout ce qu'il faut pour comprendre le problème du premier coup.
 
 ## Signaler un problème
 
 1. Dans l'outil : onglet **Options** › **📦 Rapport de problème**. Un zip est créé avec le journal, les réglages, les captures de diagnostic et l'image de l'HDV. Rien n'est envoyé automatiquement, et l'historique des ventes n'est pas inclus.
-2. Ouvre une discussion dans **Bugs**, décris ce qui s'est passé et joins le zip.
+2. Ouvrez une discussion dans **Bugs**, décrivez ce qui s'est passé et joignez le zip.
 
-Les discussions sont publiques : jette un œil au contenu du zip avant de le publier.
+Les discussions sont publiques : vérifiez le contenu du zip avant de le publier.
 
 ## Aider sans coder
 
 - **Tester** les versions de test : chaque pull request construit un zip téléchargeable dans l'onglet **Actions** (artefact « DofusPriceHelper »). Un retour « ça marche chez moi » est déjà utile.
 - **Dire sur quelle configuration la calibration automatique fonctionne** (résolution, échelle de l'interface), dans **Show and tell**.
 - **Envoyer des captures de l'HDV** quand la lecture d'un prix échoue : elles servent à enrichir les tests OCR (`tests/fixtures`).
-- **Voter** 👍 pour les idées qui t'intéressent, pour aider à choisir quoi faire en premier.
+- **Voter** 👍 pour les idées qui vous intéressent, pour aider à choisir quoi faire en premier.
 
 ## Proposer du code
 
@@ -50,7 +50,7 @@ python dofus_price_helper_psg.py   # interface graphique
 python dofus_price_helperV2.py     # ligne de commande
 ```
 
-Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indique son chemin dans `TESSERACT_CMD` (fichier de configuration). Le module `keyboard` peut demander les droits administrateur.
+Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indiquez son chemin dans `TESSERACT_CMD` (fichier de configuration). Le module `keyboard` peut demander les droits administrateur.
 
 ### Où se trouve quoi
 
@@ -74,11 +74,11 @@ Fichiers générés localement et non versionnés : `dofus_price_helper_config.j
 
 ### Étapes
 
-1. Pour un changement important, ouvre d'abord une discussion dans **Ideas** : on se met d'accord avant que tu y passes du temps.
-2. Crée une branche à partir de `main`.
-3. Garde chaque pull request centrée sur un seul sujet.
-4. Ajoute ou adapte les tests, et vérifie que `pytest` passe.
-5. Ouvre la pull request vers `main` en expliquant le problème réglé et comment tu as testé. La construction du zip et les tests se lancent automatiquement.
+1. Pour un changement important, ouvrez d'abord une discussion dans **Ideas**, pour valider l'approche avant d'y consacrer du temps.
+2. Créez une branche à partir de `main`.
+3. Gardez chaque pull request centrée sur un seul sujet.
+4. Ajoutez ou adaptez les tests, et vérifiez que `pytest` passe.
+5. Ouvrez la pull request vers `main` en expliquant le problème réglé et la façon dont vous avez testé. La construction du zip et les tests se lancent automatiquement.
 
 ### Règles du projet
 
@@ -108,6 +108,6 @@ iscc /DAppVersion=v1.0.0 /DNumVersion=1.0.0 packaging\installer.iss   # installe
 
 ## Comportement
 
-Ce projet suit un [code de conduite](CODE_OF_CONDUCT.md). Sois respectueux et bienveillant, en particulier avec les débutants.
+Ce projet suit un [code de conduite](CODE_OF_CONDUCT.md). Merci de rester respectueux et bienveillant, en particulier avec les débutants.
 
 Projet indépendant, non affilié à Ankama.
