@@ -941,6 +941,18 @@ def test_find_scrollbar_on_real_captures():
     assert core.find_scrollbar(_gray_fixture("hdv_mesventes.png", (240, 140, 300, 540))) is None   # pas de barre
 
 
+def test_find_scrollbar_ignores_bright_scenery_right_of_the_hdv():
+    # Décor du jeu à droite de l'HDV : une bande claire « en bas » ne doit pas être prise
+    g = _gray_fixture("barre_defilement_haut.png")
+    h, w = g.shape
+    wide = np.full((h, w + 80), 33, np.uint8)
+    wide[:, :w] = g
+    wide[h - 60:h, w + 40:w + 48] = 200             # tache claire collée en bas, sans piste
+    sb = core.find_scrollbar(wide, min_len=16, expect_x=w // 2, min_track=150)
+    t0, t1, a, b = sb
+    assert t1 < b - 100                              # la vraie barre (poignée en haut)
+
+
 def test_scrollbar_at_bottom(monkeypatch):
     cfg = core.Config(relist_row=[100, 100], relist_step=50, relist_rows=10)
     bas = np.dstack([_gray_fixture("barre_defilement_bas.png")] * 3)
