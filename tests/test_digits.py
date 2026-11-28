@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dofus_digits import DigitReader  # noqa: E402
+from dofus_helper.digits import DigitReader  # noqa: E402
 
 VARIANTS = [(1.0, 2), (1.1, 2), (1.2, 3), (1.3, 3)]
 
@@ -30,7 +30,7 @@ def trained(bad_five_as_eight=False):
         for sc, th in VARIANTS:
             r.add(d, glyph(d, sc, th), sure=True)
     if bad_five_as_eight:       # Tesseract a lu « 8 » un 5 : appris comme 8
-        r.samples[8].append(__import__("dofus_digits").normalize(glyph(5, 1.15, 3)))
+        r.samples[8].append(__import__("dofus_helper.digits", fromlist=["x"]).normalize(glyph(5, 1.15, 3)))
     return r
 
 

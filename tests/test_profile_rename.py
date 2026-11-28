@@ -44,7 +44,7 @@ def test_rename_inactive_profile_and_errors(tmp_path, monkeypatch):
 
 def test_toggle_window_hotkey():
     pytest.importorskip("customtkinter")
-    import dofus_price_helper as gui
+    from dofus_helper import gui
     assert core.DEFAULT_HOTKEYS["toggle_window"] == "ctrl+alt+o"
     others = {k: v for k, v in core.DEFAULT_HOTKEYS.items() if k != "toggle_window"}
     assert gui.hotkey_problem("toggle_window", "ctrl+alt+o", others) is None
@@ -53,7 +53,7 @@ def test_toggle_window_hotkey():
 
 def test_validate_reminder():
     pytest.importorskip("customtkinter")
-    import dofus_price_helper as gui
+    from dofus_helper import gui
     cfg = core.Config()
 
     def R(msg, level="ok", new=9499):

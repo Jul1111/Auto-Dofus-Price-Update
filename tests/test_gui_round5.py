@@ -4,13 +4,13 @@ import zipfile
 
 import pytest
 
-import dofus_backup
+from dofus_helper import backup as dofus_backup
 from dofus_helper import core
-import dofus_logo
-import dofus_style as style
+from dofus_helper.gui import logo as dofus_logo
+from dofus_helper.gui import style
 
 pytest.importorskip("customtkinter")
-import dofus_price_helper as gui  # noqa: E402
+from dofus_helper import gui  # noqa: E402
 
 
 # ---- « Quoi de neuf »

@@ -13,7 +13,7 @@ Tout est fait.
   - lecture ~150-300 ms → ~10-20 ms, boucle Ctrl+F3 2 à 3× plus rapide ;
   - beaucoup moins d'erreurs (icône kamas lue « 4 », chiffres collés, confiance faible).
 - **Sécurité** : Tesseract reste en secours si un chiffre n'est pas reconnu.
-- **Réalisé autrement** : pas de captures à fournir. Les modèles sont appris sur l'écran de l'utilisateur, à partir des lectures Tesseract très sûres (`dofus_digits.py`, `digit_templates.npz`). Chiffres collés : découpe automatique. Formes parasites (flèche, coin de cadre) : apprises et ignorées. Contrôle croisé 1 lecture sur 25.
+- **Réalisé autrement** : pas de captures à fournir. Les modèles sont appris sur l'écran de l'utilisateur, à partir des lectures Tesseract très sûres (`dofus_helper/digits.py`, `digit_templates.npz`). Chiffres collés : découpe automatique. Formes parasites (flèche, coin de cadre) : apprises et ignorées. Contrôle croisé 1 lecture sur 25.
 
 ### 2. Zones liées à la fenêtre de l'HDV — ✅ FAIT (repère « Hôtel de vente »)
 - Calibration du titre « Hôtel de vente » (Ctrl+Alt+F10 ×2) : son image sert de repère (`hdv_anchor.png`).

@@ -56,8 +56,10 @@ Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indiquez son chem
 
 | Fichier | Rôle |
 |---|---|
+| `dofus_price_helper.py` | Lance l'interface graphique |
+| `dofus_price_helper_cli.py` | Version ligne de commande |
 | `dofus_helper/` | Moteur, rangé par thème ; tout le reste l'utilise par `from dofus_helper import core` |
-| `dofus_helper/core.py` | Rassemble le moteur en un seul module (`core.X`) ; remplacer `core.X` dans un test le remplace partout |
+| `dofus_helper/core.py` | Rassemble le moteur en un seul module (`core.X`) ; remplacer `core.X` dans un test le remplace partout (`_gather.py`) |
 | `dofus_helper/base.py` | Dossiers, version, fichier journal |
 | `dofus_helper/config.py` | Réglages, profils, enregistrement sûr |
 | `dofus_helper/anchor.py` | Repère HDV : les zones suivent la fenêtre de l'Hôtel de vente |
@@ -67,13 +69,17 @@ Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indiquez son chem
 | `dofus_helper/hotkeys.py`, `sounds.py` | Raccourcis globaux, sons |
 | `dofus_helper/history.py`, `my_prices.py` | Historique des prix, mémoire de tes ventes |
 | `dofus_helper/engine.py` | Moteur : F1, F3, Tout vendre, Toute la liste |
-| `dofus_price_helper.py` | Interface graphique |
-| `dofus_price_helper_cli.py` | Version ligne de commande |
-| `dofus_digits.py` | Reconnaissance rapide des chiffres du jeu |
-| `dofus_autocal.py` | Calibration automatique |
-| `dofus_update.py` | Mise à jour de l'outil |
-| `dofus_style.py` | Thèmes, couleurs d'accent, effet verre, fondus |
-| `dofus_logo.py` | Logo (dessiné par le code) et icônes |
+| `dofus_helper/digits.py` | Reconnaissance rapide des chiffres du jeu |
+| `dofus_helper/autocal.py` | Calibration automatique |
+| `dofus_helper/update.py` | Mise à jour de l'outil, un seul exemplaire ouvert, rapport de problème |
+| `dofus_helper/backup.py` | Sauvegarde et restauration des réglages |
+| `dofus_helper/gui/` | Interface graphique, rangée par thème ; `from dofus_helper import gui` puis `gui.X` |
+| `dofus_helper/gui/app.py` | Fenêtre principale : `App` rassemble les morceaux ci-dessous |
+| `dofus_helper/gui/home.py`, `tabs.py`, `options.py`, `journal.py` | Onglets, réglages, journal |
+| `dofus_helper/gui/hud.py`, `loops.py`, `results.py`, `wizard.py` | HUD, parcours, résultats, assistant de calibration |
+| `dofus_helper/gui/watch.py`, `tour.py`, `tray.py`, `news.py` | Surveillance du jeu, visite guidée, icône près de l'horloge, « Quoi de neuf » |
+| `dofus_helper/gui/common.py`, `helpers.py`, `popups.py` | Couleurs et libellés, fonctions pures testées, fenêtres flottantes |
+| `dofus_helper/gui/style.py`, `logo.py`, `icons.py` | Thèmes, couleurs d'accent, effet verre ; logo et icônes dessinés par le code |
 | `modele_hdv/` | Modèle de l'HDV pour la calibration automatique (`packaging/build_hdv_model.py`) |
 | `packaging/` | Construction du zip (`build.py`) et de l'installeur (`installer.iss`) |
 | `.github/workflows/` | Tests, construction et publication automatiques |

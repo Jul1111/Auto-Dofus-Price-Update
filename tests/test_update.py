@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dofus_helper import core  # noqa: E402
-import dofus_update as du  # noqa: E402
+from dofus_helper import update as du  # noqa: E402
 
 
 def release(tag="v1.2.0", digest="sha256:abc", with_zip=True):

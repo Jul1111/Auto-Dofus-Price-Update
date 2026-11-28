@@ -45,14 +45,14 @@ BACKDROP = FX / "hdv_echelles" / "2560x1440_90.png"   # HDV, une de tes ventes s
 NAMES = sorted(FX.glob("nom_*.png"))                   # noms d'objets réels (résumé Ctrl+F3)
 
 WINDOW_SIZE = (1120, 780)     # taille logique de la fenêtre principale
-# Styles : chaque ambiance de dofus_style.AMBIENCES (thème sombre), plus « light » (thème clair).
+# Styles : chaque ambiance de gui/style.py : AMBIENCES (thème sombre), plus « light » (thème clair).
 ACCENT_FOR = {"night": "blue", "amber": "amber", "forest": "green", "ocean": "cyan"}   # sinon : bleu
 DEFAULT_STYLES = ("night", "amber", "forest", "ocean", "light")
 
 
 def looks() -> dict:
     """style -> (thème, accent, ambiance, titre), comme dans Options › Apparence."""
-    import dofus_style as style
+    from dofus_helper.gui import style
     out = {k: ("dark", ACCENT_FOR.get(k, "blue"), k, v[0]) for k, v in style.AMBIENCES.items()}
     out["light"] = ("light", "violet", "night", "Clair")
     return out
@@ -223,7 +223,7 @@ def autocal_backdrop():
     (coordonnées dans l'image)."""
     import cv2
     import numpy as np
-    import dofus_autocal as ac
+    from dofus_helper import autocal as ac
     img = cv2.imread(str(BACKDROP))
     pad = 60
     screen = np.full((img.shape[0] + 2 * pad, img.shape[1] + 2 * pad, 3), 18, np.uint8)
@@ -238,7 +238,7 @@ def autocal_backdrop():
 # Données d'exemple
 # =====================================================================================
 def demo_config(core, look: tuple):
-    import dofus_autocal as ac
+    from dofus_helper import autocal as ac
     theme, accent, ambience = look
     cfg = core.Config()
     res, screen, origin = autocal_backdrop()
@@ -363,7 +363,7 @@ def run_worker(look_key: str, out: Path, only_home: bool, version: str = "") -> 
     demo_config(core, looks()[look_key][:3])
 
     _quiet_windows()
-    import dofus_price_helper as gui
+    from dofus_helper import gui
     gui.RUNS_PATH = tmp / "dofus_relist_runs.json"
     gui.windows_notify = lambda *a, **k: False
     gui.Tray.start = lambda self: None
