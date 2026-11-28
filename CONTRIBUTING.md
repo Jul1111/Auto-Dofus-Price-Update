@@ -68,7 +68,8 @@ Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indiquez son chem
 | `packaging/` | Construction du zip (`build.py`) et de l'installeur (`installer.iss`) |
 | `.github/workflows/` | Tests, construction et publication automatiques |
 | `tests/` | Tests unitaires et tests OCR sur captures réelles |
-| `docs/` | Guide d'utilisation et captures d'écran |
+| `docs/` | Guide d'utilisation, visite de l'interface (`INTERFACE.md`) et captures d'écran (`img/`) |
+| `tools/readme_shots.py` | Génère les captures de `docs/img` (données d'exemple, sans toucher au jeu) |
 
 Fichiers générés localement et non versionnés : `dofus_price_helper_config.json`, `dofus_price_history.csv`, `digit_templates.npz`, `hdv_anchor.png`, `dofus_my_prices.json`.
 

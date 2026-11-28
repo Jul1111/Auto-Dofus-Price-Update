@@ -1,7 +1,9 @@
-Captures utilisées par README.md (section « Démonstration ») :
+Captures d'écran (dossier img/) utilisées par README.md et docs/INTERFACE.md.
 
-  interface.png        fenêtre principale de l'outil
-  calibrage.png        zones calibrées dans l'Hôtel de vente
-  assistant.png        onglet Calibration (assistant)
+Elles sont générées par tools/readme_shots.py : la vraie interface, lancée avec des données
+d'exemple (vos réglages ne sont ni lus ni modifiés), capturée sans prendre le focus du jeu.
 
-Pour remplacer une capture, garder le même nom de fichier : README.md n'a pas à changer.
+  python tools/readme_shots.py --version vX.Y.Z
+
+Le script réécrit les images de docs/img sous les mêmes noms : README.md et INTERFACE.md
+n'ont pas à changer.
