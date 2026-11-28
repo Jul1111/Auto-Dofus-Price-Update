@@ -662,6 +662,11 @@ WHATS_NEW = {
         "l'HDV, mis à jour quand tu changes d'objet.",
         "Réduire la fenêtre la range toujours près de l'horloge, et la fenêtre s'adapte à sa taille : plus "
         "étroite, le panneau Activité se retire.",
+        "Toute la liste : la dernière vente n'est plus oubliée en bas de liste, la reprise sur une liste "
+        "déjà défilée ne s'arrête plus à tort, et les ventes vendues sont oubliées après un parcours complet.",
+        "Corrections : la calibration ne peut plus être perdue (réglages illisibles gardés de côté), un "
+        "prix suspect est relu sur une autre image, et la mise à jour en un clic attend aussi un "
+        "exemplaire lancé en administrateur.",
     ],
 }
 
