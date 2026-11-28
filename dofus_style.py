@@ -45,6 +45,7 @@ DARK = {
     "red_hover": "#5a2730",   # survol des boutons « danger » (fond CHIP rouge)
     "green_hover": "#1c4535",
     "popup_head": "#ffffff",  # titre des popups / bandeau
+    "caption": "#101216",     # barre de titre Windows 11 (= fond, sauf thèmes Dofus)
 }
 LIGHT = {
     "bg": "#f2f3f6",
@@ -77,6 +78,7 @@ LIGHT = {
     "red_hover": "#f4c4c9",
     "green_hover": "#bfe8d4",
     "popup_head": "#1b1f26",
+    "caption": "#f2f3f6",
 }
 # couleur d'accent au choix : clé -> (libellé, couleur, survol). Texte blanc lisible sur chacune.
 ACCENTS = {
@@ -104,6 +106,22 @@ AMBIENCES = {
                         "track": "#2f4255", "track_hover": "#3b5167", "menu_hover": "#32475c",
                         "check_border": "#475d72", "log_time": "#5b6c7c"}),
 }
+# thèmes du jeu (Options › Thèmes de Dofus 3) : fonds relevés en jeu, barre de titre colorée et accent
+# du thème (couleurs vives, texte sombre dessus). Choisir l'un d'eux passe en sombre et remplace l'accent.
+DOFUS_THEMES = {
+    "dofus_standard": ("Standard", {"caption": "#464360", "bg": "#17182c", "card": "#22223d", "card2": "#292848", "border": "#403f61", "input": "#111221", "log_bg": "#0f101d", "btn2": "#353354", "btn2_hover": "#444365", "track": "#4c4a6d", "track_hover": "#5b597e", "menu_hover": "#504e72", "check_border": "#5f5d82", "log_time": "#7d7ba0", "muted": "#a6a5be", "accent": "#e2f55c", "accent_hover": "#c7d851", "on_accent": "#10111f"}),
+    "dofus_azur": ("Azur", {"caption": "#3d5073", "bg": "#25252d", "card": "#363a44", "card2": "#424854", "border": "#545c68", "input": "#1c1c22", "log_bg": "#18181d", "btn2": "#4b525e", "btn2_hover": "#575f6b", "track": "#5d6571", "track_hover": "#6a727e", "menu_hover": "#606874", "check_border": "#6d7682", "log_time": "#858f9a", "muted": "#acb2ba", "accent": "#f6cc95", "accent_hover": "#d8b483", "on_accent": "#1a1a20"}),
+    "dofus_pourpre": ("Pourpre", {"caption": "#542432", "bg": "#1b1b1b", "card": "#2b2a2b", "card2": "#363435", "border": "#464445", "input": "#141414", "log_bg": "#121212", "btn2": "#3e3c3d", "btn2_hover": "#494647", "track": "#4e4b4c", "track_hover": "#595657", "menu_hover": "#514e4f", "check_border": "#5c5859", "log_time": "#737070", "muted": "#9f9d9e", "accent": "#f6cc95", "accent_hover": "#d8b483", "on_accent": "#131313"}),
+    "dofus_cendre": ("Cendre", {"caption": "#4d4e46", "bg": "#1f211c", "card": "#2d3029", "card2": "#373a31", "border": "#4b4e44", "input": "#171915", "log_bg": "#141512", "btn2": "#41443b", "btn2_hover": "#4e5147", "track": "#55584e", "track_hover": "#62655b", "menu_hover": "#585b51", "check_border": "#65685e", "log_time": "#808378", "muted": "#a8aaa3", "accent": "#caf07a", "accent_hover": "#b2d36b", "on_accent": "#161714"}),
+    "dofus_terre": ("Terre", {"caption": "#503329", "bg": "#1e1e1e", "card": "#2e2b28", "card2": "#39342e", "border": "#554f48", "input": "#161616", "log_bg": "#141414", "btn2": "#47413b", "btn2_hover": "#5a534c", "track": "#635c55", "track_hover": "#756e66", "menu_hover": "#686059", "check_border": "#7a726a", "log_time": "#9b938a", "muted": "#bbb5af", "accent": "#f6cc95", "accent_hover": "#d8b483", "on_accent": "#151515"}),
+    "dofus_lavande": ("Lavande", {"caption": "#4f415a", "bg": "#211b29", "card": "#342e41", "card2": "#403b51", "border": "#544b64", "input": "#19141f", "log_bg": "#15121b", "btn2": "#4a435b", "btn2_hover": "#574e67", "track": "#5e536e", "track_hover": "#6b5e7b", "menu_hover": "#615671", "check_border": "#6e617e", "log_time": "#887896", "muted": "#aea3b8", "accent": "#d9f177", "accent_hover": "#bfd469", "on_accent": "#17131d"}),
+    "dofus_orchidee": ("Orchidée", {"caption": "#482f48", "bg": "#221e1f", "card": "#393038", "card2": "#483c48", "border": "#5a4c5a", "input": "#1a1617", "log_bg": "#161414", "btn2": "#514451", "btn2_hover": "#5d4f5d", "track": "#635463", "track_hover": "#6e5f6f", "menu_hover": "#665766", "check_border": "#716272", "log_time": "#89798a", "muted": "#aea3af", "accent": "#f39ee6", "accent_hover": "#d68bca", "on_accent": "#181516"}),
+    "dofus_jade": ("Jade", {"caption": "#405858", "bg": "#1b2023", "card": "#232c2b", "card2": "#293430", "border": "#3e4b4a", "input": "#14181a", "log_bg": "#121517", "btn2": "#34403d", "btn2_hover": "#424f4f", "track": "#485758", "track_hover": "#566769", "menu_hover": "#4c5b5c", "check_border": "#5a6b6e", "log_time": "#76888e", "muted": "#a1aeb2", "accent": "#9af8d0", "accent_hover": "#88dab7", "on_accent": "#131618"}),
+    "dofus_lagon": ("Lagon", {"caption": "#385055", "bg": "#25252d", "card": "#363a44", "card2": "#424854", "border": "#545c68", "input": "#1c1c22", "log_bg": "#18181d", "btn2": "#4b525e", "btn2_hover": "#575f6b", "track": "#5d6571", "track_hover": "#6a727e", "menu_hover": "#606874", "check_border": "#6d7682", "log_time": "#858f9a", "muted": "#acb2ba", "accent": "#f6f19c", "accent_hover": "#d8d489", "on_accent": "#1a1a20"}),
+    "dofus_sylve": ("Sylve", {"caption": "#384a23", "bg": "#1f1f1f", "card": "#2f2c28", "card2": "#39342e", "border": "#554f48", "input": "#171717", "log_bg": "#141414", "btn2": "#47413b", "btn2_hover": "#5a534c", "track": "#635c55", "track_hover": "#756e66", "menu_hover": "#686059", "check_border": "#7a726a", "log_time": "#9b938a", "muted": "#bbb5af", "accent": "#f0f09a", "accent_hover": "#d3d388", "on_accent": "#161616"}),
+    "dofus_braise": ("Braise", {"caption": "#953326", "bg": "#201f1b", "card": "#2e2f28", "card2": "#373a31", "border": "#4c4c42", "input": "#181714", "log_bg": "#151412", "btn2": "#41433a", "btn2_hover": "#4f4f45", "track": "#56554b", "track_hover": "#646057", "menu_hover": "#5a584e", "check_border": "#67635a", "log_time": "#837c72", "muted": "#aaa59f", "accent": "#caf07a", "accent_hover": "#b2d36b", "on_accent": "#161613"}),
+}
+AMBIENCES.update(DOFUS_THEMES)
 # couleur par profil (multi-compte) : vives, avec du texte sombre dessus, lisibles dans les 2 thèmes
 PROFILE_COLORS = {"blue": ("Bleu", "#6b8cff"), "green": ("Vert", "#3ecf8e"), "gold": ("Or", "#f2b134"),
                   "red": ("Rouge", "#f0616d"), "violet": ("Violet", "#b392f0"), "cyan": ("Cyan", "#5ccfe6"),
@@ -164,12 +182,15 @@ def resolve_theme(theme: str) -> str:
 
 def palette(theme: str = "dark", accent: str = "blue", ambience: str = "night") -> dict:
     """Palette complète pour ce thème, cet accent et cette ambiance (sans rien changer : sert à l'aperçu).
-    L'ambiance ne s'applique qu'au thème sombre."""
-    dark = resolve_theme(theme) != "light"
+    L'ambiance ne s'applique qu'au thème sombre ; un thème Dofus impose le sombre et son propre accent."""
+    dark = resolve_theme(theme) != "light" or ambience in DOFUS_THEMES
     pal = dict(DARK if dark else LIGHT)
-    if dark:
-        pal.update(AMBIENCES.get(ambience, AMBIENCES["night"])[1])
     _, pal["accent"], pal["accent_hover"] = ACCENTS.get(accent, ACCENTS["blue"])
+    if dark:
+        over = AMBIENCES.get(ambience, AMBIENCES["night"])[1]
+        pal.update(over)
+        if "caption" not in over:
+            pal["caption"] = pal["bg"]
     return pal
 
 
@@ -183,7 +204,7 @@ def configure(theme: str = "dark", accent: str = "blue", ambience: str = "night"
     P.update(palette(theme, accent, ambience))
     CHIP.clear()
     CHIP.update(chips(theme))
-    CURRENT.update(theme=resolve_theme(theme), accent=accent if accent in ACCENTS else "blue",
+    CURRENT.update(theme="dark" if ambience in DOFUS_THEMES else resolve_theme(theme), accent=accent if accent in ACCENTS else "blue",
                    ambience=ambience if ambience in AMBIENCES else "night")
 
 
