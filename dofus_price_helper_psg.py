@@ -668,6 +668,10 @@ WHATS_NEW = {
         "prix suspect est relu sur une autre image, et la mise à jour en un clic attend aussi un "
         "exemplaire lancé en administrateur.",
     ],
+    "1.13.0": [
+        "Thèmes Dofus (Options › Apparence) : les 11 thèmes du jeu, avec leurs fonds, leur barre de titre "
+        "colorée et leur couleur d'accent. Choisis le même que dans Dofus pour que l'outil s'y fonde.",
+    ],
 }
 
 
