@@ -31,7 +31,7 @@
 ## Démonstration
 
 <p align="center">
-  <img width="800" alt="Démonstration de Dofus Price Helper" src="https://github.com/user-attachments/assets/c0b4e31f-562e-45e9-8127-4ed8c1cc7a45" />
+  <img width="800" alt="Démonstration : F1 vend un objet, F1 met à jour une vente, Alt+* met à jour toute la liste" src="docs/img/demo.webp" />
 </p>
 
 <p align="center">
