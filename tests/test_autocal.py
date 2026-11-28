@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dofus_autocal as ac  # noqa: E402
-import dofus_core as core  # noqa: E402
+from dofus_helper import core  # noqa: E402
 
 cv2 = pytest.importorskip("cv2")
 

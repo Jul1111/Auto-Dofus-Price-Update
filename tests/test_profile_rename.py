@@ -1,7 +1,7 @@
 """Renommer un profil, touche afficher / cacher la fenêtre, rappel « Entrée pour valider »."""
 import pytest
 
-import dofus_core as core
+from dofus_helper import core
 
 
 def test_rename_active_default_profile_moves_everything(tmp_path, monkeypatch):

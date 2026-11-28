@@ -56,7 +56,17 @@ Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indiquez son chem
 
 | Fichier | Rôle |
 |---|---|
-| `dofus_core.py` | Moteur : lecture, calcul des prix, saisie, contrôles de sécurité |
+| `dofus_helper/` | Moteur, rangé par thème ; tout le reste l'utilise par `from dofus_helper import core` |
+| `dofus_helper/core.py` | Rassemble le moteur en un seul module (`core.X`) ; remplacer `core.X` dans un test le remplace partout |
+| `dofus_helper/base.py` | Dossiers, version, fichier journal |
+| `dofus_helper/config.py` | Réglages, profils, enregistrement sûr |
+| `dofus_helper/anchor.py` | Repère HDV : les zones suivent la fenêtre de l'Hôtel de vente |
+| `dofus_helper/ocr.py` | Lecture de l'écran (Tesseract, chiffres rapides, lignes de la liste) |
+| `dofus_helper/pricing.py` | Calcul du prix |
+| `dofus_helper/game.py` | Fenêtre du jeu, souris, presse-papier, saisie, défilement |
+| `dofus_helper/hotkeys.py`, `sounds.py` | Raccourcis globaux, sons |
+| `dofus_helper/history.py`, `my_prices.py` | Historique des prix, mémoire de tes ventes |
+| `dofus_helper/engine.py` | Moteur : F1, F3, Tout vendre, Toute la liste |
 | `dofus_price_helper.py` | Interface graphique |
 | `dofus_price_helper_cli.py` | Version ligne de commande |
 | `dofus_digits.py` | Reconnaissance rapide des chiffres du jeu |

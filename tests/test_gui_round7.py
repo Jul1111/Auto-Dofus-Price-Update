@@ -1,7 +1,7 @@
 """Récap de fin de Ctrl+F3 (le HUD « objet sélectionné » : test_hud_selected.py)."""
 import pytest
 
-import dofus_core as core
+from dofus_helper import core
 
 pytest.importorskip("customtkinter")
 import dofus_price_helper as gui  # noqa: E402

@@ -16,7 +16,7 @@ import zipfile
 from pathlib import Path
 from typing import List, Optional
 
-import dofus_core as core
+from dofus_helper import core
 
 CONFIG_NAME = core.CONFIG_PATH.name
 PATTERNS = (CONFIG_NAME, "hdv_anchor*.png", core.DIGITS_PATH.name, "dofus_relist_runs.json")

@@ -1,6 +1,6 @@
 import pytest
 
-import dofus_core as core
+from dofus_helper import core
 import dofus_price_helper_cli as cli
 
 

@@ -34,7 +34,7 @@ import time
 import tkinter as tk
 from typing import Optional
 
-import dofus_core as core  # active la gestion DPI avant Tk
+from dofus_helper import core  # active la gestion DPI avant Tk
 import dofus_update  # noqa: E402
 
 import customtkinter as ctk

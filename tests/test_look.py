@@ -28,7 +28,7 @@ def test_price_delta():
 
 
 def test_action_entry_has_icon_and_delta():
-    import dofus_core as core
+    from dofus_helper import core
     e = gui.action_entry(core.Result(100, "ok", "[MAJ] Lot 100 | modifié", new_price=49999, old_price=52000))
     assert e["icon"] == "edit" and e["delta"] == ("▼ 4 %", "down")
     e = gui.action_entry(core.Result(10, "ok", "[VENTE] Lot 10 | mis en vente", new_price=9499))

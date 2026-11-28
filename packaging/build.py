@@ -175,7 +175,7 @@ def main() -> int:
     subprocess.run(cmd, check=True, cwd=ROOT)
 
     app = dist / NAME
-    internal = app / "_internal"   # = sys._MEIPASS (APP_DIR dans dofus_core)
+    internal = app / "_internal"   # = sys._MEIPASS (APP_DIR dans dofus_helper/base.py)
     # Tesseract et version.txt copiés APRÈS PyInstaller : passés en --add-data, ses DLL étaient
     # analysées et dupliquées à la racine (~35 Mo de plus).
     shutil.copytree(tess, internal / "tesseract")
