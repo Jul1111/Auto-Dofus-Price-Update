@@ -1,6 +1,6 @@
 """Apparence du HUD : prix qui défile, respiration, formes."""
 import dofus_core as core
-import dofus_price_helper_psg as gui
+import dofus_price_helper as gui
 
 
 def test_count_value_goes_from_start_to_end():

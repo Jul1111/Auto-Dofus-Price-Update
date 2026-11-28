@@ -170,7 +170,7 @@ def main() -> int:
            "--specpath", str(BUILD), "--icon", str(ico),
            "--collect-data", "customtkinter",
            "--hidden-import", "pystray._win32",      # icône de la zone de notification
-           str(ROOT / "dofus_price_helper_psg.py")]
+           str(ROOT / "dofus_price_helper.py")]
     print(" ".join(cmd))
     subprocess.run(cmd, check=True, cwd=ROOT)
 

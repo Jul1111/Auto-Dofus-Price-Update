@@ -46,8 +46,8 @@ pytest
 Lancement :
 
 ```bash
-python dofus_price_helper_psg.py   # interface graphique
-python dofus_price_helperV2.py     # ligne de commande
+python dofus_price_helper.py       # interface graphique
+python dofus_price_helper_cli.py   # ligne de commande
 ```
 
 Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indiquez son chemin dans `TESSERACT_CMD` (fichier de configuration). Le module `keyboard` peut demander les droits administrateur.
@@ -57,8 +57,8 @@ Si Tesseract n'est pas dans `C:\Program Files\Tesseract-OCR\`, indiquez son chem
 | Fichier | Rôle |
 |---|---|
 | `dofus_core.py` | Moteur : lecture, calcul des prix, saisie, contrôles de sécurité |
-| `dofus_price_helper_psg.py` | Interface graphique |
-| `dofus_price_helperV2.py` | Version ligne de commande |
+| `dofus_price_helper.py` | Interface graphique |
+| `dofus_price_helper_cli.py` | Version ligne de commande |
 | `dofus_digits.py` | Reconnaissance rapide des chiffres du jeu |
 | `dofus_autocal.py` | Calibration automatique |
 | `dofus_update.py` | Mise à jour de l'outil |
