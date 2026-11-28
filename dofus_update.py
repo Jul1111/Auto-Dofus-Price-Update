@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
-import dofus_core as core
+from dofus_helper import core
 
 APP_NAME = "DofusPriceHelper"
 ISSUES_URL = f"https://github.com/{core.GITHUB_REPO}/issues/new"

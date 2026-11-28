@@ -349,7 +349,7 @@ def run_worker(look_key: str, out: Path, only_home: bool, version: str = "") -> 
     _fake_input_modules()
     tmp = Path(tempfile.mkdtemp(prefix="dph-captures-"))
 
-    import dofus_core as core
+    from dofus_helper import core
     core.BASE_DIR = tmp
     for name in ("CONFIG_PATH", "HISTORY_PATH", "DIGITS_PATH", "ANCHOR_PATH", "MY_PRICES_PATH"):
         setattr(core, name, tmp / getattr(core, name).name)

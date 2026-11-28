@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import dofus_core as core  # noqa: E402
+from dofus_helper import core  # noqa: E402
 
 pytest.importorskip("pytesseract")
 # même recherche que l'outil : PATH, puis le dossier d'installation par défaut (souvent hors PATH)

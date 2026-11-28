@@ -1,5 +1,5 @@
 """Apparence du HUD : prix qui défile, respiration, formes."""
-import dofus_core as core
+from dofus_helper import core
 import dofus_price_helper as gui
 
 

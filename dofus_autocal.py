@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-import dofus_core as core
+from dofus_helper import core
 
 MODEL_DIR = core.APP_DIR / "modele_hdv"
 SCALES = (0.45, 2.2)          # tailles cherchées (1 = capture du modèle)

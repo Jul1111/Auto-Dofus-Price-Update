@@ -3,7 +3,7 @@
 """
 Dofus Price Helper — version ligne de commande
 ----------------------------------------------
-Même moteur que l'interface graphique (dofus_core.py), sans fenêtre.
+Même moteur que l'interface graphique (dossier dofus_helper), sans fenêtre.
 
 Raccourcis par défaut (clé HOTKEYS de la config) :
   F1                  vendre (objet de l'inventaire) OU mettre à jour (une de tes ventes) :
@@ -45,7 +45,7 @@ import threading
 import time
 from typing import List, Optional
 
-import dofus_core as core
+from dofus_helper import core
 
 FLOOR_MODES = {"plancher": "floor", "garder": "keep", "arret": "stop"}
 FLOOR_LABELS = {"floor": "au plancher", "keep": "garder mon prix", "stop": "arrêt (suspect)"}

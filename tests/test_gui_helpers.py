@@ -1,7 +1,7 @@
 """Fonctions pures de l'interface : aperçu des prix, filtres du journal, historique Ctrl+F3."""
 import pytest
 
-import dofus_core as core
+from dofus_helper import core
 
 pytest.importorskip("customtkinter")
 import dofus_price_helper as gui  # noqa: E402

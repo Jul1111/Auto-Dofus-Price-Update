@@ -1,5 +1,5 @@
 """Thèmes repris du jeu (Options › Thèmes de Dofus 3)."""
-import dofus_core as core
+from dofus_helper import core
 import dofus_style as style
 
 

@@ -1,7 +1,7 @@
 """Profil automatique selon le personnage, HUD discret."""
 import pytest
 
-import dofus_core as core
+from dofus_helper import core
 
 
 def test_character_from_title():

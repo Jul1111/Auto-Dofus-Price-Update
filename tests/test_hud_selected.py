@@ -4,7 +4,7 @@ import threading
 import numpy as np
 import pytest
 
-import dofus_core as core
+from dofus_helper import core
 
 pytest.importorskip("customtkinter")
 import dofus_price_helper as gui  # noqa: E402

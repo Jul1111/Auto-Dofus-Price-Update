@@ -4,7 +4,7 @@
 Lecture rapide des chiffres Dofus (sans Tesseract)
 --------------------------------------------------
 La police du jeu ne change pas : chaque chiffre est une tache noire (image binarisée
-par dofus_core.preprocess) que l'on compare à des modèles 0-9.
+par dofus_helper/ocr.py : preprocess) que l'on compare à des modèles 0-9.
 
 Les modèles sont APPRIS sur l'écran de l'utilisateur : quand Tesseract lit un nombre avec
 une très bonne confiance, chaque chiffre est découpé et enregistré (digit_templates.npz).

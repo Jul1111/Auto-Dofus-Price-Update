@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import dofus_core as core  # noqa: E402
+from dofus_helper import core  # noqa: E402
 from dofus_digits import DigitReader  # noqa: E402
 
 

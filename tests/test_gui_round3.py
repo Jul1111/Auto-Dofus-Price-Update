@@ -5,7 +5,7 @@ import struct
 
 import pytest
 
-import dofus_core as core
+from dofus_helper import core
 import dofus_logo
 import dofus_style as style
 
