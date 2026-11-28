@@ -10,7 +10,7 @@ import dofus_logo
 import dofus_style as style
 
 pytest.importorskip("customtkinter")
-import dofus_price_helper_psg as gui  # noqa: E402
+import dofus_price_helper as gui  # noqa: E402
 
 
 # ---- « Quoi de neuf »

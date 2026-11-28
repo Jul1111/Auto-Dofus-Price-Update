@@ -7,7 +7,7 @@ import pytest
 import dofus_core as core
 
 pytest.importorskip("customtkinter")
-import dofus_price_helper_psg as gui  # noqa: E402
+import dofus_price_helper as gui  # noqa: E402
 
 
 def test_selected_lines_one_per_lot_with_unit_price():

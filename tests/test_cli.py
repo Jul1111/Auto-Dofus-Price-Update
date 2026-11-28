@@ -1,7 +1,7 @@
 import pytest
 
 import dofus_core as core
-import dofus_price_helperV2 as cli
+import dofus_price_helper_cli as cli
 
 
 def test_no_args_changes_nothing():

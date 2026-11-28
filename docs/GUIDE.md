@@ -188,13 +188,13 @@ Les réglages se modifient dans l'interface. Ils sont enregistrés dans `dofus_p
 
 ## Version ligne de commande
 
-`python dofus_price_helperV2.py` a les mêmes raccourcis que l'interface. Ses options sont enregistrées dans la configuration :
+`python dofus_price_helper_cli.py` a les mêmes raccourcis que l'interface. Ses options sont enregistrées dans la configuration :
 
 ```bash
-python dofus_price_helperV2.py --plancher 70 --sous-plancher plancher   # plancher à 70 % du prix moyen
-python dofus_price_helperV2.py --plancher 0                             # plancher désactivé
-python dofus_price_helperV2.py --f1-simple                              # F1 vend toujours
-python dofus_price_helperV2.py --help
+python dofus_price_helper_cli.py --plancher 70 --sous-plancher plancher   # plancher à 70 % du prix moyen
+python dofus_price_helper_cli.py --plancher 0                             # plancher désactivé
+python dofus_price_helper_cli.py --f1-simple                              # F1 vend toujours
+python dofus_price_helper_cli.py --help
 ```
 
 ## Données enregistrées

@@ -2,7 +2,7 @@
 import pytest
 
 import dofus_icons
-import dofus_price_helper_psg as gui
+import dofus_price_helper as gui
 import dofus_style as style
 
 

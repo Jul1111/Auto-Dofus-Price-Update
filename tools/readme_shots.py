@@ -363,7 +363,7 @@ def run_worker(look_key: str, out: Path, only_home: bool, version: str = "") -> 
     demo_config(core, looks()[look_key][:3])
 
     _quiet_windows()
-    import dofus_price_helper_psg as gui
+    import dofus_price_helper as gui
     gui.RUNS_PATH = tmp / "dofus_relist_runs.json"
     gui.windows_notify = lambda *a, **k: False
     gui.Tray.start = lambda self: None

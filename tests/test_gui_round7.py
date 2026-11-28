@@ -4,7 +4,7 @@ import pytest
 import dofus_core as core
 
 pytest.importorskip("customtkinter")
-import dofus_price_helper_psg as gui  # noqa: E402
+import dofus_price_helper as gui  # noqa: E402
 
 
 def R(msg, lot=10, price=9499, level="ok", old=None):
