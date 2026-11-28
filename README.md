@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://github.com/Jul1111/Auto-Dofus-Price-Update/releases/latest"><b>Télécharger</b></a> ·
   <a href="docs/GUIDE.md"><b>Guide d'utilisation</b></a> ·
+  <a href="docs/INTERFACE.md"><b>L'interface en images</b></a> ·
   <a href="https://github.com/Jul1111/Auto-Dofus-Price-Update/discussions"><b>Discussions</b></a>
 </p>
 
@@ -33,9 +34,24 @@
   <img width="800" alt="Démonstration de Dofus Price Helper" src="https://github.com/user-attachments/assets/c0b4e31f-562e-45e9-8127-4ed8c1cc7a45" />
 </p>
 
-| Interface | Zones calibrées dans l'HDV | Calibration |
-|---|---|---|
-| ![Interface](docs/interface.png) | ![Zones calibrées dans l'HDV](docs/calibrage.png) | ![Onglet Calibration](docs/assistant.png) |
+<p align="center">
+  <img width="800" alt="Fenêtre principale : dernières actions, dernière lecture des prix et journal" src="docs/img/accueil.png" />
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img alt="HUD par-dessus l'Hôtel de vente" src="docs/img/hud.png" /><br>
+      <sub><b>Par-dessus le jeu.</b> Le HUD affiche le résultat de chaque action et les prix de l'objet sélectionné. Les clics le traversent.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img alt="Résumé de la mise à jour de toute la liste" src="docs/img/resume.png" /><br>
+      <sub><b>Toute la liste en un appui.</b> À la fin, un résumé : prix modifiés, lignes à revoir, durée.</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><a href="docs/INTERFACE.md"><b>Visite de l'interface en images →</b></a></p>
 
 ## Points forts
 
@@ -45,6 +61,7 @@
 - **Calibration en un clic** : l'HDV est détecté à n'importe quelle résolution et échelle d'interface.
 - **Rapide** : environ 5 ms par lecture grâce à un modèle des chiffres du jeu, appris sur votre écran.
 - **Discret** : un HUD par-dessus le jeu montre le résultat de chaque action (les clics le traversent), et les profils suivent le personnage en multi-compte.
+- **À vos couleurs** : thème sombre ou clair, quatre ambiances, et les 11 thèmes de Dofus pour que l'outil se fonde dans le jeu.
 
 ## Installation
 
