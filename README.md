@@ -34,6 +34,8 @@
   <img width="800" alt="Démonstration : F1 vend un objet, F1 met à jour une vente, Alt+* met à jour toute la liste" src="docs/img/demo.webp" />
 </p>
 
+<p align="center"><a href="docs/INTERFACE.md#la-démo-complète"><b>▶ Voir la démo complète (1 min 30)</b></a></p>
+
 <p align="center">
   <img width="800" alt="Fenêtre principale : dernières actions, dernière lecture des prix et journal" src="docs/img/accueil.png" />
 </p>
