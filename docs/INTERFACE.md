@@ -2,6 +2,7 @@
 
 Une visite rapide de Dofus Price Helper, écran par écran. Le détail de chaque réglage est dans le [guide d'utilisation](GUIDE.md).
 
+- [La démo complète](#la-démo-complète)
 - [Par-dessus le jeu](#par-dessus-le-jeu)
 - [La fenêtre principale](#la-fenêtre-principale)
 - [Prix](#prix)
@@ -10,6 +11,12 @@ Une visite rapide de Dofus Price Helper, écran par écran. Le détail de chaque
 - [Raccourcis](#raccourcis)
 - [Options](#options)
 - [Apparence](#apparence)
+
+## La démo complète
+
+Vendre, mettre à jour une vente, tout vendre, une lecture douteuse bloquée, toute la liste, la calibration automatique et l'aide-mémoire, en 1 min 30.
+
+https://github.com/user-attachments/assets/d6b1a2d8-83bb-4b88-b758-d21044a29ecd
 
 ## Par-dessus le jeu
 
