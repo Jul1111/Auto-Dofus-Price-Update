@@ -262,6 +262,12 @@ def keep_unreadable(path: Path) -> Optional[Path]:
         return None
 
 
+# ambiances valides (même liste que dofus_style.AMBIENCES, vérifiée par les tests)
+AMBIENCE_KEYS = ("night", "amber", "forest", "ocean", "dofus_standard", "dofus_azur", "dofus_pourpre",
+                 "dofus_cendre", "dofus_terre", "dofus_lavande", "dofus_orchidee", "dofus_jade", "dofus_lagon",
+                 "dofus_sylve", "dofus_braise")
+
+
 @dataclass
 class Config:
     # Les noms en MAJUSCULES dans le JSON = nom du champ en majuscules.
@@ -350,7 +356,7 @@ class Config:
     sound_volume: float = 0.5         # volume des sons (0..1)
     theme: str = "dark"               # "dark" | "light" | "system" (comme Windows)
     accent: str = "blue"              # couleur d'accent (dofus_style.ACCENTS)
-    ambience: str = "night"           # ambiance du thème sombre : night | amber | forest | ocean
+    ambience: str = "night"           # ambiance du thème sombre (AMBIENCE_KEYS ; dofus_* = thèmes du jeu)
     animations: bool = True           # fondus des popups, barre de progression douce
     tray: bool = True                 # icône dans la zone de notification (près de l'horloge)
     tray_minimize: bool = True        # (toujours actif) réduire la fenêtre = la cacher près de l'horloge
@@ -443,7 +449,7 @@ class Config:
             cfg.hud_autohide = 0
         if cfg.hud_content not in ("state", "action", "both", "dot"):
             cfg.hud_content = "both"
-        if cfg.ambience not in ("night", "amber", "forest", "ocean"):
+        if cfg.ambience not in AMBIENCE_KEYS:
             cfg.ambience = "night"
         if cfg.hud_shape not in ("card", "pill", "minimal"):
             cfg.hud_shape = "card"

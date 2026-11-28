@@ -513,7 +513,7 @@ def brand(window) -> None:
         except tk.TclError:
             pass
     try:                               # barre de titre de la couleur du fond (Windows 11), après CustomTkinter
-        window.after(350, lambda: style.set_titlebar(window, P["bg"], P["text"], P["border"]))
+        window.after(350, lambda: style.set_titlebar(window, P["caption"], P["text"], P["border"]))
     except tk.TclError:
         pass
 
@@ -1992,12 +1992,25 @@ class App(ctk.CTk):
         r = self._row(b)
         self._tip(ctk.CTkLabel(r, text="Ambiance", width=120, anchor="w"),
                   "Teinte des fonds, cartes et bordures du thème sombre.").pack(side="left")
-        self.amb_seg = ctk.CTkSegmentedButton(r, values=[v[0] for v in style.AMBIENCES.values()],
+        self.amb_seg = ctk.CTkSegmentedButton(r, values=[v[0] for k, v in style.AMBIENCES.items()
+                                                         if k not in style.DOFUS_THEMES],
                                               command=self._pick_ambience)
-        self.amb_seg.set(style.AMBIENCES[self._look["ambience"]][0])
         self.amb_seg.pack(side="left")
         r = self._row(b)
+        self._tip(ctk.CTkLabel(r, text="Thème Dofus", width=120, anchor="w"),
+                  "Les thèmes du jeu (Options › Thèmes de Dofus) : mêmes fonds, barre de titre et couleur "
+                  "d'accent. Passe l'outil en sombre et remplace la couleur choisie.").pack(side="left")
+        self.dofus_btns = {}
+        for key, (label, pal) in style.DOFUS_THEMES.items():
+            sw = ctk.CTkButton(r, text="●", width=30, height=30, corner_radius=8, fg_color=pal["caption"],
+                               hover_color=pal["card2"], text_color=pal["accent"], border_width=3,
+                               font=ctk.CTkFont(size=15), command=lambda k=key: self._pick_dofus_theme(k))
+            sw.pack(side="left", padx=2)
+            self._tip(sw, label)
+            self.dofus_btns[key] = sw
+        r = self._row(b)
         ctk.CTkLabel(r, text="Couleur", width=120, anchor="w").pack(side="left")
+        self.accent_row = r
         self.accent_btns = {}
         for key, (label, color, hover) in style.ACCENTS.items():
             sw = ctk.CTkButton(r, text="", width=28, height=28, corner_radius=14, fg_color=color,
@@ -2005,6 +2018,7 @@ class App(ctk.CTk):
             sw.pack(side="left", padx=3)
             self._tip(sw, label)
             self.accent_btns[key] = sw
+        self.accent_note = ctk.CTkLabel(r, text="(celle du thème Dofus)", text_color=MUTED)
         self.look_preview = ctk.CTkFrame(b, fg_color="transparent")
         self.look_preview.pack(fill="x", pady=(6, 2))
         self.look_apply = ctk.CTkFrame(b, fg_color="transparent")
@@ -2094,19 +2108,40 @@ class App(ctk.CTk):
     # ---- apparence : thème, couleur d'accent (appliqués au redémarrage, avec un aperçu)
     def _pick_theme(self, label: str):
         self._look["theme"] = next((k for k, v in style.THEMES.items() if v == label), "dark")
+        if style.resolve_theme(self._look["theme"]) == "light" and self._look["ambience"] in style.DOFUS_THEMES:
+            self._look["ambience"] = "night"      # les thèmes Dofus sont sombres
         self._refresh_look()
 
     def _pick_ambience(self, label: str):
-        self._look["ambience"] = next((k for k, v in style.AMBIENCES.items() if v[0] == label), "night")
+        self._look["ambience"] = next((k for k, v in style.AMBIENCES.items()
+                                       if v[0] == label and k not in style.DOFUS_THEMES), "night")
+        self._refresh_look()
+
+    def _pick_dofus_theme(self, key: str):
+        self._look["ambience"] = key
+        if style.resolve_theme(self._look["theme"]) == "light":
+            self._look["theme"] = "dark"
         self._refresh_look()
 
     def _pick_accent(self, key: str):
         self._look["accent"] = key
+        if self._look["ambience"] in style.DOFUS_THEMES:
+            self._look["ambience"] = "night"      # une couleur choisie à la main quitte le thème Dofus
         self._refresh_look()
 
     def _refresh_look(self):
+        amb = self._look["ambience"]
+        dofus = amb in style.DOFUS_THEMES
+        self.theme_seg.set(style.THEMES[self._look["theme"]])
+        self.amb_seg.set("" if dofus else style.AMBIENCES.get(amb, style.AMBIENCES["night"])[0])
+        for key, sw in self.dofus_btns.items():
+            sw.configure(border_color=P["text"] if key == amb else P["card"])
         for key, sw in self.accent_btns.items():
-            sw.configure(border_color=P["text"] if key == self._look["accent"] else P["card"])
+            sw.configure(border_color=P["text"] if key == self._look["accent"] and not dofus else P["card"])
+        if dofus and not self.accent_note.winfo_manager():
+            self.accent_note.pack(side="left", padx=8)
+        elif not dofus:
+            self.accent_note.pack_forget()
         self._render_look_preview()
         self.amb_seg.configure(state="normal" if style.resolve_theme(self._look["theme"]) == "dark" else "disabled")
         pending = (self._look["theme"], self._look["accent"], self._look["ambience"]) != \
@@ -3729,7 +3764,7 @@ class App(ctk.CTk):
             self.configure(fg_color=bg)
             self._refresh_transparent(self)
         self._update_glass_controls()
-        style.set_titlebar(self, P["bg"], P["text"], P["border"])
+        style.set_titlebar(self, P["caption"], P["text"], P["border"])
 
     # ---- micro-animations (option « Animations »)
     def _on_tab_change(self):
