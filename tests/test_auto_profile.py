@@ -48,7 +48,7 @@ def test_bad_character_profiles_value_is_ignored(tmp_path):
 
 def test_hud_hotkey_is_free():
     pytest.importorskip("customtkinter")
-    import dofus_price_helper as gui
+    from dofus_helper import gui
     others = {k: v for k, v in core.DEFAULT_HOTKEYS.items() if k != "hud"}
     assert gui.hotkey_problem("hud", "ctrl+alt+u", others) is None
     assert "hud" in gui.HOTKEY_LABELS

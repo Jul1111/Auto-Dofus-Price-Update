@@ -161,7 +161,7 @@ def main() -> int:
     (BUILD / "version.txt").write_text(version, encoding="utf-8")
 
     sys.path.insert(0, str(ROOT))
-    import dofus_logo
+    from dofus_helper.gui import logo as dofus_logo
     ico = BUILD / "logo.ico"
     dofus_logo.write_ico(ico)          # icône du .exe : le logo (pièce d'or)
 

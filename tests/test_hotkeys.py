@@ -3,7 +3,7 @@ import pytest
 from dofus_helper import core
 
 pytest.importorskip("customtkinter")
-import dofus_price_helper as gui  # noqa: E402
+from dofus_helper import gui  # noqa: E402
 
 
 @pytest.mark.parametrize("combo,ok", [

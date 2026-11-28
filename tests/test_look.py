@@ -1,9 +1,9 @@
 """Apparence : icônes, écart de prix, couleurs, états vides."""
 import pytest
 
-import dofus_icons
-import dofus_price_helper as gui
-import dofus_style as style
+from dofus_helper.gui import icons as dofus_icons
+from dofus_helper import gui
+from dofus_helper.gui import style
 
 
 @pytest.mark.parametrize("name", dofus_icons.NAMES)

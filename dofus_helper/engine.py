@@ -204,13 +204,13 @@ class PriceEngine:
         return dx, dy
 
     def calibrate_auto(self):
-        """Trouve l'HDV à l'écran et place TOUTES les zones du profil actif (dofus_autocal).
+        """Trouve l'HDV à l'écran et place TOUTES les zones du profil actif (autocal.py).
         Ne change rien si l'HDV n'est pas reconnu. Retourne le résultat (AutoCal)."""
         with self._lock:
             return self._autocal_now()
 
     def _autocal_now(self):
-        import dofus_autocal
+        from . import autocal as dofus_autocal
         sx, sy, sw, sh = screen_bounds()
         screen = grab_screen((sx, sy, sw, sh))
         res = dofus_autocal.locate(screen, (sx, sy))

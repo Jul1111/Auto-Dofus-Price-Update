@@ -4,7 +4,7 @@ import sys
 import pytest
 
 from dofus_helper import core
-import dofus_style as style
+from dofus_helper.gui import style
 
 
 def test_tint_color_format():

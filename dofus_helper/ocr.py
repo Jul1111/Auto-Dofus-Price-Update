@@ -326,7 +326,7 @@ def digit_reader():
     global _digits
     with _digits_lock:
         if _digits is None:
-            from dofus_digits import DigitReader
+            from .digits import DigitReader
             _digits = DigitReader(DIGITS_PATH)
         return _digits
 

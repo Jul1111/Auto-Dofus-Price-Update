@@ -62,7 +62,7 @@ def keep_unreadable(path: Path) -> Optional[Path]:
         return None
 
 
-# ambiances valides (même liste que dofus_style.AMBIENCES, vérifiée par les tests)
+# ambiances valides (même liste que gui/style.py : AMBIENCES, vérifiée par les tests)
 AMBIENCE_KEYS = ("night", "amber", "forest", "ocean", "dofus_standard", "dofus_azur", "dofus_pourpre",
                  "dofus_cendre", "dofus_terre", "dofus_lavande", "dofus_orchidee", "dofus_jade", "dofus_lagon",
                  "dofus_sylve", "dofus_braise")
@@ -155,7 +155,7 @@ class Config:
     first_steps: List[str] = field(default_factory=list)   # premiers pas faits : "read", "sell"
     sound_volume: float = 0.5         # volume des sons (0..1)
     theme: str = "dark"               # "dark" | "light" | "system" (comme Windows)
-    accent: str = "blue"              # couleur d'accent (dofus_style.ACCENTS)
+    accent: str = "blue"              # couleur d'accent (gui/style.py : ACCENTS)
     ambience: str = "night"           # ambiance du thème sombre (AMBIENCE_KEYS ; dofus_* = thèmes du jeu)
     animations: bool = True           # fondus des popups, barre de progression douce
     tray: bool = True                 # icône dans la zone de notification (près de l'horloge)

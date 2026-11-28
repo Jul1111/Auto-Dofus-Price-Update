@@ -1,6 +1,6 @@
 """Thèmes repris du jeu (Options › Thèmes de Dofus 3)."""
 from dofus_helper import core
-import dofus_style as style
+from dofus_helper.gui import style
 
 
 def _lum(c: str) -> float:

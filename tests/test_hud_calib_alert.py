@@ -1,5 +1,5 @@
 """Alerte « calibration décalée » dans le HUD."""
-import dofus_price_helper as gui
+from dofus_helper import gui
 
 
 def test_no_alert_when_fine_or_not_calibrated():

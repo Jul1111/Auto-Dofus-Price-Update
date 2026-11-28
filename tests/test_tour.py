@@ -6,7 +6,7 @@ import pytest
 from dofus_helper import core
 
 pytest.importorskip("customtkinter")
-import dofus_price_helper as gui  # noqa: E402
+from dofus_helper import gui  # noqa: E402
 
 
 def test_tour_steps_use_current_hotkeys():
